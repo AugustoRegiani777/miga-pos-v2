@@ -1,0 +1,8 @@
+{
+  "name": "miga-pos-v2",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "start": "npx serve . --no-clipboard"
+  }
+}
