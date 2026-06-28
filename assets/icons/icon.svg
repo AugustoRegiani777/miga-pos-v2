@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Miga POS">
+  <rect width="512" height="512" rx="96" fill="#17324d"/>
+  <path d="M116 188c0-51 43-92 140-92s140 41 140 92v28H116z" fill="#f7efe3"/>
+  <path d="M116 216h280v88c0 48-38 112-140 112s-140-64-140-112z" fill="#ffffff"/>
+  <path d="M116 246h280" stroke="#d64b2a" stroke-width="26" stroke-linecap="round"/>
+  <path d="M160 320h192" stroke="#20734d" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="206" cy="162" r="12" fill="#d64b2a"/>
+  <circle cx="262" cy="148" r="12" fill="#d64b2a"/>
+  <circle cx="318" cy="166" r="12" fill="#d64b2a"/>
+</svg>
