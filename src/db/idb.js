@@ -52,6 +52,36 @@ function createStores(db) {
     const store = db.createObjectStore("cierres_diarios", { keyPath: "id" });
     store.createIndex("fecha", "fecha", { unique: true });
   }
+  if (!db.objectStoreNames.contains("insumos")) {
+    db.createObjectStore("insumos", { keyPath: "id" });
+  }
+  if (!db.objectStoreNames.contains("recetas")) {
+    const store = db.createObjectStore("recetas", { keyPath: "id" });
+    store.createIndex("productoId", "productoId", { unique: false });
+    store.createIndex("insumoId", "insumoId", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("movimientos_insumos")) {
+    const store = db.createObjectStore("movimientos_insumos", { keyPath: "id", autoIncrement: true });
+    store.createIndex("insumoId", "insumoId", { unique: false });
+    store.createIndex("fecha", "fecha", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("historial_calibraciones")) {
+    const store = db.createObjectStore("historial_calibraciones", { keyPath: "id", autoIncrement: true });
+    store.createIndex("insumoId", "insumoId", { unique: false });
+    store.createIndex("fecha", "fecha", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("historial_recetas")) {
+    const store = db.createObjectStore("historial_recetas", { keyPath: "id", autoIncrement: true });
+    store.createIndex("recetaId", "recetaId", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("proveedores")) {
+    db.createObjectStore("proveedores", { keyPath: "id" });
+  }
+  if (!db.objectStoreNames.contains("proveedor_insumos")) {
+    const store = db.createObjectStore("proveedor_insumos", { keyPath: "id" });
+    store.createIndex("proveedorId", "proveedorId", { unique: false });
+    store.createIndex("insumoId", "insumoId", { unique: false });
+  }
 }
 
 export function openDatabase() {

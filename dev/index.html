@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Miga POS — Datos de prueba</title>
+  <style>
+    body { font-family: monospace; max-width: 600px; margin: 2rem auto; padding: 1rem; background:#111; color:#eee; }
+    h1 { color:#f90; margin-bottom:0.25rem; }
+    p.sub { color:#888; margin-top:0; margin-bottom:2rem; font-size:0.85rem; }
+    button { padding:0.75rem 1.5rem; font-size:1rem; border:none; border-radius:6px; cursor:pointer; margin-right:1rem; }
+    #btn-seed  { background:#2a7; color:#fff; }
+    #btn-clear { background:#555; color:#fff; }
+    #btn-reset { background:#a44; color:#fff; }
+    #btn-seed:disabled, #btn-clear:disabled, #btn-reset:disabled { opacity:0.4; cursor:not-allowed; }
+    #log { margin-top:2rem; background:#1a1a1a; border:1px solid #333; border-radius:6px;
+           padding:1rem; min-height:120px; font-size:0.8rem; line-height:1.6; white-space:pre-wrap; }
+    .ok  { color:#2d9; }
+    .err { color:#f55; }
+    .warn { color:#f90; }
+  </style>
+</head>
+<body>
+  <h1>Miga POS — Dataset de prueba</h1>
+  <p class="sub">
+    Simula 4 semanas de calibración con convergencia diferente por insumo.<br>
+    <strong>Prerequisito:</strong> abrí la app principal primero para que los stores de IDB existan.
+  </p>
+  <button id="btn-seed">Cargar datos de prueba</button>
+  <button id="btn-clear">Limpiar datos</button>
+  <button id="btn-reset">Reset producción hoy</button>
+  <div id="log">Esperando...</div>
+
+  <script type="module">
+    const log = document.getElementById("log");
+    const btnSeed  = document.getElementById("btn-seed");
+    const btnClear = document.getElementById("btn-clear");
+    const btnReset = document.getElementById("btn-reset");
+
+    function print(msg, cls = "") {
+      const line = document.createElement("span");
+      if (cls) line.className = cls;
+      line.textContent = msg + "\n";
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    window.addEventListener("error", e => print("JS ERROR: " + e.message + " (" + e.filename + ":" + e.lineno + ")", "err"));
+    window.addEventListener("unhandledrejection", e => print("PROMISE ERROR: " + (e.reason?.message || e.reason), "err"));
+
+    const origLog   = console.log.bind(console);
+    const origError = console.error.bind(console);
+    console.log   = (...args) => { origLog(...args);   print(args.join(" ")); };
+    console.error = (...args) => { origError(...args); print("ERROR: " + args.join(" "), "err"); };
+
+    btnReset.addEventListener("click", async () => {
+      if (!confirm("¿Borrar la producción de hoy y restaurar insumos al estado del seed?")) return;
+      log.innerHTML = "";
+      btnSeed.disabled = true;
+      btnClear.disabled = true;
+      btnReset.disabled = true;
+      try {
+        print("Cargando módulo...");
+        const mod = await import("/dev/seed-prueba.js?v=" + Date.now());
+        print("Reseteando producción de hoy...");
+        await mod.resetProduccionHoy();
+        print("✓ Producción de hoy eliminada. Recargá la app para ver los cambios.", "ok");
+      } catch (e) {
+        print("ERROR: " + e.message, "err");
+        if (e.stack) print(e.stack, "err");
+      } finally {
+        btnSeed.disabled = false;
+        btnClear.disabled = false;
+        btnReset.disabled = false;
+      }
+    });
+
+    btnSeed.addEventListener("click", async () => {
+      log.innerHTML = "";
+      btnSeed.disabled = true;
+      btnClear.disabled = true;
+      btnReset.disabled = true;
+      try {
+        print("Cargando módulo seed...");
+        const mod = await import("/dev/seed-prueba.js?v=" + Date.now());
+        print("Módulo cargado. Iniciando seed...");
+        await mod.seedDatosPrueba();
+        print("✓ Listo. Abrí la app → vista Calibrar.", "ok");
+      } catch (e) {
+        print("ERROR: " + e.message, "err");
+        if (e.stack) print(e.stack, "err");
+        print("¿Abriste la app principal primero en otra pestaña?", "warn");
+      } finally {
+        btnSeed.disabled = false;
+        btnClear.disabled = false;
+        btnReset.disabled = false;
+      }
+    });
+
+    btnClear.addEventListener("click", async () => {
+      if (!confirm("¿Eliminar todos los datos de prueba?")) return;
+      log.innerHTML = "";
+      btnSeed.disabled = true;
+      btnClear.disabled = true;
+      btnReset.disabled = true;
+      try {
+        print("Cargando módulo...");
+        const mod = await import("/dev/seed-prueba.js?v=" + Date.now());
+        print("Limpiando...");
+        await mod.clearDatosPrueba();
+        print("✓ Datos de prueba eliminados.", "ok");
+      } catch (e) {
+        print("ERROR: " + e.message, "err");
+        if (e.stack) print(e.stack, "err");
+      } finally {
+        btnSeed.disabled = false;
+        btnClear.disabled = false;
+        btnReset.disabled = false;
+      }
+    });
+
+    print("Listo. Apretá un botón para empezar.", "ok");
+  </script>
+</body>
+</html>

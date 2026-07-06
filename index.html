@@ -19,12 +19,40 @@
       <button class="nav-link" type="button" data-view="produccion">Produccion</button>
       <button class="nav-link" type="button" data-view="stock">Stock</button>
       <button class="nav-link" type="button" data-view="historial">Historial</button>
+      <button class="nav-link" type="button" data-view="insumos">Insumos</button>
+      <button class="nav-link" type="button" data-view="calibrar">Calibrar</button>
+      <button class="nav-link" type="button" data-view="recetas">Recetas</button>
+      <button class="nav-link" type="button" data-view="proveedores">Proveedores</button>
     </nav>
   </header>
 
   <main class="page">
     <section class="flash-stack" aria-live="polite">
       <p class="flash-message" id="app-message" hidden></p>
+    </section>
+
+    <!-- Sheet global de calibracion — visible desde cualquier tab -->
+    <section class="production-sheet-backdrop" id="calibracion-backdrop" hidden></section>
+    <section class="form-section stock-adjust-sheet" id="calibracion-sheet" aria-hidden="true">
+      <form id="calibracion-form" class="stock-form" novalidate>
+        <div class="production-sheet-header">
+          <div>
+            <h2>Calibrar insumo</h2>
+            <p>Conta el stock real y corregi la estimacion del modelo.</p>
+          </div>
+          <button type="button" class="ghost-button compact" id="close-calibracion" aria-label="Cerrar">Cerrar</button>
+        </div>
+        <div class="production-selected-box" id="calibracion-selected">
+          <strong>Insumo</strong>
+          <small>Stock calculado: —</small>
+        </div>
+        <label class="quantity-field">
+          <span id="calibracion-label">Stock real que contas</span>
+          <input id="calibracion-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+        </label>
+        <div id="calibracion-receta-settings"></div>
+        <button class="primary-button" type="submit">Guardar calibracion</button>
+      </form>
     </section>
 
     <section class="view active" id="view-caja" aria-labelledby="caja-title">
@@ -200,15 +228,233 @@
       <section class="backup-panel">
         <div>
           <h2>Exportacion local</h2>
-          <p>Exporta el cierre del dia en TXT.</p>
+          <p>Exporta el cierre del dia en TXT (para imprimir/compartir) o JSON (para analisis de datos).</p>
           <p id="history-production-text">Cantidad de produccion del dia: 0 sandwiches.</p>
         </div>
         <div class="backup-actions">
-          <button class="ghost-button" type="button" id="export-sales-summary">Exportar resumen TXT</button>
+          <button class="ghost-button" type="button" id="export-sales-summary">Exportar TXT</button>
+          <button class="ghost-button" type="button" id="export-sales-json">Exportar JSON</button>
         </div>
       </section>
 
       <section class="history-list" id="history-list"></section>
+    </section>
+
+    <section class="view" id="view-insumos" aria-labelledby="insumos-title">
+      <section class="section-heading">
+        <h1 id="insumos-title">Insumos</h1>
+        <p>Stock de insumos, compras y lista de lo que falta.</p>
+      </section>
+
+      <div id="calibracion-alert" hidden></div>
+
+      <section class="production-sheet-backdrop" id="insumos-ajuste-backdrop" hidden></section>
+
+      <section class="form-section stock-adjust-sheet" id="insumos-ajuste-sheet" aria-hidden="true">
+        <form id="insumos-ajuste-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div>
+              <h2>Registrar</h2>
+              <p>Compra recibida o ajuste manual de stock.</p>
+            </div>
+            <button type="button" class="ghost-button compact" id="close-insumos-ajuste" aria-label="Cerrar">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <div class="production-selected-box" id="insumos-ajuste-selected">
+              <strong>Selecciona un insumo</strong>
+              <small>Stock actual: —</small>
+            </div>
+            <div class="insumo-tipo-switcher">
+              <button type="button" class="ghost-button compact active" id="insumo-tipo-compra">Compra</button>
+              <button type="button" class="ghost-button compact" id="insumo-tipo-ajuste">Ajuste manual</button>
+            </div>
+            <label class="quantity-field" id="insumos-compra-field">
+              <span id="insumos-compra-label">Cantidad recibida</span>
+              <input id="insumos-compra-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+            </label>
+            <div id="insumos-ajuste-field" hidden>
+              <div class="insumo-stepper">
+                <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-minus">−</button>
+                <div class="insumo-stepper-center">
+                  <input id="insumos-ajuste-cantidad" type="number" min="0" step="any" inputmode="decimal">
+                  <span class="insumo-stepper-unit" id="insumos-ajuste-unidad">g</span>
+                </div>
+                <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-plus">+</button>
+              </div>
+              <p class="insumo-stepper-hint" id="insumos-ajuste-delta-hint"></p>
+              <p class="insumo-motivos-label">Motivo del ajuste</p>
+              <div class="insumo-motivos" id="insumos-ajuste-motivos">
+                <label class="insumo-motivo">
+                  <input type="radio" name="insumo-motivo" value="desperdicio">
+                  <div class="insumo-motivo-body">
+                    <strong>Baja por desperdicio</strong>
+                    <span>Producto vencido, derrame o consumo fuera de producción.</span>
+                    <span class="insumo-motivo-badge no-afecta">Se registra como pérdida</span>
+                  </div>
+                </label>
+                <label class="insumo-motivo">
+                  <input type="radio" name="insumo-motivo" value="no_recibido">
+                  <div class="insumo-motivo-body">
+                    <strong>Cantidad no recibida</strong>
+                    <span>La compra llegó incompleta o se registró de más.</span>
+                    <span class="insumo-motivo-badge no-afecta">Solo corrige el stock</span>
+                  </div>
+                </label>
+                <label class="insumo-motivo">
+                  <input type="radio" name="insumo-motivo" value="error_conteo">
+                  <div class="insumo-motivo-body">
+                    <strong>Error de conteo</strong>
+                    <span>El stock registrado no coincidía con el real.</span>
+                    <span class="insumo-motivo-badge no-afecta">Solo corrige el stock</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="stock-toolbar">
+        <button class="ghost-button compact" type="button" id="ver-lista-compras">Lista de compras</button>
+      </section>
+
+      <section id="lista-compras-section" hidden>
+        <div class="section-heading" style="padding-top: 0.5rem">
+          <h2>Lo que falta comprar</h2>
+        </div>
+        <div class="stock-list" id="lista-compras-list"></div>
+        <div class="backup-actions">
+          <button class="ghost-button" type="button" id="export-lista-compras">Exportar TXT</button>
+        </div>
+      </section>
+
+      <div class="stock-list" id="insumos-list"></div>
+    </section>
+
+    <section class="view" id="view-calibrar" aria-labelledby="calibrar-title">
+      <section class="section-heading">
+        <h1 id="calibrar-title">Calibracion</h1>
+        <p>Verificacion de stock real y ajuste del modelo de consumo por insumo.</p>
+      </section>
+      <div id="calibrar-list"></div>
+    </section>
+
+    <section class="view" id="view-recetas" aria-labelledby="recetas-title">
+      <section class="section-heading">
+        <h1 id="recetas-title">Recetas</h1>
+        <p>Ingredientes y cantidades por producto. Editá para corregir antes de que el modelo calibre solo.</p>
+      </section>
+
+      <section class="production-sheet-backdrop" id="receta-edit-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="receta-edit-sheet" aria-hidden="true">
+        <form id="receta-edit-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div>
+              <h2 id="receta-edit-title">Editar cantidad</h2>
+              <p id="receta-edit-context" class="cal-muted"></p>
+            </div>
+            <button type="button" class="ghost-button compact" id="close-receta-edit">Cerrar</button>
+          </div>
+          <label class="quantity-field">
+            <span id="receta-edit-label">Cantidad por unidad</span>
+            <input id="receta-edit-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+          </label>
+          <label class="quantity-field">
+            <span>Motivo del cambio <span class="cal-muted">(opcional)</span></span>
+            <input id="receta-edit-motivo" type="text" placeholder="ej: decisión de calidad, ajuste de costos...">
+          </label>
+          <button class="primary-button" type="submit">Guardar</button>
+        </form>
+      </section>
+
+      <div id="recetas-list"></div>
+    </section>
+
+    <section class="view" id="view-proveedores" aria-labelledby="proveedores-title">
+      <section class="section-heading">
+        <h1 id="proveedores-title">Proveedores</h1>
+        <p>Directorio de proveedores con precios extraidos de facturas reales.</p>
+      </section>
+
+      <!-- Sheet: editar proveedor -->
+      <section class="production-sheet-backdrop" id="prov-edit-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="prov-edit-sheet" aria-hidden="true">
+        <form id="prov-edit-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div><h2>Editar proveedor</h2></div>
+            <button type="button" class="ghost-button compact" id="close-prov-edit">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <label class="quantity-field">
+              <span>Nombre</span>
+              <input id="prov-edit-nombre" type="text" required>
+            </label>
+            <label class="quantity-field">
+              <span>Telefono</span>
+              <input id="prov-edit-tel" type="text" inputmode="tel">
+            </label>
+            <label class="quantity-field">
+              <span>Email</span>
+              <input id="prov-edit-email" type="email">
+            </label>
+            <label class="quantity-field">
+              <span>Notas</span>
+              <textarea id="prov-edit-notas" class="comment-textarea" rows="3"></textarea>
+            </label>
+            <label class="quantity-field">
+              <span>Dias entre pedidos</span>
+              <input id="prov-edit-dias" type="number" min="1" step="1" inputmode="numeric">
+            </label>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar cambios</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Sheet: agregar / editar producto de proveedor -->
+      <section class="production-sheet-backdrop" id="prov-prod-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="prov-prod-sheet" aria-hidden="true">
+        <form id="prov-prod-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div>
+              <h2 id="prov-prod-title">Agregar producto</h2>
+              <p id="prov-prod-context" class="cal-muted"></p>
+            </div>
+            <button type="button" class="ghost-button compact" id="close-prov-prod">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <label class="quantity-field">
+              <span>Nombre del producto (como en factura)</span>
+              <input id="prov-prod-nombre" type="text" required>
+            </label>
+            <label class="quantity-field">
+              <span>Unidad de compra (ej: kg, caja, bolsa, pack)</span>
+              <input id="prov-prod-unidad" type="text" placeholder="kg, caja, bolsa..." required>
+            </label>
+            <label class="quantity-field">
+              <span>Insumo vinculado <span class="cal-muted">(opcional)</span></span>
+              <select id="prov-prod-insumo"></select>
+            </label>
+            <label class="quantity-field">
+              <span id="prov-prod-cantidad-label">Cantidad por unidad de compra</span>
+              <input id="prov-prod-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+            </label>
+            <label class="quantity-field">
+              <span>Precio por unidad de compra (EUR)</span>
+              <input id="prov-prod-precio" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+            </label>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar</button>
+          </div>
+        </form>
+      </section>
+
+      <div id="proveedores-list"></div>
     </section>
   </main>
 

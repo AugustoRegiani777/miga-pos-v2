@@ -358,6 +358,128 @@ export async function exportSalesSummary(fecha) {
   await shareOrDownloadText(`${dd}-${mm}-${yyyy}-miga-cierre.txt`, text, "text/plain;charset=utf-8");
 }
 
+export async function exportDailySummaryJSON(fecha) {
+  const sales = await salesForDay(fecha);
+  const products = await listProducts();
+  const snapshot = await productionSnapshot(fecha);
+  const productsById = new Map(products.map((p) => [p.id, p]));
+  const productsByName = new Map(products.map((p) => [normalizeText(p.nombre), p]));
+
+  // Consolidar ventas por producto
+  const salesSummary = new Map();
+  const togooSummary = new Map();
+  const bajaSummary = new Map();
+  let totalVentaCentavos = 0;
+  let totalToGooCentavos = 0;
+  let totalToGooUnidades = 0;
+  let totalBajaUnidades = 0;
+
+  for (const sale of sales) {
+    for (const detail of sale.detalles) {
+      if (isDiscountDetail(detail)) { totalVentaCentavos += detail.subtotalCentavos; continue; }
+
+      if (isToGooDetail(detail)) {
+        totalToGooCentavos += detail.subtotalCentavos;
+        totalToGooUnidades += detail.cantidad;
+        const cleanName = cleanToGooName(detail.productoNombre);
+        const key = detail.productoId || normalizeText(cleanName);
+        const row = togooSummary.get(key) || { productoId: key, nombre: cleanName, cantidad: 0, totalCentavos: 0 };
+        row.cantidad += detail.cantidad;
+        row.totalCentavos += detail.subtotalCentavos;
+        togooSummary.set(key, row);
+        continue;
+      }
+
+      if (isBajaDetail(detail)) {
+        totalBajaUnidades += detail.cantidad;
+        const cleanName = cleanBajaName(detail.productoNombre);
+        const key = detail.productoId || normalizeText(cleanName);
+        const row = bajaSummary.get(key) || { productoId: key, nombre: cleanName, cantidad: 0 };
+        row.cantidad += detail.cantidad;
+        bajaSummary.set(key, row);
+        continue;
+      }
+
+      totalVentaCentavos += detail.subtotalCentavos;
+      const product = productsById.get(detail.productoId) || productsByName.get(normalizeText(detail.productoNombre));
+      const key = product?.id || normalizeText(detail.productoNombre);
+      const row = salesSummary.get(key) || {
+        productoId: key,
+        nombre: product?.nombre || detail.productoNombre,
+        categoriaId: product?.categoriaId || "otros",
+        cantidad: 0,
+        totalCentavos: 0,
+        primeraVenta: sale.hora,
+        ultimaVenta: sale.hora
+      };
+      row.cantidad += detail.cantidad;
+      row.totalCentavos += detail.subtotalCentavos;
+      if (sale.hora < row.primeraVenta) row.primeraVenta = sale.hora;
+      if (sale.hora > row.ultimaVenta) row.ultimaVenta = sale.hora;
+      salesSummary.set(key, row);
+    }
+  }
+
+  const totalSandwichesProducidos = snapshot.sandwiches.reduce((s, p) => s + (Number(p.cantidadProducida) || 0), 0);
+  const totalBolleriaProducida = snapshot.bolleria.reduce((s, p) => s + (Number(p.cantidadProducida) || 0), 0);
+  const totalSandwichesVendidos = Array.from(salesSummary.values())
+    .filter(r => productsById.get(r.productoId)?.categoriaId === "sandwiches" && productsById.get(r.productoId)?.controlaStock)
+    .reduce((s, r) => s + r.cantidad, 0);
+  const totalSandwichesRestantes = snapshot.sandwiches.reduce((s, p) => s + (Number(p.stockActual) || 0), 0);
+  const sandwichesAyer = totalSandwichesRestantes - totalSandwichesProducidos + totalSandwichesVendidos;
+
+  const payload = {
+    _meta: { app: "Miga POS", version: "v2", exportadoEn: new Date().toISOString() },
+    fecha,
+    resumen: {
+      transacciones: sales.length,
+      sandwichesAyer,
+      sandwichesProducidos: totalSandwichesProducidos,
+      sandwichesVendidos: totalSandwichesVendidos,
+      sandwichesRestantes: totalSandwichesRestantes,
+      ingresosCentavos: totalVentaCentavos,
+      togooCentavos: totalToGooCentavos,
+      totalCentavos: totalVentaCentavos + totalToGooCentavos
+    },
+    ventas: {
+      porProducto: Array.from(salesSummary.values()).sort((a, b) => b.cantidad - a.cantidad)
+    },
+    produccion: {
+      totalSandwiches: totalSandwichesProducidos,
+      totalBolleria: totalBolleriaProducida,
+      sandwiches: snapshot.sandwiches.map(p => ({
+        productoId: p.id,
+        nombre: p.nombre,
+        cantidadProducida: Number(p.cantidadProducida) || 0,
+        stockRestante: Number(p.stockActual) || 0
+      })),
+      bolleria: snapshot.bolleria.map(p => ({
+        productoId: p.id,
+        nombre: p.nombre,
+        cantidadProducida: Number(p.cantidadProducida) || 0,
+        stockRestante: Number(p.stockActual) || 0
+      })),
+      comentarios: snapshot.comentarios || []
+    },
+    togoo: {
+      total: totalToGooUnidades,
+      totalCentavos: totalToGooCentavos,
+      porProducto: Array.from(togooSummary.values())
+    },
+    baja: {
+      total: totalBajaUnidades,
+      porProducto: Array.from(bajaSummary.values())
+    }
+  };
+
+  const [yyyy, mm, dd] = fecha.split("-");
+  await shareOrDownloadText(
+    `${dd}-${mm}-${yyyy}-miga-cierre.json`,
+    JSON.stringify(payload, null, 2),
+    "application/json;charset=utf-8"
+  );
+}
+
 export async function exportFullBackup() {
   const payload = await exportAllData();
   const text = JSON.stringify(payload, null, 2);

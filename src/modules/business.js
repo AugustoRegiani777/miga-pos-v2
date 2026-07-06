@@ -1,6 +1,7 @@
 import { getAll, requestToPromise, withStores } from "../db/idb.js";
 import { currentTime, todayISO } from "../utils/format.js";
 import { calculateCartPricing } from "./pricing.js";
+import { deductInsumosForProductionInTx } from "./aprovisionamiento.js";
 
 const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria"]);
 const TOGOO_PRICE_RATIO = 0.4;
@@ -191,7 +192,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
   }
   const now = new Date().toISOString();
 
-  return withStores(["productos", "movimientos_stock", "produccion_diaria"], "readwrite", async (stores) => {
+  return withStores(["productos", "movimientos_stock", "produccion_diaria", "insumos", "recetas", "movimientos_insumos"], "readwrite", async (stores) => {
     const product = await requestToPromise(stores.productos.get(productId));
     if (!product || !product.controlaStock) {
       throw new Error("Producto invalido para ajuste de stock.");
@@ -222,6 +223,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
         creadoEn: currentProduction?.creadoEn || now,
         actualizadoEn: now
       });
+      await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
     }
 
     stores.productos.put({ ...product, stockActual: nuevoStock, actualizadoEn: now });
@@ -246,7 +248,7 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
   }
   const now = new Date().toISOString();
 
-  return withStores(["productos", "produccion_diaria", "movimientos_stock"], "readwrite", async (stores) => {
+  return withStores(["productos", "produccion_diaria", "movimientos_stock", "insumos", "recetas", "movimientos_insumos"], "readwrite", async (stores) => {
     const product = await requestToPromise(stores.productos.get(productId));
     if (!product || !PRODUCTION_CATEGORIES.has(product.categoriaId) || !product.controlaStock) {
       throw new Error("Producto invalido para produccion.");
@@ -279,6 +281,7 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
       fecha,
       creadoEn: now
     });
+    await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
   });
 }
 
@@ -292,6 +295,8 @@ export async function confirmSale(items) {
     const lines = [];
     let totalCentavos = 0;
     let saleMode = "normal";
+    const _detallesSync = [];
+    const _movStockSync = [];
 
     const stockProducts = new Map();
     for (const item of cart.stockItems) {
@@ -351,7 +356,7 @@ export async function confirmSale(items) {
     const saleId = await requestToPromise(stores.ventas.add({ fecha, hora, totalCentavos, saleMode, creadoEn: now }));
 
     for (const line of lines) {
-      stores.detalle_venta.add({
+      const detalle = {
         ventaId: saleId,
         productoId: line.product.id,
         productoNombre: line.productName,
@@ -360,11 +365,13 @@ export async function confirmSale(items) {
         subtotalCentavos: line.subtotalCentavos,
         fecha,
         creadoEn: now
-      });
+      };
+      stores.detalle_venta.add(detalle);
+      _detallesSync.push(detalle);
     }
 
     if (discountCentavos > 0) {
-      stores.detalle_venta.add({
+      const descuento = {
         ventaId: saleId,
         productoId: `combo-${pricing.combo.cantidad}`,
         productoNombre: `Descuento ${pricing.combo.nombre}`,
@@ -373,7 +380,9 @@ export async function confirmSale(items) {
         subtotalCentavos: -discountCentavos,
         fecha,
         creadoEn: now
-      });
+      };
+      stores.detalle_venta.add(descuento);
+      _detallesSync.push(descuento);
     }
 
     for (const item of cart.stockItems) {
@@ -382,7 +391,7 @@ export async function confirmSale(items) {
         const stockAnterior = product.stockActual;
         const stockNuevo = stockAnterior - item.quantity;
         stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
-        stores.movimientos_stock.add({
+        const mov = {
           productoId: product.id,
           tipo: "venta",
           cantidad: -item.quantity,
@@ -391,11 +400,21 @@ export async function confirmSale(items) {
           referencia: `Venta #${saleId}`,
           fecha,
           creadoEn: now
-        });
+        };
+        stores.movimientos_stock.add(mov);
+        _movStockSync.push(mov);
       }
     }
 
-    return { saleId, fecha, hora, totalCentavos };
+    return {
+      saleId, fecha, hora, totalCentavos, saleMode,
+      _syncPayload: {
+        venta: { fecha, hora, totalCentavos, saleMode, creadoEn: now },
+        detalles: _detallesSync,
+        movimientosStock: _movStockSync,
+        movimientosInsumos: []
+      }
+    };
   });
 }
 
