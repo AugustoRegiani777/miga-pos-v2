@@ -124,7 +124,9 @@ export function renderCart(container, sandwichCountNode, totalNode, confirmButto
       </div>
     `;
     line.querySelector("strong").textContent = item.displayName || item.nombre;
-    line.querySelector(".cart-unit").textContent = `${centsToMoney(item.precioCentavos)} c/u`;
+    line.querySelector(".cart-unit").textContent = item.saleMode === "togoo" && item.controlaStock
+      ? "ToGoo — incluido en tarifa fija"
+      : `${centsToMoney(item.precioCentavos)} c/u`;
     line.querySelector("span").textContent = item.quantity;
     line.querySelector('[data-action="minus"]').addEventListener("click", () => onQuantityChange(item.cartKey, -1));
     line.querySelector('[data-action="plus"]').addEventListener("click", () => onQuantityChange(item.cartKey, 1));
@@ -168,27 +170,37 @@ export function filterProductButtons(searchInput, emptyNode) {
   emptyNode.hidden = visibleCount > 0;
 }
 
-export function renderToGooSelect(select, products) {
-  select.innerHTML = "";
-  products
-    .filter((product) => product.controlaStock)
-    .forEach((product) => {
-      const displayStock = product.stockDisponible ?? product.stockActual;
-      const option = document.createElement("option");
-      option.value = product.id;
-      option.disabled = displayStock <= 0;
-      option.textContent = `${product.nombre} - stock: ${displayStock}`;
-      select.appendChild(option);
-    });
-}
-
 function saleTitle(sale) {
+  if (sale.origen === "pedido" && sale.clienteNombre) return `Pedido: ${sale.clienteNombre}`;
   if (sale.saleMode === "baja") return `Baja #${sale.id}`;
   if (sale.saleMode === "togoo") return `ToGoo #${sale.id}`;
   return `Venta #${sale.id}`;
 }
 
-export function renderProduction(snapshot, selectedBox, selectedProductId, onProductionProductSelect, productionLists) {
+function renderProductionRow(product, selectedProductId, onProductionProductSelect, onAdjustStock) {
+  const wrapper = el("div", "production-row-wrapper");
+  const stockBtn = el("button", "ghost-button compact production-stock-button", "Modificar stock");
+  stockBtn.type = "button";
+  stockBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onAdjustStock(product);
+  });
+  wrapper.appendChild(stockBtn);
+  wrapper.appendChild(
+    renderStockRow(
+      product,
+      productionSummaryLines(product),
+      {
+        clickable: true,
+        selected: product.id === selectedProductId,
+        onClick: () => onProductionProductSelect(product)
+      }
+    )
+  );
+  return wrapper;
+}
+
+export function renderProduction(snapshot, selectedBox, selectedProductId, onProductionProductSelect, productionLists, onAdjustStock) {
   const selectedProduct = snapshot.productionProducts.find((product) => product.id === selectedProductId);
   selectedBox.innerHTML = selectedProduct
     ? `
@@ -207,15 +219,7 @@ export function renderProduction(snapshot, selectedBox, selectedProductId, onPro
   productionLists.sandwiches.innerHTML = "";
   for (const product of snapshot.sandwiches) {
     productionLists.sandwiches.appendChild(
-      renderStockRow(
-        product,
-        productionSummaryLines(product),
-        {
-          clickable: true,
-          selected: product.id === selectedProductId,
-          onClick: () => onProductionProductSelect(product)
-        }
-      )
+      renderProductionRow(product, selectedProductId, onProductionProductSelect, onAdjustStock)
     );
   }
 
@@ -223,44 +227,9 @@ export function renderProduction(snapshot, selectedBox, selectedProductId, onPro
     productionLists.bolleria.innerHTML = "";
     for (const product of snapshot.bolleria) {
       productionLists.bolleria.appendChild(
-        renderStockRow(
-          product,
-          productionSummaryLines(product),
-          {
-            clickable: true,
-            selected: product.id === selectedProductId,
-            onClick: () => onProductionProductSelect(product)
-          }
-        )
+        renderProductionRow(product, selectedProductId, onProductionProductSelect, onAdjustStock)
       );
     }
-  }
-}
-
-export function renderStockList(container, products, searchTerm = "", onAdjustStock) {
-  const term = normalizeText(searchTerm);
-  container.innerHTML = "";
-  const visible = products.filter((product) => {
-    if (!product.controlaStock) return false;
-    return normalizeText(`${product.nombre} ${product.categoria}`).includes(term);
-  });
-
-  if (visible.length === 0) {
-    container.appendChild(el("p", "empty-state", "No hay productos con ese nombre."));
-    return;
-  }
-
-  for (const product of visible) {
-    container.appendChild(
-      renderStockRow(product, [
-        product.categoria,
-        `Producido hoy: ${product.cantidadProducida || 0}`,
-        `Vendido hoy: ${product.cantidadVendida || 0}`
-      ], {
-        actionLabel: onAdjustStock ? "Modificar stock" : "",
-        onAction: onAdjustStock ? () => onAdjustStock(product) : null
-      })
-    );
   }
 }
 

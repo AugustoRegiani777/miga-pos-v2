@@ -1,6 +1,6 @@
 import { getAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
-import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION } from "./seed.js";
+import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
 
 const SEED_VERSION_KEY = "insumos_seed_version";
@@ -43,6 +43,15 @@ export async function seedInsumos() {
         if (existingInsumoIds.has(seedInsumo.id)) {
           const existing = existingInsumos.find(i => i.id === seedInsumo.id);
           stores.insumos.put({ ...existing, stockMinimo: seedInsumo.stockMinimo, stockCritico: seedInsumo.stockCritico, factorConversion: seedInsumo.factorConversion, unidadCompra: seedInsumo.unidadCompra, actualizadoEn: now });
+        }
+      }
+      // Borra insumos obsoletos que no deberian existir (ej. "Mezcla", reemplazado por Mayonesa)
+      for (const existing of existingInsumos) {
+        if (INSUMOS_OBSOLETOS_NOMBRES.has(existing.nombre)) {
+          stores.insumos.delete(existing.id);
+          for (const receta of existingRecetas) {
+            if (receta.insumoId === existing.id) stores.recetas.delete(receta.id);
+          }
         }
       }
       // Aplica recetaFija a recetas de miga existentes
@@ -552,22 +561,54 @@ export async function getCalibracionDashboardData() {
     });
 }
 
+// Chequeo de solo lectura (sin escribir nada) para saber, ANTES de guardar
+// produccion, que insumos quedarian en negativo. Se usa para avisar al cocinero
+// y darle la opcion de ir a actualizar el stock del insumo antes de continuar.
+export async function previewProduccionInsumos(productId, cantidadProducida) {
+  const [recetas, insumos] = await Promise.all([getAll("recetas"), getAll("insumos")]);
+  const recetasDelProducto = recetas.filter((r) => r.productoId === productId);
+  if (recetasDelProducto.length === 0) return [];
+
+  const insumosById = new Map(insumos.map((i) => [i.id, i]));
+  const faltantes = [];
+  for (const receta of recetasDelProducto) {
+    const insumo = insumosById.get(receta.insumoId);
+    if (!insumo || !insumo.activo) continue;
+    const total = receta.cantidadPorUnidad * cantidadProducida;
+    const stockResultante = insumo.stockActual - total;
+    if (stockResultante < 0) {
+      faltantes.push({
+        insumoId: insumo.id,
+        nombre: insumo.nombre,
+        unidad: insumo.unidad,
+        stockActual: insumo.stockActual,
+        stockResultante
+      });
+    }
+  }
+  return faltantes;
+}
+
 // Called within saveDailyProduction / adjustStockLevel transactions.
 // cantidadProducida > 0 = producción (descuenta insumos)
 // cantidadProducida < 0 = corrección de error (devuelve insumos)
+// No se clampea en 0: si el insumo no alcanza, se deja en negativo a proposito
+// (el deficit real, no uno truncado) y se avisa en `warnings`. Se autoresuelve
+// solo la proxima vez que se cargue una compra de ese insumo.
 export async function deductInsumosForProductionInTx(stores, productId, cantidadProducida, fecha, now) {
   const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
-  if (todasLasRecetas.length === 0) return [];
+  if (todasLasRecetas.length === 0) return { movimientos: [], warnings: [] };
   const recetasDelProducto = todasLasRecetas.filter(r => r.productoId === productId);
-  if (recetasDelProducto.length === 0) return [];
+  if (recetasDelProducto.length === 0) return { movimientos: [], warnings: [] };
 
   const movimientosCreados = [];
+  const warnings = [];
   for (const receta of recetasDelProducto) {
     const insumo = await requestToPromise(stores.insumos.get(receta.insumoId));
     if (!insumo || !insumo.activo) continue;
     const total = receta.cantidadPorUnidad * cantidadProducida;
     const stockAnterior = insumo.stockActual;
-    const stockNuevo = Math.max(0, stockAnterior - total);
+    const stockNuevo = stockAnterior - total;
     const cal = insumo.ultimaCalibracion
       ? { ...insumo.ultimaCalibracion, ventasPorProducto: { ...insumo.ultimaCalibracion.ventasPorProducto } }
       : { fecha: now, stockEnCalibracion: stockAnterior, ventasPorProducto: {} };
@@ -584,8 +625,11 @@ export async function deductInsumosForProductionInTx(stores, productId, cantidad
     const mov = { insumoId: receta.insumoId, tipo: "produccion", cantidad: -total, stockAnterior, stockNuevo, productoId: productId, fecha, creadoEn: now };
     stores.movimientos_insumos.add(mov);
     movimientosCreados.push(mov);
+    if (stockNuevo < 0) {
+      warnings.push(`Falta stock de ${insumo.nombre}: quedo en ${stockNuevo}${insumo.unidad}. Carga la compra pronto.`);
+    }
   }
-  return movimientosCreados;
+  return { movimientos: movimientosCreados, warnings };
 }
 
 // Called within confirmSale's transaction. Returns the movimientos created (for sync).

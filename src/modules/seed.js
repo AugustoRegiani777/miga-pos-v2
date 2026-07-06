@@ -23,7 +23,11 @@ export const STORE_NAMES = [
 // para forzar actualización en IDB aunque los insumos ya existan.
 // Basado en análisis de 18 días de ventas reales (mayo-junio 2026): ~113 sándwiches/día promedio.
 // stockMinimo = 3 días de consumo | stockCritico = 1.5 días de consumo
-export const INSUMOS_SEED_VERSION = 6;
+// v7: borra el insumo obsoleto "Mezcla" (reemplazado por Mayonesa, nunca debio quedar activo)
+export const INSUMOS_SEED_VERSION = 7;
+
+// Nombres de insumos obsoletos que hay que borrar de instalaciones viejas (no deberian existir)
+export const INSUMOS_OBSOLETOS_NOMBRES = new Set(["Mezcla"]);
 
 export const initialInsumos = [
   // Pan — 1 rebanada = 1 longa. Paquete de 12 lonchas. ~57 rebanadas/día → ~4.75 paquetes/día

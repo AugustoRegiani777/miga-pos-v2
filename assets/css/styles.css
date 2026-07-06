@@ -108,6 +108,31 @@ button {
   display: block;
 }
 
+.subview {
+  display: none;
+}
+
+.subview.active {
+  display: block;
+}
+
+.sub-nav {
+  margin-bottom: 18px;
+}
+
+.production-row-wrapper {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.production-stock-button {
+  flex-shrink: 0;
+  align-self: center;
+  min-width: auto;
+  padding: 0 12px;
+}
+
 .flash-stack {
   display: grid;
   gap: 8px;
@@ -131,6 +156,11 @@ button {
 .flash-message.error {
   color: var(--out);
   border-color: #d99b9b;
+}
+
+.flash-message.warning {
+  color: var(--low);
+  border-color: #e0c28f;
 }
 
 .section-heading {
@@ -522,6 +552,16 @@ button {
   pointer-events: auto;
 }
 
+.insumo-warning-actions {
+  display: flex;
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
+.insumo-warning-actions button {
+  flex: 1;
+}
+
 .stock-adjust-sheet .stock-form {
   display: flex;
   flex-direction: column;
@@ -665,6 +705,128 @@ button {
 .category-stack {
   display: grid;
   gap: 10px;
+}
+
+.pedidos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.pedidos-grid.empty {
+  display: block;
+  color: var(--muted);
+}
+
+.pedido-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.pedido-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.pedido-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  color: var(--ink);
+}
+
+.pedido-retiro,
+.pedido-pago,
+.pedido-aclaraciones {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.pedido-precio {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: var(--primary);
+}
+
+.pedido-cortado {
+  margin: 0;
+  color: var(--low);
+  font-weight: 800;
+}
+
+.pedido-toggle-items {
+  justify-self: start;
+}
+
+.pedido-checks-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pedido-check-field {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 800;
+  text-align: center;
+  min-height: 48px;
+}
+
+.pedido-check-field input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.pedido-check-field:has(input:checked) {
+  border-color: var(--primary);
+  background: rgba(23, 50, 77, 0.06);
+}
+
+#pedido-sheet .cart-panel {
+  position: static;
+  max-height: none;
+}
+
+.pedido-product-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pedido-product-row .qty-controls {
+  grid-template-columns: var(--tap) var(--tap) var(--tap);
+}
+
+.pedido-product-stock {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 2px;
 }
 
 .stock-row {
@@ -943,45 +1105,48 @@ button {
   padding: 14px;
 }
 
-.togoo-panel {
-  margin-top: 18px;
-  padding: 22px;
-  background:
-    linear-gradient(
-      135deg,
-      rgba(23, 50, 77, 0.04) 0%,
-      rgba(31, 111, 120, 0.06) 100%
-    ),
-    var(--surface);
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 800;
 }
 
-.stock-forms-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+.toggle-switch input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 44px;
+  height: 26px;
+  min-height: 0;
+  margin: 0;
+  flex-shrink: 0;
+  background: #d8e0e0;
+  border-radius: 999px;
+  cursor: pointer;
+  position: relative;
+  transition: background 150ms ease;
 }
 
-.togoo-panel .stock-forms-grid {
-  grid-template-columns: minmax(0, 1fr);
+.toggle-switch input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  background: #ffffff;
+  border-radius: 50%;
+  transition: transform 150ms ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-.togoo-panel .stock-form {
-  gap: 20px;
+.toggle-switch input[type="checkbox"]:checked {
+  background: var(--primary);
 }
 
-.togoo-panel h2 {
-  font-size: 1.3rem;
-}
-
-.togoo-panel .production-entry {
-  grid-template-columns: minmax(0, 1.8fr) minmax(180px, 0.7fr);
-  gap: 16px;
-}
-
-.togoo-panel .primary-button {
-  min-height: 62px;
-  font-size: 1.05rem;
-  box-shadow: 0 10px 24px rgba(31, 111, 120, 0.18);
+.toggle-switch input[type="checkbox"]:checked::before {
+  transform: translateX(18px);
 }
 
 .backup-actions {
@@ -1070,10 +1235,6 @@ button {
   .production-sheet-header {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .stock-forms-grid {
-    grid-template-columns: 1fr;
   }
 
   .sales-search {

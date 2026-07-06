@@ -108,6 +108,31 @@ CREATE TABLE IF NOT EXISTS movimientos_stock (
   creado_en       TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Pedidos (Instagram/WhatsApp) — fuente de verdad en Supabase, no en IDB local
+CREATE TABLE IF NOT EXISTS pedidos (
+  id                BIGSERIAL PRIMARY KEY,
+  cliente_nombre    TEXT NOT NULL,
+  fecha_hora_retiro TIMESTAMPTZ NOT NULL,
+  pagado            BOOLEAN NOT NULL DEFAULT false,
+  cortado_mitad     BOOLEAN NOT NULL DEFAULT false,
+  aclaraciones      TEXT,
+  total_centavos    INTEGER NOT NULL DEFAULT 0, -- editable a mano: puede diferir del catalogo por promos fuera del sistema
+  estado            TEXT NOT NULL DEFAULT 'pendiente', -- 'pendiente' | 'listo' | 'entregado'
+  creado_en         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  listo_en          TIMESTAMPTZ,
+  entregado_en      TIMESTAMPTZ
+);
+
+-- Detalle de pedido (líneas)
+CREATE TABLE IF NOT EXISTS detalle_pedido (
+  id                       BIGSERIAL PRIMARY KEY,
+  pedido_id                BIGINT NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  producto_id              TEXT NOT NULL,
+  producto_nombre          TEXT NOT NULL,
+  cantidad                 INTEGER NOT NULL,
+  precio_unitario_centavos INTEGER NOT NULL DEFAULT 0
+);
+
 -- =========================================
 -- Deshabilitar RLS para uso sin auth
 -- (habilitar y agregar policies cuando se implemente auth del dueño)
@@ -120,6 +145,8 @@ ALTER TABLE movimientos_insumos  DISABLE ROW LEVEL SECURITY;
 ALTER TABLE historial_calibraciones DISABLE ROW LEVEL SECURITY;
 ALTER TABLE produccion_diaria    DISABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_stock    DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pedidos              DISABLE ROW LEVEL SECURITY;
+ALTER TABLE detalle_pedido       DISABLE ROW LEVEL SECURITY;
 
 -- Índices útiles para queries del dashboard
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha               ON ventas(fecha);
@@ -129,3 +156,6 @@ CREATE INDEX IF NOT EXISTS idx_mov_insumos_insumo_id      ON movimientos_insumos
 CREATE INDEX IF NOT EXISTS idx_mov_insumos_fecha          ON movimientos_insumos(fecha);
 CREATE INDEX IF NOT EXISTS idx_histcal_insumo_id          ON historial_calibraciones(insumo_id);
 CREATE INDEX IF NOT EXISTS idx_mov_stock_fecha            ON movimientos_stock(fecha);
+CREATE INDEX IF NOT EXISTS idx_pedidos_estado             ON pedidos(estado);
+CREATE INDEX IF NOT EXISTS idx_pedidos_fecha_retiro        ON pedidos(fecha_hora_retiro);
+CREATE INDEX IF NOT EXISTS idx_detalle_pedido_pedido_id   ON detalle_pedido(pedido_id);

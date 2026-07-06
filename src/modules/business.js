@@ -4,7 +4,7 @@ import { calculateCartPricing } from "./pricing.js";
 import { deductInsumosForProductionInTx } from "./aprovisionamiento.js";
 
 const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria"]);
-const TOGOO_PRICE_RATIO = 0.4;
+export const TOGOO_FLAT_TOTAL_CENTAVOS = 300;
 const DECREASE_ONLY_MOTIVOS = new Set(["Consumo", "Pedidos offline"]);
 const productionCommentKey = (fecha) => `production-comment:${fecha}`;
 
@@ -207,6 +207,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
       throw new Error(`"${motivo}" solo puede reducir el stock. Stock actual: ${stockAnterior}.`);
     }
 
+    let warnings = [];
     if ((motivo === "Error de produccion" || motivo === "Error") && PRODUCTION_CATEGORIES.has(product.categoriaId)) {
       const productionId = `${fecha}:${productId}`;
       const currentProduction = await requestToPromise(stores.produccion_diaria.get(productionId));
@@ -223,7 +224,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
         creadoEn: currentProduction?.creadoEn || now,
         actualizadoEn: now
       });
-      await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
+      ({ warnings } = await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now));
     }
 
     stores.productos.put({ ...product, stockActual: nuevoStock, actualizadoEn: now });
@@ -238,6 +239,8 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
       fecha,
       creadoEn: now
     });
+
+    return { warnings };
   });
 }
 
@@ -281,7 +284,8 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
       fecha,
       creadoEn: now
     });
-    await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
+    const { warnings } = await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
+    return { warnings };
   });
 }
 
@@ -316,11 +320,9 @@ export async function confirmSale(items) {
           ? "baja"
           : "normal";
       if (saleMode === "normal" && lineSaleMode !== "normal") saleMode = lineSaleMode;
-      const unitPrice = lineSaleMode === "togoo"
-        ? Math.round(product.precioCentavos * TOGOO_PRICE_RATIO)
-        : lineSaleMode === "baja"
-          ? 0
-          : product.precioCentavos;
+      const unitPrice = lineSaleMode === "togoo" || lineSaleMode === "baja"
+        ? 0
+        : product.precioCentavos;
       const subtotalCentavos = unitPrice * item.quantity;
       totalCentavos += subtotalCentavos;
       lines.push({
@@ -344,9 +346,8 @@ export async function confirmSale(items) {
           unitOrders: line.unitOrders
         }))
     );
-    const toGooTotalCentavos = lines
-      .filter((line) => line.saleMode === "togoo")
-      .reduce((total, line) => total + line.subtotalCentavos, 0);
+    const hasTogoo = lines.some((line) => line.saleMode === "togoo");
+    const toGooTotalCentavos = hasTogoo ? TOGOO_FLAT_TOTAL_CENTAVOS : 0;
     const bajaTotalCentavos = lines
       .filter((line) => line.saleMode === "baja")
       .reduce((total, line) => total + line.subtotalCentavos, 0);
@@ -383,6 +384,21 @@ export async function confirmSale(items) {
       };
       stores.detalle_venta.add(descuento);
       _detallesSync.push(descuento);
+    }
+
+    if (hasTogoo) {
+      const tarifaTogoo = {
+        ventaId: saleId,
+        productoId: "togoo-fee",
+        productoNombre: "Tarifa ToGoo",
+        cantidad: 1,
+        precioUnitarioCentavos: TOGOO_FLAT_TOTAL_CENTAVOS,
+        subtotalCentavos: TOGOO_FLAT_TOTAL_CENTAVOS,
+        fecha,
+        creadoEn: now
+      };
+      stores.detalle_venta.add(tarifaTogoo);
+      _detallesSync.push(tarifaTogoo);
     }
 
     for (const item of cart.stockItems) {

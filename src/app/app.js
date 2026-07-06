@@ -1,9 +1,11 @@
 import { exportSalesSummary, exportDailySummaryJSON } from "../modules/backup.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
 import { trySyncVenta, trySyncMovimientosInsumos, trySyncInsumosSnapshot, trySyncRecetasSnapshot, setupAutoSync } from "../modules/sync.js";
 import { renderInsumosList, renderInsumoAjusteSelected, renderCalibracionAlert, renderListaComprasSmart, renderCalibracionDashboard, renderCalibracionRecetaSettings, renderRecetasEditor } from "../ui/render-aprovisionamiento.js";
+import { fetchPedidosDelDia, crearPedido, marcarPedidoListo, marcarPedidoEntregado } from "../modules/pedidos.js";
+import { renderPedidosGrid, renderPedidoProductPicker } from "../ui/render-pedidos.js";
 import { shareOrDownloadText } from "../utils/format.js";
 import { calculateCartPricing } from "../modules/pricing.js";
 import {
@@ -15,7 +17,7 @@ import {
   salesForDay,
   saveDailyProduction,
   saveProductionComment,
-  stockSnapshot
+  TOGOO_FLAT_TOTAL_CENTAVOS
 } from "../modules/business.js";
 import { seedDatabase, getAll } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
@@ -24,9 +26,7 @@ import {
   renderCart,
   renderHistory,
   renderProductGrid,
-  renderProduction,
-  renderStockList,
-  renderToGooSelect
+  renderProduction
 } from "../ui/render.js";
 
 const cart = new Map();
@@ -34,13 +34,15 @@ let products = [];
 let categories = [];
 let currentView = "caja";
 let saleInProgress = false;
-let toGooInProgress = false;
+let cartMode = "normal";
 let productionInProgress = false;
 let productionCommentInProgress = false;
 let stockAdjustInProgress = false;
 let cartOrder = 0;
 let selectedProductionProductId = "";
 let productionSheetOpen = false;
+let insumoWarningSheetOpen = false;
+let pendingProduction = null;
 let selectedStockAdjustProductId = "";
 let stockAdjustSheetOpen = false;
 let shouldClearProductionCommentInput = false;
@@ -63,11 +65,18 @@ let selectedProvProdId = "";
 let provProdMode = "add";
 let provEditSheetOpen = false;
 let provProdSheetOpen = false;
+const pedidoCart = new Map();
+let pedidoSheetOpen = false;
+let pedidoCreateInProgress = false;
+let pedidoActionInProgress = false;
+let pedidosPollTimer = null;
+let pedidoPrecioEditadoManualmente = false;
+let currentGestionSubView = "insumos";
 
 
 const dom = {
   appMessage: document.querySelector("#app-message"),
-  navLinks: document.querySelectorAll(".nav-link"),
+  navLinks: document.querySelectorAll(".nav:not(.sub-nav) > .nav-link"),
   views: document.querySelectorAll(".view"),
   productCategories: document.querySelector("#product-categories"),
   salesSearch: document.querySelector("#sales-search"),
@@ -79,9 +88,7 @@ const dom = {
   confirmSale: document.querySelector("#confirm-sale"),
   clearCart: document.querySelector("#clear-cart"),
   saleMessage: document.querySelector("#sale-message"),
-  toGooForm: document.querySelector("#togoo-form"),
-  toGooProduct: document.querySelector("#togoo-product"),
-  toGooQuantity: document.querySelector("#togoo-quantity"),
+  cartModeTogooToggle: document.querySelector("#cart-mode-togoo"),
   productionDateText: document.querySelector("#production-date-text"),
   productionCommentText: document.querySelector("#production-comment-text"),
   productionForm: document.querySelector("#production-form"),
@@ -94,7 +101,12 @@ const dom = {
   productionQuantity: document.querySelector("#production-quantity"),
   productionSandwichesList: document.querySelector("#production-sandwiches-list"),
   productionBolleriaList: document.querySelector("#production-bolleria-list"),
-  stockSearch: document.querySelector("#stock-search"),
+  insumoWarningSheet: document.querySelector("#insumo-warning-sheet"),
+  insumoWarningBackdrop: document.querySelector("#insumo-warning-backdrop"),
+  closeInsumoWarning: document.querySelector("#close-insumo-warning"),
+  insumoWarningText: document.querySelector("#insumo-warning-text"),
+  insumoWarningUpdate: document.querySelector("#insumo-warning-update"),
+  insumoWarningContinue: document.querySelector("#insumo-warning-continue"),
   stockAdjustForm: document.querySelector("#stock-adjust-form"),
   stockAdjustSheet: document.querySelector("#stock-adjust-sheet"),
   stockAdjustBackdrop: document.querySelector("#stock-adjust-backdrop"),
@@ -104,7 +116,6 @@ const dom = {
   stockAdjustReason: document.querySelector("#stock-adjust-reason"),
   stockAdjustMinus: document.querySelector("#stock-adjust-minus"),
   stockAdjustPlus: document.querySelector("#stock-adjust-plus"),
-  stockList: document.querySelector("#stock-list"),
   historyFilter: document.querySelector("#history-filter"),
   historyDate: document.querySelector("#history-date"),
   historyProductionText: document.querySelector("#history-production-text"),
@@ -174,7 +185,23 @@ const dom = {
   provProdInsumo: document.querySelector("#prov-prod-insumo"),
   provProdCantidadLabel: document.querySelector("#prov-prod-cantidad-label"),
   provProdCantidad: document.querySelector("#prov-prod-cantidad"),
-  provProdPrecio: document.querySelector("#prov-prod-precio")
+  provProdPrecio: document.querySelector("#prov-prod-precio"),
+  pedidosGrid: document.querySelector("#pedidos-grid"),
+  openNuevoPedido: document.querySelector("#open-nuevo-pedido"),
+  pedidoSheet: document.querySelector("#pedido-sheet"),
+  pedidoSheetBackdrop: document.querySelector("#pedido-sheet-backdrop"),
+  closePedidoSheet: document.querySelector("#close-pedido-sheet"),
+  pedidoForm: document.querySelector("#pedido-form"),
+  pedidoProductPicker: document.querySelector("#pedido-product-picker"),
+  pedidoCartItems: document.querySelector("#pedido-cart-items"),
+  pedidoCartTotal: document.querySelector("#pedido-cart-total"),
+  pedidoClienteNombre: document.querySelector("#pedido-cliente-nombre"),
+  pedidoFechaHora: document.querySelector("#pedido-fecha-hora"),
+  pedidoPrecioTotal: document.querySelector("#pedido-precio-total"),
+  pedidoPagado: document.querySelector("#pedido-pagado"),
+  pedidoCortadoMitad: document.querySelector("#pedido-cortado-mitad"),
+  pedidoAclaraciones: document.querySelector("#pedido-aclaraciones"),
+  confirmPedido: document.querySelector("#confirm-pedido")
 };
 
 function setFlash(text, type = "success") {
@@ -198,6 +225,19 @@ function setProductionSheetOpen(isOpen) {
   dom.productionSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
   dom.productionSheetBackdrop.hidden = !isOpen;
   dom.productionSheetBackdrop.classList.toggle("open", isOpen);
+}
+
+function setInsumoWarningSheetOpen(isOpen) {
+  insumoWarningSheetOpen = isOpen;
+  dom.insumoWarningSheet.classList.toggle("open", isOpen);
+  dom.insumoWarningSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  dom.insumoWarningBackdrop.hidden = !isOpen;
+  dom.insumoWarningBackdrop.classList.toggle("open", isOpen);
+}
+
+function closeInsumoWarningSheet() {
+  setInsumoWarningSheetOpen(false);
+  pendingProduction = null;
 }
 
 function setInsumosAjusteSheetOpen(isOpen) {
@@ -232,29 +272,68 @@ function setStockAdjustSheetOpen(isOpen) {
   dom.stockAdjustBackdrop.classList.toggle("open", isOpen);
 }
 
+function setPedidoSheetOpen(isOpen) {
+  pedidoSheetOpen = isOpen;
+  dom.pedidoSheet.classList.toggle("open", isOpen);
+  dom.pedidoSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  dom.pedidoSheetBackdrop.hidden = !isOpen;
+  dom.pedidoSheetBackdrop.classList.toggle("open", isOpen);
+}
+
+function stopPedidosPolling() {
+  if (pedidosPollTimer) {
+    window.clearInterval(pedidosPollTimer);
+    pedidosPollTimer = null;
+  }
+}
+
+function startPedidosPolling() {
+  stopPedidosPolling();
+  pedidosPollTimer = window.setInterval(() => { renderPedidosView(); }, 9000);
+}
+
+function closeAllGestionSheets() {
+  setInsumosAjusteSheetOpen(false);
+  setInsumosCalibracionSheetOpen(false);
+  setRecetaEditSheetOpen(false);
+  setProvEditSheetOpen(false);
+  setProvProdSheetOpen(false);
+}
+
+async function refreshGestionSubView(subViewName) {
+  if (subViewName === "insumos") await renderInsumosView();
+  if (subViewName === "calibrar") await renderCalibracionView();
+  if (subViewName === "recetas") await renderRecetasView();
+  if (subViewName === "proveedores") await renderProveedoresView();
+}
+
+function showGestionSubView(subViewName) {
+  closeAllGestionSheets();
+  currentGestionSubView = subViewName;
+  document.querySelectorAll(".subview").forEach((section) => section.classList.toggle("active", section.id === `subview-${subViewName}`));
+  document.querySelectorAll(".sub-nav-link").forEach((link) => link.classList.toggle("active", link.dataset.subview === subViewName));
+  refreshGestionSubView(subViewName);
+}
+
 function showView(viewName) {
   currentView = viewName;
   if (viewName !== "produccion") {
     setProductionSheetOpen(false);
-  }
-  if (viewName !== "stock") {
     setStockAdjustSheetOpen(false);
+    closeInsumoWarningSheet();
   }
-  if (viewName !== "insumos") {
-    setInsumosAjusteSheetOpen(false);
-    setInsumosCalibracionSheetOpen(false);
+  if (viewName !== "gestion") {
+    closeAllGestionSheets();
   }
-  if (viewName !== "recetas") {
-    setRecetaEditSheetOpen(false);
-  }
-  if (viewName !== "proveedores") {
-    setProvEditSheetOpen(false);
-    setProvProdSheetOpen(false);
+  if (viewName !== "pedidos") {
+    setPedidoSheetOpen(false);
+    stopPedidosPolling();
   }
   dom.views.forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
   dom.navLinks.forEach((link) => link.classList.toggle("active", link.dataset.view === viewName));
   window.location.hash = viewName;
   refreshView(viewName);
+  if (viewName === "pedidos") startPedidosPolling();
 }
 
 function quantityInCartForProduct(productId) {
@@ -278,12 +357,23 @@ function productsWithReservedStock() {
 function renderReservedStock() {
   const displayProducts = productsWithReservedStock();
   renderProductGrid(dom.productCategories, categories, displayProducts, addToCart);
-  renderToGooSelect(dom.toGooProduct, displayProducts);
   filterProductButtons(dom.salesSearch, dom.salesSearchEmpty);
 }
 
-function addToCart(product, variant = { mode: "normal" }) {
-  const mode = variant.mode || "normal";
+function setCartMode(mode) {
+  if (mode === cartMode) return;
+  if (cart.size > 0) {
+    cart.clear();
+    setFlash("Carrito vaciado al cambiar de modo.", "success");
+  }
+  cartMode = mode;
+  dom.cartModeTogooToggle.checked = mode === "togoo";
+  renderReservedStock();
+  renderCurrentCart();
+}
+
+function addToCart(product) {
+  const mode = cartMode;
   const cartKey = `${product.id}:${mode}`;
   const current = cart.get(cartKey);
   const nextQuantity = (current?.quantity || 0) + 1;
@@ -326,7 +416,19 @@ function changeQuantity(cartKey, delta) {
   renderCurrentCart();
 }
 
+function effectiveSaleMode(item) {
+  // Mismo criterio que confirmSale en business.js: togoo/baja solo aplican a productos
+  // con control de stock propio — un producto sin stock (ej. cafe) agregado con el
+  // carrito en modo ToGoo termina cobrando precio normal igual.
+  if (item.saleMode === "togoo" && item.controlaStock) return "togoo";
+  if (item.saleMode === "baja" && item.controlaStock) return "baja";
+  return "normal";
+}
+
 function renderCurrentCart() {
+  const items = Array.from(cart.values());
+  const pricing = calculateCartPricing(items.filter((item) => effectiveSaleMode(item) === "normal"));
+  const hasTogoo = items.some((item) => effectiveSaleMode(item) === "togoo");
   renderCart(
     dom.cartItems,
     dom.cartSandwichCount,
@@ -334,7 +436,7 @@ function renderCurrentCart() {
     dom.confirmSale,
     cart,
     changeQuantity,
-    calculateCartPricing(cart.values())
+    { ...pricing, totalCentavos: pricing.totalCentavos + (hasTogoo ? TOGOO_FLAT_TOTAL_CENTAVOS : 0) }
   );
 }
 
@@ -349,6 +451,7 @@ async function renderCashier() {
 }
 
 async function renderProductionView() {
+  await loadProducts();
   const snapshot = await productionSnapshot();
   if (selectedProductionProductId && !snapshot.productionProducts.some((product) => product.id === selectedProductionProductId)) {
     selectedProductionProductId = "";
@@ -381,8 +484,17 @@ async function renderProductionView() {
     {
       sandwiches: dom.productionSandwichesList,
       bolleria: dom.productionBolleriaList
-    }
+    },
+    openStockAdjustSheet
   );
+  if (stockAdjustSheetOpen) {
+    const selectedProduct = selectedStockAdjustProduct();
+    if (!selectedProduct) {
+      closeStockAdjustSheet();
+    } else {
+      renderStockAdjustSelection();
+    }
+  }
 }
 
 function selectProductionProduct(product) {
@@ -436,19 +548,6 @@ function nudgeStockAdjust(delta) {
   const currentValue = Number(dom.stockAdjustQuantity.value || 0);
   const nextValue = Math.max(0, currentValue + delta);
   dom.stockAdjustQuantity.value = String(nextValue);
-}
-
-async function renderStockView() {
-  products = await stockSnapshot();
-  renderStockList(dom.stockList, products, dom.stockSearch.value, openStockAdjustSheet);
-  if (stockAdjustSheetOpen) {
-    const selectedProduct = selectedStockAdjustProduct();
-    if (!selectedProduct) {
-      closeStockAdjustSheet();
-    } else {
-      renderStockAdjustSelection();
-    }
-  }
 }
 
 async function renderHistoryView() {
@@ -701,13 +800,142 @@ async function renderProveedoresView() {
 
 async function refreshView(viewName = currentView) {
   if (viewName === "caja") await renderCashier();
+  if (viewName === "pedidos") await renderPedidosView();
   if (viewName === "produccion") await renderProductionView();
-  if (viewName === "stock") await renderStockView();
   if (viewName === "historial") await renderHistoryView();
-  if (viewName === "insumos") await renderInsumosView();
-  if (viewName === "calibrar") await renderCalibracionView();
-  if (viewName === "recetas") await renderRecetasView();
-  if (viewName === "proveedores") await renderProveedoresView();
+  if (viewName === "gestion") await refreshGestionSubView(currentGestionSubView);
+}
+
+async function renderPedidosView() {
+  try {
+    await loadProducts();
+    const pedidos = await fetchPedidosDelDia();
+    renderPedidosGrid(dom.pedidosGrid, pedidos, {
+      onMarcarListo: handleMarcarListo,
+      onMarcarEntregado: handleMarcarEntregado
+    });
+  } catch (error) {
+    dom.pedidosGrid.textContent = "No se pudo cargar los pedidos (revisa la conexion).";
+    dom.pedidosGrid.classList.add("empty");
+  }
+}
+
+function sandwichProductsForPedido() {
+  // categoriaId "sandwiches" tambien incluye promos de combo (ej. "Promo bebida") que no son
+  // sabores reales — esas no controlan stock, asi que se excluyen con controlaStock.
+  return products.filter((p) => p.activo && p.categoriaId === "sandwiches" && p.controlaStock);
+}
+
+function pedidoCartTotalCentavos() {
+  let total = 0;
+  for (const item of pedidoCart.values()) total += item.precioUnitarioCentavos * item.cantidad;
+  return total;
+}
+
+function renderPedidoSheetContents() {
+  renderPedidoProductPicker(dom.pedidoProductPicker, sandwichProductsForPedido(), pedidoCart, addToPedidoCart, decrementPedidoCartItem);
+  dom.confirmPedido.disabled = pedidoCart.size === 0;
+  if (!pedidoPrecioEditadoManualmente) {
+    dom.pedidoPrecioTotal.value = (pedidoCartTotalCentavos() / 100).toFixed(2);
+  }
+}
+
+function addToPedidoCart(product) {
+  const existing = pedidoCart.get(product.id);
+  pedidoCart.set(product.id, {
+    productId: product.id,
+    nombre: product.nombre,
+    cantidad: (existing?.cantidad || 0) + 1,
+    precioUnitarioCentavos: product.precioCentavos
+  });
+  renderPedidoSheetContents();
+}
+
+function changePedidoCartQuantity(productId, delta) {
+  const item = pedidoCart.get(productId);
+  if (!item) return;
+  item.cantidad += delta;
+  if (item.cantidad <= 0) pedidoCart.delete(productId);
+  renderPedidoSheetContents();
+}
+
+function decrementPedidoCartItem(productId) {
+  changePedidoCartQuantity(productId, -1);
+}
+
+function openNuevoPedidoSheet() {
+  pedidoCart.clear();
+  pedidoPrecioEditadoManualmente = false;
+  dom.pedidoClienteNombre.value = "";
+  dom.pedidoFechaHora.value = "";
+  dom.pedidoPrecioTotal.value = "";
+  dom.pedidoPagado.checked = false;
+  dom.pedidoCortadoMitad.checked = false;
+  dom.pedidoAclaraciones.value = "";
+  renderPedidoSheetContents();
+  setPedidoSheetOpen(true);
+}
+
+function closePedidoSheet() {
+  setPedidoSheetOpen(false);
+}
+
+async function handleCrearPedido(event) {
+  event.preventDefault();
+  if (pedidoCreateInProgress) return;
+  try {
+    pedidoCreateInProgress = true;
+    if (pedidoCart.size === 0) throw new Error("Agrega al menos un producto al pedido.");
+    if (!dom.pedidoFechaHora.value) throw new Error("Falta la fecha y hora de retiro.");
+    const totalCentavos = Math.round(parseFloat(dom.pedidoPrecioTotal.value) * 100);
+    await crearPedido({
+      clienteNombre: dom.pedidoClienteNombre.value,
+      fechaHoraRetiro: new Date(dom.pedidoFechaHora.value).toISOString(),
+      pagado: dom.pedidoPagado.checked,
+      cortadoMitad: dom.pedidoCortadoMitad.checked,
+      aclaraciones: dom.pedidoAclaraciones.value,
+      totalCentavos,
+      items: Array.from(pedidoCart.values())
+    });
+    setFlash("Pedido creado.", "success");
+    closePedidoSheet();
+    await renderPedidosView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo crear el pedido.", "error");
+  } finally {
+    pedidoCreateInProgress = false;
+  }
+}
+
+async function handleMarcarListo(pedido) {
+  if (pedidoActionInProgress) return;
+  try {
+    pedidoActionInProgress = true;
+    const result = await marcarPedidoListo(pedido);
+    setFlash(`Pedido de ${pedido.clienteNombre} preparado. Stock descontado.`, "success");
+    // Sync fire-and-forget — nunca bloquea el flujo de pedidos
+    const { venta, detalles, movimientosStock } = result._syncPayload;
+    trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
+  } catch (error) {
+    setFlash(error.message || "No se pudo marcar el pedido como listo.", "error");
+  } finally {
+    pedidoActionInProgress = false;
+    await renderPedidosView();
+  }
+}
+
+async function handleMarcarEntregado(pedido) {
+  if (pedidoActionInProgress) return;
+  try {
+    pedidoActionInProgress = true;
+    await marcarPedidoEntregado(pedido.id);
+    setFlash(`Pedido de ${pedido.clienteNombre} entregado.`, "success");
+  } catch (error) {
+    setFlash(error.message || "No se pudo marcar el pedido como entregado.", "error");
+  } finally {
+    pedidoActionInProgress = false;
+    await renderPedidosView();
+  }
 }
 
 async function handleConfirmSale() {
@@ -724,7 +952,11 @@ async function handleConfirmSale() {
     }));
     const sale = await confirmSale(items);
     cart.clear();
-    setSaleMessage(`Venta #${sale.saleId} confirmada.`, true);
+    setSaleMessage(
+      sale.saleMode === "togoo" ? `Venta ToGoo #${sale.saleId} confirmada.` : `Venta #${sale.saleId} confirmada.`,
+      true
+    );
+    setCartMode("normal");
     // Sync fire-and-forget — nunca bloquea la caja
     const { venta, detalles, movimientosStock, movimientosInsumos } = sale._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
@@ -738,32 +970,21 @@ async function handleConfirmSale() {
   }
 }
 
-async function handleToGooSale(event) {
-  event.preventDefault();
-  if (toGooInProgress) return;
-  try {
-    toGooInProgress = true;
-    const productId = dom.toGooProduct.value;
-    const quantity = Number(dom.toGooQuantity.value);
-    const product = products.find((item) => item.id === productId);
-    if (!product) throw new Error("Selecciona un producto valido para ToGoo.");
-    if (!Number.isSafeInteger(quantity) || quantity <= 0) throw new Error("La cantidad de ToGoo debe ser un entero mayor a 0.");
-    if (product.controlaStock && availableStockForProduct(product) < quantity) {
-      throw new Error(`Stock insuficiente: ${product.nombre}.`);
-    }
-    const sale = await confirmSale([{ productId, quantity, saleMode: "togoo" }]);
-    dom.toGooQuantity.value = "1";
-    setFlash(`Salida ToGoo registrada como venta #${sale.saleId}.`, "success");
-    await renderCashier();
-  } catch (error) {
-    setFlash(error.message || "No se pudo registrar la salida ToGoo.", "error");
-  } finally {
-    toGooInProgress = false;
+async function commitProduction(productId, quantityRaw) {
+  const { warnings } = await saveDailyProduction(productId, quantityRaw);
+  dom.productionQuantity.value = "";
+  if (warnings.length > 0) {
+    setFlash(`Produccion guardada. ${warnings.join(" ")}`, "warning");
+  } else {
+    setFlash("Produccion guardada.", "success");
   }
+  closeProductionSheet();
+  await renderCashier();
 }
 
 function bindEvents() {
   dom.navLinks.forEach((link) => link.addEventListener("click", () => showView(link.dataset.view)));
+  document.querySelectorAll(".sub-nav-link").forEach((link) => link.addEventListener("click", () => showGestionSubView(link.dataset.subview)));
 
   dom.salesSearch.addEventListener("input", () => filterProductButtons(dom.salesSearch, dom.salesSearchEmpty));
   dom.clearSalesSearch.addEventListener("click", () => {
@@ -779,9 +1000,18 @@ function bindEvents() {
     renderCurrentCart();
   });
   dom.confirmSale.addEventListener("click", handleConfirmSale);
-  dom.toGooForm.addEventListener("submit", handleToGooSale);
+  dom.cartModeTogooToggle.addEventListener("change", () => {
+    setCartMode(dom.cartModeTogooToggle.checked ? "togoo" : "normal");
+  });
   dom.closeProductionSheet.addEventListener("click", closeProductionSheet);
   dom.productionSheetBackdrop.addEventListener("click", closeProductionSheet);
+  dom.openNuevoPedido.addEventListener("click", openNuevoPedidoSheet);
+  dom.closePedidoSheet.addEventListener("click", closePedidoSheet);
+  dom.pedidoSheetBackdrop.addEventListener("click", closePedidoSheet);
+  dom.pedidoForm.addEventListener("submit", handleCrearPedido);
+  dom.pedidoPrecioTotal.addEventListener("input", () => {
+    pedidoPrecioEditadoManualmente = true;
+  });
   dom.closeStockAdjust.addEventListener("click", closeStockAdjustSheet);
   dom.stockAdjustBackdrop.addEventListener("click", closeStockAdjustSheet);
   dom.stockAdjustMinus.addEventListener("click", () => nudgeStockAdjust(-1));
@@ -793,17 +1023,56 @@ function bindEvents() {
     try {
       productionInProgress = true;
       if (!selectedProductionProductId) throw new Error("Selecciona un producto desde la lista.");
-      await saveDailyProduction(selectedProductionProductId, dom.productionQuantity.value);
-      dom.productionQuantity.value = "";
-      setFlash("Produccion guardada.", "success");
-      closeProductionSheet();
-      await renderCashier();
+      const quantityRaw = dom.productionQuantity.value;
+      const cantidad = Number(quantityRaw);
+      if (Number.isFinite(cantidad) && cantidad > 0) {
+        const faltantes = await previewProduccionInsumos(selectedProductionProductId, cantidad);
+        if (faltantes.length > 0) {
+          pendingProduction = { productId: selectedProductionProductId, quantityRaw, faltantes };
+          dom.insumoWarningText.textContent = faltantes
+            .map((f) => `${f.nombre}: quedaria en ${f.stockResultante}${f.unidad}.`)
+            .join(" ");
+          setInsumoWarningSheetOpen(true);
+          return;
+        }
+      }
+      await commitProduction(selectedProductionProductId, quantityRaw);
     } catch (error) {
       setFlash(error.message, "error");
     } finally {
       productionInProgress = false;
     }
   });
+
+  dom.insumoWarningContinue.addEventListener("click", async () => {
+    if (!pendingProduction || productionInProgress) return;
+    const { productId, quantityRaw } = pendingProduction;
+    closeInsumoWarningSheet();
+    try {
+      productionInProgress = true;
+      await commitProduction(productId, quantityRaw);
+    } catch (error) {
+      setFlash(error.message, "error");
+    } finally {
+      productionInProgress = false;
+    }
+  });
+
+  dom.insumoWarningUpdate.addEventListener("click", async () => {
+    const pending = pendingProduction;
+    closeInsumoWarningSheet();
+    closeProductionSheet();
+    showView("gestion");
+    showGestionSubView("insumos");
+    if (pending && pending.faltantes.length > 0) {
+      const insumos = await listInsumos();
+      const insumo = insumos.find((i) => i.id === pending.faltantes[0].insumoId);
+      if (insumo) openInsumoAjusteSheet(insumo);
+    }
+  });
+
+  dom.closeInsumoWarning.addEventListener("click", closeInsumoWarningSheet);
+  dom.insumoWarningBackdrop.addEventListener("click", closeInsumoWarningSheet);
 
   dom.productionCommentForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -821,7 +1090,6 @@ function bindEvents() {
     }
   });
 
-  dom.stockSearch.addEventListener("input", renderStockView);
   dom.stockAdjustForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (stockAdjustInProgress) return;
@@ -833,10 +1101,14 @@ function bindEvents() {
       if (!Number.isSafeInteger(newStock) || newStock < 0) {
         throw new Error("El nuevo stock debe ser un entero mayor o igual a 0.");
       }
-      await adjustStockLevel(product.id, newStock, dom.stockAdjustReason.value);
-      setFlash(`Stock de ${product.nombre} ajustado a ${newStock}.`, "success");
+      const { warnings } = await adjustStockLevel(product.id, newStock, dom.stockAdjustReason.value);
+      if (warnings.length > 0) {
+        setFlash(`Stock de ${product.nombre} ajustado a ${newStock}. ${warnings.join(" ")}`, "warning");
+      } else {
+        setFlash(`Stock de ${product.nombre} ajustado a ${newStock}.`, "success");
+      }
       closeStockAdjustSheet();
-      await renderStockView();
+      await renderProductionView();
       await renderCashier();
     } catch (error) {
       setFlash(error.message, "error");
@@ -1044,7 +1316,7 @@ function bindEvents() {
 
   window.addEventListener("hashchange", () => {
     const viewName = window.location.hash.replace("#", "") || "caja";
-    if (["caja", "produccion", "stock", "historial", "insumos", "calibrar", "recetas", "proveedores"].includes(viewName)) showView(viewName);
+    if (["caja", "pedidos", "produccion", "historial", "gestion"].includes(viewName)) showView(viewName);
   });
 }
 
@@ -1061,5 +1333,5 @@ export async function startApp() {
   dom.historyDate.value = todayISO();
   bindEvents();
   const initialView = window.location.hash.replace("#", "") || "caja";
-  showView(["caja", "produccion", "stock", "historial", "insumos", "calibrar", "recetas", "proveedores"].includes(initialView) ? initialView : "caja");
+  showView(["caja", "pedidos", "produccion", "historial", "gestion"].includes(initialView) ? initialView : "caja");
 }

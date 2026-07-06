@@ -143,3 +143,45 @@ export async function pushMovimientosInsumos(movimientos) {
     creado_en: m.creadoEn
   })));
 }
+
+// Pedidos: fuente de verdad en Supabase (no hay store espejo en IDB local),
+// para que un pedido creado desde cualquier dispositivo sea visible en el local.
+export async function fetchPedidos() {
+  return sbFetch(`/pedidos?select=*,detalle_pedido(*)&order=fecha_hora_retiro.asc`);
+}
+
+export async function pushPedido({ pedido, detalles }) {
+  const [pedidoRow] = await insert("pedidos", {
+    cliente_nombre: pedido.clienteNombre,
+    fecha_hora_retiro: pedido.fechaHoraRetiro,
+    pagado: pedido.pagado,
+    cortado_mitad: pedido.cortadoMitad,
+    aclaraciones: pedido.aclaraciones || null,
+    total_centavos: pedido.totalCentavos
+  });
+  const pedidoId = pedidoRow.id;
+
+  if (detalles.length > 0) {
+    await insert("detalle_pedido", detalles.map(d => ({
+      pedido_id: pedidoId,
+      producto_id: d.productoId,
+      producto_nombre: d.productoNombre,
+      cantidad: d.cantidad,
+      precio_unitario_centavos: d.precioUnitarioCentavos
+    })));
+  }
+
+  return pedidoId;
+}
+
+// Filtro de concurrencia: solo aplica la transicion si el pedido sigue en estadoEsperado.
+// result.length === 0 significa que otro dispositivo ya hizo esta transicion antes.
+export async function patchEstadoPedido(pedidoId, estadoNuevo, estadoEsperado, extraFields = {}) {
+  const result = await sbFetch(
+    `/pedidos?id=eq.${pedidoId}&estado=eq.${estadoEsperado}`,
+    "PATCH",
+    { estado: estadoNuevo, ...extraFields },
+    { "Prefer": "return=representation" }
+  );
+  return result.length > 0;
+}

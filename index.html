@@ -16,13 +16,10 @@
     <a class="brand" href="#caja" aria-label="Miga POS">Miga POS</a>
     <nav class="nav" aria-label="Principal">
       <button class="nav-link active" type="button" data-view="caja">Caja</button>
+      <button class="nav-link" type="button" data-view="pedidos">Pedidos</button>
       <button class="nav-link" type="button" data-view="produccion">Produccion</button>
-      <button class="nav-link" type="button" data-view="stock">Stock</button>
       <button class="nav-link" type="button" data-view="historial">Historial</button>
-      <button class="nav-link" type="button" data-view="insumos">Insumos</button>
-      <button class="nav-link" type="button" data-view="calibrar">Calibrar</button>
-      <button class="nav-link" type="button" data-view="recetas">Recetas</button>
-      <button class="nav-link" type="button" data-view="proveedores">Proveedores</button>
+      <button class="nav-link" type="button" data-view="gestion">Gestión</button>
     </nav>
   </header>
 
@@ -75,6 +72,11 @@
         <aside class="cart-panel" aria-label="Carrito">
           <div class="cart-header">
             <h2>Carrito</h2>
+            <label class="toggle-switch">
+              <input type="checkbox" id="cart-mode-togoo">
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">ToGoo</span>
+            </label>
             <button class="ghost-button" type="button" id="clear-cart">Vaciar</button>
           </div>
           <div id="cart-items" class="cart-items empty">Sin productos.</div>
@@ -89,24 +91,65 @@
           </div>
         </aside>
       </div>
+    </section>
 
-      <section class="form-section togoo-panel">
-        <div class="stock-forms-grid">
-          <form id="togoo-form" class="stock-form" novalidate>
-            <h2>ToGoo</h2>
-            <div class="production-entry">
-              <label class="quantity-field">
-                <span>Producto a descontar</span>
-                <select id="togoo-product" required></select>
+    <section class="view" id="view-pedidos" aria-labelledby="pedidos-title">
+      <section class="section-heading">
+        <h1 id="pedidos-title">Pedidos</h1>
+        <p>Pedidos por Instagram/WhatsApp, ordenados por hora de retiro.</p>
+      </section>
+
+      <button class="primary-button" type="button" id="open-nuevo-pedido">+ Nuevo pedido</button>
+
+      <div id="pedidos-grid" class="pedidos-grid"></div>
+
+      <section class="production-sheet-backdrop" id="pedido-sheet-backdrop" hidden></section>
+
+      <section class="form-section stock-adjust-sheet" id="pedido-sheet" aria-hidden="true">
+        <form id="pedido-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div>
+              <h2>Nuevo pedido</h2>
+              <p>Toca los productos para sumarlos, despues completa los datos de retiro.</p>
+            </div>
+            <button type="button" class="ghost-button compact" id="close-pedido-sheet" aria-label="Cerrar">Cerrar</button>
+          </div>
+
+          <div class="sheet-scroll-body">
+            <div id="pedido-product-picker" class="category-stack"></div>
+
+            <label class="quantity-field">
+              <span>Nombre del cliente</span>
+              <input id="pedido-cliente-nombre" type="text" placeholder="Nombre" required>
+            </label>
+            <label class="quantity-field">
+              <span>Fecha y hora de retiro</span>
+              <input id="pedido-fecha-hora" type="datetime-local" lang="es-ES" required>
+            </label>
+            <label class="quantity-field">
+              <span>Precio total (editable por promos fuera del sistema)</span>
+              <input id="pedido-precio-total" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+            </label>
+            <div class="pedido-checks-row">
+              <label class="pedido-check-field">
+                <input id="pedido-pagado" type="checkbox">
+                <span>Ya esta pagado</span>
               </label>
-              <label class="quantity-field">
-                <span>Cantidad</span>
-                <input id="togoo-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" required>
+              <label class="pedido-check-field">
+                <input id="pedido-cortado-mitad" type="checkbox">
+                <span>Cortado a la mitad</span>
               </label>
             </div>
-            <button class="primary-button secondary" type="submit">Registrar salida ToGoo</button>
-          </form>
-        </div>
+            <label class="quantity-field">
+              <span>Aclaraciones</span>
+              <textarea id="pedido-aclaraciones" class="comment-textarea" rows="2" placeholder="Sin cebolla, entregar en bolsa aparte, etc."></textarea>
+            </label>
+          </div>
+
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit" id="confirm-pedido" disabled>Crear pedido</button>
+          </div>
+        </form>
       </section>
     </section>
 
@@ -143,29 +186,20 @@
         </form>
       </section>
 
-      <section class="production-groups">
-        <section>
-          <h2 class="category-title">Sandwiches</h2>
-          <div class="stock-list" id="production-sandwiches-list"></div>
-          <form id="production-comment-form" class="stock-form production-comment-form" novalidate>
-            <label class="quantity-field">
-              <span>Comentarios</span>
-              <textarea id="production-comment-input" class="comment-textarea" rows="3" placeholder="Anota un error o detalle de produccion"></textarea>
-            </label>
-            <button class="primary-button secondary" type="submit">Guardar comentario</button>
-          </form>
-        </section>
-        <section>
-          <h2 class="category-title">Bolleria</h2>
-          <div class="stock-list" id="production-bolleria-list"></div>
-        </section>
-      </section>
-    </section>
+      <section class="production-sheet-backdrop" id="insumo-warning-backdrop" hidden></section>
 
-    <section class="view" id="view-stock" aria-labelledby="stock-title">
-      <section class="section-heading">
-        <h1 id="stock-title">Disponibilidad</h1>
-        <p>Stock actual por producto terminado.</p>
+      <section class="form-section stock-adjust-sheet" id="insumo-warning-sheet" aria-hidden="true">
+        <div class="production-sheet-header">
+          <div>
+            <h2>Falta stock de insumos</h2>
+            <p id="insumo-warning-text"></p>
+          </div>
+          <button type="button" class="ghost-button compact" id="close-insumo-warning" aria-label="Cerrar">Cerrar</button>
+        </div>
+        <div class="insumo-warning-actions">
+          <button type="button" class="ghost-button" id="insumo-warning-update">Actualizar stock</button>
+          <button type="button" class="primary-button" id="insumo-warning-continue">Continuar de todas formas</button>
+        </div>
       </section>
 
       <section class="production-sheet-backdrop" id="stock-adjust-backdrop" hidden></section>
@@ -204,11 +238,23 @@
         </form>
       </section>
 
-      <section class="stock-toolbar">
-        <input id="stock-search" class="search-input" type="search" placeholder="Buscar producto" autocomplete="off">
+      <section class="production-groups">
+        <section>
+          <h2 class="category-title">Sandwiches</h2>
+          <div class="stock-list" id="production-sandwiches-list"></div>
+          <form id="production-comment-form" class="stock-form production-comment-form" novalidate>
+            <label class="quantity-field">
+              <span>Comentarios</span>
+              <textarea id="production-comment-input" class="comment-textarea" rows="3" placeholder="Anota un error o detalle de produccion"></textarea>
+            </label>
+            <button class="primary-button secondary" type="submit">Guardar comentario</button>
+          </form>
+        </section>
+        <section>
+          <h2 class="category-title">Bolleria</h2>
+          <div class="stock-list" id="production-bolleria-list"></div>
+        </section>
       </section>
-
-      <section class="stock-list" id="stock-list"></section>
     </section>
 
     <section class="view" id="view-historial" aria-labelledby="historial-title">
@@ -240,7 +286,18 @@
       <section class="history-list" id="history-list"></section>
     </section>
 
-    <section class="view" id="view-insumos" aria-labelledby="insumos-title">
+    <section class="view" id="view-gestion" aria-labelledby="gestion-title">
+      <section class="section-heading">
+        <h1 id="gestion-title">Gestión</h1>
+      </section>
+      <nav class="nav sub-nav" aria-label="Gestión">
+        <button class="nav-link sub-nav-link active" type="button" data-subview="insumos">Insumos</button>
+        <button class="nav-link sub-nav-link" type="button" data-subview="calibrar">Calibrar</button>
+        <button class="nav-link sub-nav-link" type="button" data-subview="recetas">Recetas</button>
+        <button class="nav-link sub-nav-link" type="button" data-subview="proveedores">Proveedores</button>
+      </nav>
+
+      <section class="subview active" id="subview-insumos" aria-labelledby="insumos-title">
       <section class="section-heading">
         <h1 id="insumos-title">Insumos</h1>
         <p>Stock de insumos, compras y lista de lo que falta.</p>
@@ -334,7 +391,7 @@
       <div class="stock-list" id="insumos-list"></div>
     </section>
 
-    <section class="view" id="view-calibrar" aria-labelledby="calibrar-title">
+    <section class="subview" id="subview-calibrar" aria-labelledby="calibrar-title">
       <section class="section-heading">
         <h1 id="calibrar-title">Calibracion</h1>
         <p>Verificacion de stock real y ajuste del modelo de consumo por insumo.</p>
@@ -342,7 +399,7 @@
       <div id="calibrar-list"></div>
     </section>
 
-    <section class="view" id="view-recetas" aria-labelledby="recetas-title">
+    <section class="subview" id="subview-recetas" aria-labelledby="recetas-title">
       <section class="section-heading">
         <h1 id="recetas-title">Recetas</h1>
         <p>Ingredientes y cantidades por producto. Editá para corregir antes de que el modelo calibre solo.</p>
@@ -373,7 +430,7 @@
       <div id="recetas-list"></div>
     </section>
 
-    <section class="view" id="view-proveedores" aria-labelledby="proveedores-title">
+    <section class="subview" id="subview-proveedores" aria-labelledby="proveedores-title">
       <section class="section-heading">
         <h1 id="proveedores-title">Proveedores</h1>
         <p>Directorio de proveedores con precios extraidos de facturas reales.</p>
@@ -455,6 +512,7 @@
       </section>
 
       <div id="proveedores-list"></div>
+      </section>
     </section>
   </main>
 
