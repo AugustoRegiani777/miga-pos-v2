@@ -134,19 +134,66 @@ CREATE TABLE IF NOT EXISTS detalle_pedido (
 );
 
 -- =========================================
--- Deshabilitar RLS para uso sin auth
--- (habilitar y agregar policies cuando se implemente auth del dueño)
+-- RLS con Auth (usuario/contraseña, Supabase Auth)
+-- La app ahora exige login (3 cuentas: Augusto, Sharon, Guadalupe) antes de
+-- llamar a Supabase. El anon key sin sesion no puede hacer NADA — ni leer ni
+-- escribir ninguna tabla. Una vez logueado, cualquiera de las 3 cuentas puede
+-- ver y operar todo (no hay roles distintos entre ellas).
 -- =========================================
-ALTER TABLE ventas               DISABLE ROW LEVEL SECURITY;
-ALTER TABLE detalle_venta        DISABLE ROW LEVEL SECURITY;
-ALTER TABLE insumos              DISABLE ROW LEVEL SECURITY;
-ALTER TABLE recetas              DISABLE ROW LEVEL SECURITY;
-ALTER TABLE movimientos_insumos  DISABLE ROW LEVEL SECURITY;
-ALTER TABLE historial_calibraciones DISABLE ROW LEVEL SECURITY;
-ALTER TABLE produccion_diaria    DISABLE ROW LEVEL SECURITY;
-ALTER TABLE movimientos_stock    DISABLE ROW LEVEL SECURITY;
-ALTER TABLE pedidos              DISABLE ROW LEVEL SECURITY;
-ALTER TABLE detalle_pedido       DISABLE ROW LEVEL SECURITY;
+ALTER TABLE ventas               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE detalle_venta        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE insumos              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recetas              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE movimientos_insumos  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE historial_calibraciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE produccion_diaria    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE movimientos_stock    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pedidos              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE detalle_pedido       ENABLE ROW LEVEL SECURITY;
+
+-- Cualquier usuario autenticado (las 3 cuentas) puede leer, insertar y
+-- actualizar todas las tablas. Sin policy de DELETE en ningun lado a proposito:
+-- la app nunca borra filas, asi que nadie puede hacerlo ni por error ni con la
+-- sesion comprometida.
+CREATE POLICY ventas_select ON ventas FOR SELECT TO authenticated USING (true);
+CREATE POLICY ventas_insert ON ventas FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY ventas_update ON ventas FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY detalle_venta_select ON detalle_venta FOR SELECT TO authenticated USING (true);
+CREATE POLICY detalle_venta_insert ON detalle_venta FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY detalle_venta_update ON detalle_venta FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY insumos_select ON insumos FOR SELECT TO authenticated USING (true);
+CREATE POLICY insumos_insert ON insumos FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY insumos_update ON insumos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY recetas_select ON recetas FOR SELECT TO authenticated USING (true);
+CREATE POLICY recetas_insert ON recetas FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY recetas_update ON recetas FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY movimientos_insumos_select ON movimientos_insumos FOR SELECT TO authenticated USING (true);
+CREATE POLICY movimientos_insumos_insert ON movimientos_insumos FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY movimientos_insumos_update ON movimientos_insumos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY historial_calibraciones_select ON historial_calibraciones FOR SELECT TO authenticated USING (true);
+CREATE POLICY historial_calibraciones_insert ON historial_calibraciones FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY historial_calibraciones_update ON historial_calibraciones FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY produccion_diaria_select ON produccion_diaria FOR SELECT TO authenticated USING (true);
+CREATE POLICY produccion_diaria_insert ON produccion_diaria FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY produccion_diaria_update ON produccion_diaria FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY movimientos_stock_select ON movimientos_stock FOR SELECT TO authenticated USING (true);
+CREATE POLICY movimientos_stock_insert ON movimientos_stock FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY movimientos_stock_update ON movimientos_stock FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY pedidos_select ON pedidos FOR SELECT TO authenticated USING (true);
+CREATE POLICY pedidos_insert ON pedidos FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY pedidos_update ON pedidos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY detalle_pedido_select ON detalle_pedido FOR SELECT TO authenticated USING (true);
+CREATE POLICY detalle_pedido_insert ON detalle_pedido FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY detalle_pedido_update ON detalle_pedido FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 
 -- Índices útiles para queries del dashboard
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha               ON ventas(fecha);

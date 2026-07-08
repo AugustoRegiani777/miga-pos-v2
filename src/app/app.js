@@ -1,4 +1,5 @@
 import { exportSalesSummary, exportDailySummaryJSON } from "../modules/backup.js";
+import { signIn, signOut, restoreSession } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
@@ -75,6 +76,12 @@ let currentGestionSubView = "insumos";
 
 
 const dom = {
+  loginScreen: document.querySelector("#login-screen"),
+  loginForm: document.querySelector("#login-form"),
+  loginEmail: document.querySelector("#login-email"),
+  loginPassword: document.querySelector("#login-password"),
+  loginError: document.querySelector("#login-error"),
+  logoutButton: document.querySelector("#logout-button"),
   appMessage: document.querySelector("#app-message"),
   navLinks: document.querySelectorAll(".nav:not(.sub-nav) > .nav-link"),
   views: document.querySelectorAll(".view"),
@@ -1320,7 +1327,57 @@ function bindEvents() {
   });
 }
 
-export async function startApp() {
+function showLoginScreen(message) {
+  dom.loginScreen.hidden = false;
+  if (message) {
+    dom.loginError.textContent = message;
+    dom.loginError.hidden = false;
+  }
+}
+
+function hideLoginScreen() {
+  dom.loginScreen.hidden = true;
+  dom.loginError.hidden = true;
+}
+
+// Supabase Auth exige formato de email, pero en pantalla solo se pide el
+// nombre de usuario (augusto, sharon, guada) -- se le agrega el dominio aca
+// para que nadie tenga que escribir ni ver un "@" en la tablet.
+const LOGIN_DOMAIN = "migapos.local";
+
+function toLoginEmail(username) {
+  const clean = username.trim().toLowerCase();
+  return clean.includes("@") ? clean : `${clean}@${LOGIN_DOMAIN}`;
+}
+
+function bindAuthEvents() {
+  dom.loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    dom.loginError.hidden = true;
+    const email = toLoginEmail(dom.loginEmail.value);
+    const password = dom.loginPassword.value;
+    const submitBtn = dom.loginForm.querySelector("button[type='submit']");
+    try {
+      submitBtn.disabled = true;
+      await signIn(email, password);
+      dom.loginForm.reset();
+      hideLoginScreen();
+      await bootApp();
+    } catch {
+      dom.loginError.textContent = "Email o contraseña incorrectos.";
+      dom.loginError.hidden = false;
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  dom.logoutButton.addEventListener("click", () => {
+    signOut();
+    window.location.reload();
+  });
+}
+
+async function bootApp() {
   await seedDatabase();
   await seedInsumos();
   await seedProveedores();
@@ -1334,4 +1391,15 @@ export async function startApp() {
   bindEvents();
   const initialView = window.location.hash.replace("#", "") || "caja";
   showView(["caja", "pedidos", "produccion", "historial", "gestion"].includes(initialView) ? initialView : "caja");
+}
+
+export async function startApp() {
+  bindAuthEvents();
+  const session = await restoreSession();
+  if (session) {
+    hideLoginScreen();
+    await bootApp();
+  } else {
+    showLoginScreen();
+  }
 }

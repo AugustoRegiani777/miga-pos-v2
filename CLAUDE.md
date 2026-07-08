@@ -416,7 +416,6 @@ La función `listaDeComprasSmart()` en `aprovisionamiento.js`:
 ## 14. Crecimiento del proyecto — visión
 
 **Corto plazo (próximas semanas):**
-- Dashboard dueño (mobile read-only)
 - Completar sync de proveedores a Supabase
 - Auth magic link para acceso del dueño
 

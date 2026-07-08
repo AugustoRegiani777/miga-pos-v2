@@ -12,6 +12,23 @@
   <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body>
+  <section class="login-screen" id="login-screen">
+    <form id="login-form" class="login-form" novalidate>
+      <h1>Miga POS</h1>
+      <p>Iniciá sesión para continuar.</p>
+      <label class="quantity-field">
+        <span>Usuario</span>
+        <input id="login-email" type="text" autocomplete="username" placeholder="augusto" required>
+      </label>
+      <label class="quantity-field">
+        <span>Contraseña</span>
+        <input id="login-password" type="password" autocomplete="current-password" required>
+      </label>
+      <p class="login-error" id="login-error" hidden></p>
+      <button class="primary-button" type="submit">Entrar</button>
+    </form>
+  </section>
+
   <header class="topbar">
     <a class="brand" href="#caja" aria-label="Miga POS">Miga POS</a>
     <nav class="nav" aria-label="Principal">
@@ -21,6 +38,7 @@
       <button class="nav-link" type="button" data-view="historial">Historial</button>
       <button class="nav-link" type="button" data-view="gestion">Gestión</button>
     </nav>
+    <button class="ghost-button compact" type="button" id="logout-button">Cerrar sesión</button>
   </header>
 
   <main class="page">

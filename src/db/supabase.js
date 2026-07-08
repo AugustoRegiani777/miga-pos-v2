@@ -2,19 +2,106 @@ const SUPABASE_URL = "https://iknytfgqkdddtqpykgab.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlrbnl0Zmdxa2RkZHRxcHlrZ2FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NjY1OTQsImV4cCI6MjA5ODI0MjU5NH0.1qAJ71w1DaZu1i0G5an6AOuLwyu4_OU-uMvms4AjM0w";
 
 const BASE = `${SUPABASE_URL}/rest/v1`;
+const AUTH_BASE = `${SUPABASE_URL}/auth/v1`;
+const SESSION_KEY = "miga_auth_session";
 
-const HEADERS = {
-  "apikey": SUPABASE_ANON_KEY,
-  "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-  "Content-Type": "application/json"
-};
+// --- Sesion (login con usuario/contraseña, Supabase Auth) ---
+
+function loadSession() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); }
+  catch { return null; }
+}
+
+function saveSession(session) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
+  catch { /* localStorage lleno o no disponible */ }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignorar */ }
+}
+
+function sessionFromAuthResponse(data) {
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: Date.now() + (data.expires_in || 3600) * 1000
+  };
+}
+
+async function authFetch(path, body) {
+  const res = await fetch(`${AUTH_BASE}${path}`, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    throw new Error(data?.error_description || data?.msg || `Error de autenticacion (${res.status})`);
+  }
+  return data;
+}
+
+export async function signIn(email, password) {
+  const data = await authFetch("/token?grant_type=password", { email, password });
+  const session = sessionFromAuthResponse(data);
+  saveSession(session);
+  return session;
+}
+
+export function signOut() {
+  clearSession();
+}
+
+async function refreshSession(session) {
+  const data = await authFetch("/token?grant_type=refresh_token", { refresh_token: session.refreshToken });
+  const newSession = sessionFromAuthResponse(data);
+  saveSession(newSession);
+  return newSession;
+}
+
+// Se llama al arrancar la app: si hay sesion guardada, la refresca para
+// confirmar que el refresh token sigue vivo (el access token dura 1h, poco
+// importa si ya vencio con tal de que se pueda renovar).
+export async function restoreSession() {
+  const session = loadSession();
+  if (!session) return null;
+  try {
+    return await refreshSession(session);
+  } catch {
+    clearSession();
+    return null;
+  }
+}
+
+function authHeaders(accessToken) {
+  return {
+    "apikey": SUPABASE_ANON_KEY,
+    "Authorization": `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
+    "Content-Type": "application/json"
+  };
+}
 
 async function sbFetch(path, method = "GET", body = null, extra = {}) {
-  const res = await fetch(`${BASE}${path}`, {
+  let session = loadSession();
+  const doFetch = (accessToken) => fetch(`${BASE}${path}`, {
     method,
-    headers: { ...HEADERS, ...extra },
+    headers: { ...authHeaders(accessToken), ...extra },
     body: body != null ? JSON.stringify(body) : undefined
   });
+
+  let res = await doFetch(session?.accessToken);
+
+  if (res.status === 401 && session?.refreshToken) {
+    try {
+      session = await refreshSession(session);
+      res = await doFetch(session.accessToken);
+    } catch {
+      clearSession();
+    }
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Supabase ${method} ${path} → ${res.status}: ${text}`);
@@ -37,7 +124,8 @@ function upsert(table, data) {
 
 export async function testConnection() {
   try {
-    const res = await fetch(`${BASE}/ventas?select=id&limit=1`, { headers: HEADERS });
+    const session = loadSession();
+    const res = await fetch(`${BASE}/ventas?select=id&limit=1`, { headers: authHeaders(session?.accessToken) });
     return res.ok;
   } catch {
     return false;
