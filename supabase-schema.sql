@@ -152,9 +152,9 @@ ALTER TABLE pedidos              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detalle_pedido       ENABLE ROW LEVEL SECURITY;
 
 -- Cualquier usuario autenticado (las 3 cuentas) puede leer, insertar y
--- actualizar todas las tablas. Sin policy de DELETE en ningun lado a proposito:
--- la app nunca borra filas, asi que nadie puede hacerlo ni por error ni con la
--- sesion comprometida.
+-- actualizar todas las tablas. DELETE solo existe en pedidos/detalle_pedido
+-- (la app borra pedidos a proposito); el resto de las tablas no tiene policy
+-- de DELETE porque la app nunca borra esas filas.
 CREATE POLICY ventas_select ON ventas FOR SELECT TO authenticated USING (true);
 CREATE POLICY ventas_insert ON ventas FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY ventas_update ON ventas FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
@@ -190,10 +190,15 @@ CREATE POLICY movimientos_stock_update ON movimientos_stock FOR UPDATE TO authen
 CREATE POLICY pedidos_select ON pedidos FOR SELECT TO authenticated USING (true);
 CREATE POLICY pedidos_insert ON pedidos FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY pedidos_update ON pedidos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY pedidos_delete ON pedidos FOR DELETE TO authenticated USING (true);
 
+-- detalle_pedido necesita DELETE tambien: al borrar un pedido, el ON DELETE
+-- CASCADE de la FK borra sus lineas, y esa operacion en cascada igual pasa
+-- por RLS (necesita su propia policy de DELETE para poder completarse).
 CREATE POLICY detalle_pedido_select ON detalle_pedido FOR SELECT TO authenticated USING (true);
 CREATE POLICY detalle_pedido_insert ON detalle_pedido FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY detalle_pedido_update ON detalle_pedido FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY detalle_pedido_delete ON detalle_pedido FOR DELETE TO authenticated USING (true);
 
 -- Índices útiles para queries del dashboard
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha               ON ventas(fecha);

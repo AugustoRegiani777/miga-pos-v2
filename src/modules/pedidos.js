@@ -1,6 +1,13 @@
 import { requestToPromise, withStores } from "../db/idb.js";
 import { currentTime, todayISO } from "../utils/format.js";
-import { fetchPedidos as fetchPedidosSb, pushPedido, patchEstadoPedido } from "../db/supabase.js";
+import {
+  fetchPedidos as fetchPedidosSb,
+  pushPedido,
+  updatePedido,
+  replaceDetallesPedido,
+  deletePedido,
+  patchEstadoPedido
+} from "../db/supabase.js";
 
 function mapPedidoRow(row) {
   return {
@@ -32,7 +39,7 @@ export async function fetchPedidosDelDia() {
     .filter((p) => p.estado !== "entregado" || String(p.fechaHoraRetiro).slice(0, 10) === hoy);
 }
 
-export async function crearPedido({ clienteNombre, fechaHoraRetiro, pagado, cortadoMitad, aclaraciones, totalCentavos, items }) {
+function buildPedidoPayload({ clienteNombre, fechaHoraRetiro, pagado, cortadoMitad, aclaraciones, totalCentavos, items }) {
   const nombre = String(clienteNombre || "").trim();
   if (!nombre) throw new Error("Falta el nombre del cliente.");
   if (!fechaHoraRetiro) throw new Error("Falta la fecha y hora de retiro.");
@@ -46,7 +53,7 @@ export async function crearPedido({ clienteNombre, fechaHoraRetiro, pagado, cort
     precioUnitarioCentavos: item.precioUnitarioCentavos
   }));
 
-  return pushPedido({
+  return {
     pedido: {
       clienteNombre: nombre,
       fechaHoraRetiro,
@@ -56,7 +63,25 @@ export async function crearPedido({ clienteNombre, fechaHoraRetiro, pagado, cort
       totalCentavos
     },
     detalles
-  });
+  };
+}
+
+export async function crearPedido(input) {
+  const { pedido, detalles } = buildPedidoPayload(input);
+  return pushPedido({ pedido, detalles });
+}
+
+// Reemplaza nombre/fecha/items del pedido. Se puede editar en cualquier estado
+// (pendiente/listo/entregado) — si ya se descontó stock al marcarlo preparado,
+// eso no se toca aca, solo se corrige el registro del pedido en si.
+export async function editarPedido(pedidoId, input) {
+  const { pedido, detalles } = buildPedidoPayload(input);
+  await updatePedido(pedidoId, pedido);
+  await replaceDetallesPedido(pedidoId, detalles);
+}
+
+export async function eliminarPedido(pedidoId) {
+  await deletePedido(pedidoId);
 }
 
 // Marca el pedido "preparado". Esto es lo que descuenta el stock de mostrador

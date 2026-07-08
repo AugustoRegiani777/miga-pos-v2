@@ -46,6 +46,21 @@
       <p class="flash-message" id="app-message" hidden></p>
     </section>
 
+    <!-- Dialogo de confirmacion global — reemplaza window.confirm nativo -->
+    <section class="production-sheet-backdrop" id="confirm-dialog-backdrop" hidden></section>
+    <section class="form-section stock-adjust-sheet" id="confirm-dialog" aria-hidden="true">
+      <div class="production-sheet-header">
+        <div>
+          <h2 id="confirm-dialog-title">Confirmar</h2>
+          <p id="confirm-dialog-message"></p>
+        </div>
+      </div>
+      <div class="insumo-warning-actions">
+        <button type="button" class="ghost-button" id="confirm-dialog-cancel">Cancelar</button>
+        <button type="button" class="primary-button" id="confirm-dialog-accept">Confirmar</button>
+      </div>
+    </section>
+
     <!-- Sheet global de calibracion — visible desde cualquier tab -->
     <section class="production-sheet-backdrop" id="calibracion-backdrop" hidden></section>
     <section class="form-section stock-adjust-sheet" id="calibracion-sheet" aria-hidden="true">
@@ -57,16 +72,20 @@
           </div>
           <button type="button" class="ghost-button compact" id="close-calibracion" aria-label="Cerrar">Cerrar</button>
         </div>
-        <div class="production-selected-box" id="calibracion-selected">
-          <strong>Insumo</strong>
-          <small>Stock calculado: —</small>
+        <div class="sheet-scroll-body">
+          <div class="production-selected-box" id="calibracion-selected">
+            <strong>Insumo</strong>
+            <small>Stock calculado: —</small>
+          </div>
+          <label class="quantity-field">
+            <span id="calibracion-label">Stock real que contas</span>
+            <input id="calibracion-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+          </label>
+          <div id="calibracion-receta-settings"></div>
         </div>
-        <label class="quantity-field">
-          <span id="calibracion-label">Stock real que contas</span>
-          <input id="calibracion-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
-        </label>
-        <div id="calibracion-receta-settings"></div>
-        <button class="primary-button" type="submit">Guardar calibracion</button>
+        <div class="sheet-footer">
+          <button class="primary-button" type="submit">Guardar calibracion</button>
+        </div>
       </form>
     </section>
 
@@ -127,7 +146,7 @@
         <form id="pedido-form" class="stock-form" novalidate>
           <div class="production-sheet-header">
             <div>
-              <h2>Nuevo pedido</h2>
+              <h2 id="pedido-sheet-title">Nuevo pedido</h2>
               <p>Toca los productos para sumarlos, despues completa los datos de retiro.</p>
             </div>
             <button type="button" class="ghost-button compact" id="close-pedido-sheet" aria-label="Cerrar">Cerrar</button>
@@ -141,8 +160,12 @@
               <input id="pedido-cliente-nombre" type="text" placeholder="Nombre" required>
             </label>
             <label class="quantity-field">
-              <span>Fecha y hora de retiro</span>
-              <input id="pedido-fecha-hora" type="datetime-local" lang="es-ES" required>
+              <span>Fecha de retiro</span>
+              <input id="pedido-fecha-retiro" type="date" min="2026-01-01" max="2026-12-31" required>
+            </label>
+            <label class="quantity-field">
+              <span>Hora de retiro (formato 24hs)</span>
+              <input id="pedido-hora-retiro" type="text" inputmode="numeric" placeholder="21:00" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" maxlength="5" required>
             </label>
             <label class="quantity-field">
               <span>Precio total (editable por promos fuera del sistema)</span>
@@ -231,28 +254,32 @@
             </div>
             <button type="button" class="ghost-button compact" id="close-stock-adjust" aria-label="Cerrar">Cerrar</button>
           </div>
-          <div class="production-selected-box" id="stock-adjust-selected-box">
-            <strong>Selecciona un producto</strong>
-            <small>Stock actual: 0</small>
-          </div>
-          <div class="stock-adjust-controls">
-            <button type="button" class="stock-step-button" id="stock-adjust-minus" aria-label="Bajar uno">-</button>
+          <div class="sheet-scroll-body">
+            <div class="production-selected-box" id="stock-adjust-selected-box">
+              <strong>Selecciona un producto</strong>
+              <small>Stock actual: 0</small>
+            </div>
+            <div class="stock-adjust-controls">
+              <button type="button" class="stock-step-button" id="stock-adjust-minus" aria-label="Bajar uno">-</button>
+              <label class="quantity-field">
+                <span>Nuevo stock final</span>
+                <input id="stock-adjust-quantity" type="number" min="0" step="1" inputmode="numeric" required>
+              </label>
+              <button type="button" class="stock-step-button" id="stock-adjust-plus" aria-label="Subir uno">+</button>
+            </div>
             <label class="quantity-field">
-              <span>Nuevo stock final</span>
-              <input id="stock-adjust-quantity" type="number" min="0" step="1" inputmode="numeric" required>
+              <span>Motivo</span>
+              <select id="stock-adjust-reason" required>
+                <option value="Recuento de stock" selected>Recuento de stock</option>
+                <option value="Consumo">Consumo</option>
+                <option value="Error de produccion">Error de produccion</option>
+                <option value="Pedidos offline">Pedidos offline</option>
+              </select>
             </label>
-            <button type="button" class="stock-step-button" id="stock-adjust-plus" aria-label="Subir uno">+</button>
           </div>
-          <label class="quantity-field">
-            <span>Motivo</span>
-            <select id="stock-adjust-reason" required>
-              <option value="Recuento de stock" selected>Recuento de stock</option>
-              <option value="Consumo">Consumo</option>
-              <option value="Error de produccion">Error de produccion</option>
-              <option value="Pedidos offline">Pedidos offline</option>
-            </select>
-          </label>
-          <button class="primary-button" type="submit">Guardar ajuste</button>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar ajuste</button>
+          </div>
         </form>
       </section>
 
@@ -433,15 +460,19 @@
             </div>
             <button type="button" class="ghost-button compact" id="close-receta-edit">Cerrar</button>
           </div>
-          <label class="quantity-field">
-            <span id="receta-edit-label">Cantidad por unidad</span>
-            <input id="receta-edit-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
-          </label>
-          <label class="quantity-field">
-            <span>Motivo del cambio <span class="cal-muted">(opcional)</span></span>
-            <input id="receta-edit-motivo" type="text" placeholder="ej: decisión de calidad, ajuste de costos...">
-          </label>
-          <button class="primary-button" type="submit">Guardar</button>
+          <div class="sheet-scroll-body">
+            <label class="quantity-field">
+              <span id="receta-edit-label">Cantidad por unidad</span>
+              <input id="receta-edit-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+            </label>
+            <label class="quantity-field">
+              <span>Motivo del cambio <span class="cal-muted">(opcional)</span></span>
+              <input id="receta-edit-motivo" type="text" placeholder="ej: decisión de calidad, ajuste de costos...">
+            </label>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar</button>
+          </div>
         </form>
       </section>
 

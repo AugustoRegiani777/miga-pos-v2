@@ -22,7 +22,27 @@ function estadoPill(estado) {
   return { className: "out", label: "Pendiente" };
 }
 
-export function renderPedidosGrid(container, pedidos, { onMarcarListo, onMarcarEntregado }) {
+// Texto plano para compartir el pedido por mail/WhatsApp/lo que sea instalado.
+export function formatPedidoTicket(pedido) {
+  const lineas = [
+    `Pedido - ${pedido.clienteNombre}`,
+    `Retira: ${fmtRetiro(pedido.fechaHoraRetiro)}`,
+    "",
+    ...pedido.items.map((item) => `${item.cantidad}x ${item.nombre}`),
+    "",
+    `Total: ${centsToMoney(pedido.totalCentavos)}`,
+    pedido.pagado ? "Pagado" : "No pagado"
+  ];
+  if (pedido.cortadoMitad) lineas.push("Cortado a la mitad");
+  if (pedido.aclaraciones) lineas.push(`Aclaraciones: ${pedido.aclaraciones}`);
+  return lineas.join("\n");
+}
+
+const EDIT_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
+const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`;
+const SHARE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`;
+
+export function renderPedidosGrid(container, pedidos, { onMarcarListo, onMarcarEntregado, onEditarPedido, onBorrarPedido, onCompartirPedido, expandedPedidoIds, onToggleItems }) {
   container.innerHTML = "";
   if (pedidos.length === 0) {
     container.textContent = "No hay pedidos cargados.";
@@ -39,6 +59,11 @@ export function renderPedidosGrid(container, pedidos, { onMarcarListo, onMarcarE
         <strong></strong>
         <span class="stock-pill"></span>
       </div>
+      <div class="pedido-card-actions">
+        <button type="button" class="icon-button pedido-share" aria-label="Compartir pedido">${SHARE_ICON}</button>
+        <button type="button" class="icon-button pedido-edit" aria-label="Editar pedido">${EDIT_ICON}</button>
+        <button type="button" class="icon-button pedido-delete" aria-label="Borrar pedido">${DELETE_ICON}</button>
+      </div>
       <p class="pedido-retiro"></p>
       <p class="pedido-precio"></p>
       <p class="pedido-pago"></p>
@@ -48,6 +73,9 @@ export function renderPedidosGrid(container, pedidos, { onMarcarListo, onMarcarE
       <ul class="pedido-items" hidden></ul>
     `;
     card.querySelector("strong").textContent = pedido.clienteNombre;
+    card.querySelector(".pedido-share").addEventListener("click", () => onCompartirPedido(pedido));
+    card.querySelector(".pedido-edit").addEventListener("click", () => onEditarPedido(pedido));
+    card.querySelector(".pedido-delete").addEventListener("click", () => onBorrarPedido(pedido));
     const pillNode = card.querySelector(".stock-pill");
     pillNode.classList.add(pill.className);
     pillNode.textContent = pill.label;
@@ -68,11 +96,18 @@ export function renderPedidosGrid(container, pedidos, { onMarcarListo, onMarcarE
       itemsList.appendChild(el("li", "", `${item.cantidad}x ${item.nombre}`));
     }
 
+    // El estado de "expandido" vive fuera de este render (en app.js) para que
+    // sobreviva a los refrescos automaticos del polling — sin esto, cada 9s
+    // se perdia y la lista se volvia a cerrar sola.
+    const isExpanded = expandedPedidoIds?.has(pedido.id) ?? false;
+    itemsList.hidden = !isExpanded;
     const toggleBtn = card.querySelector(".pedido-toggle-items");
+    toggleBtn.textContent = isExpanded ? "Ocultar pedido" : "Ver pedido";
     toggleBtn.addEventListener("click", () => {
-      const isHidden = itemsList.hidden;
-      itemsList.hidden = !isHidden;
-      toggleBtn.textContent = isHidden ? "Ocultar pedido" : "Ver pedido";
+      onToggleItems(pedido.id);
+      const nowExpanded = expandedPedidoIds?.has(pedido.id) ?? false;
+      itemsList.hidden = !nowExpanded;
+      toggleBtn.textContent = nowExpanded ? "Ocultar pedido" : "Ver pedido";
     });
 
     if (pedido.estado === "pendiente") {

@@ -446,7 +446,49 @@ export async function salesForDay(fecha = todayISO()) {
     });
 
   return sales
-    .filter((sale) => sale.fecha === fecha)
+    .filter((sale) => sale.fecha === fecha && !sale.anulada)
     .sort((a, b) => b.id - a.id)
     .map((sale) => ({ ...sale, saleMode: sale.saleMode || "normal", detalles: detailsBySale.get(sale.id) || [] }));
+}
+
+// Deshace una venta: devuelve al stock cada producto vendido (las lineas
+// sinteticas como descuentos de combo, tarifa ToGoo o ajustes de precio de
+// pedido no tienen producto real, asi que se ignoran solas). Los insumos no
+// se tocan: se consumen en produccion, no en la venta, asi que no hay nada
+// que revertir ahi.
+// No se borra la venta ni su detalle — se marca "anulada". salesForDay() la
+// excluye del historial y de los totales (asi que desaparece igual para el
+// uso normal), pero el registro queda por si hace falta revisarlo despues.
+export async function undoSale(ventaId) {
+  const fecha = todayISO();
+  const now = new Date().toISOString();
+
+  return withStores(["ventas", "detalle_venta", "productos", "movimientos_stock"], "readwrite", async (stores) => {
+    const venta = await requestToPromise(stores.ventas.get(ventaId));
+    if (!venta) throw new Error("La venta no existe.");
+    if (venta.anulada) throw new Error("Esta venta ya fue deshecha antes.");
+
+    const detalles = await requestToPromise(stores.detalle_venta.index("ventaId").getAll(ventaId));
+
+    for (const detalle of detalles) {
+      const product = await requestToPromise(stores.productos.get(detalle.productoId));
+      if (product && product.controlaStock) {
+        const stockAnterior = product.stockActual;
+        const stockNuevo = stockAnterior + detalle.cantidad;
+        stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
+        stores.movimientos_stock.add({
+          productoId: product.id,
+          tipo: "devolucion",
+          cantidad: detalle.cantidad,
+          stockAnterior,
+          stockNuevo,
+          referencia: `Venta #${ventaId} anulada`,
+          fecha,
+          creadoEn: now
+        });
+      }
+    }
+
+    stores.ventas.put({ ...venta, anulada: true, anuladaEn: now });
+  });
 }

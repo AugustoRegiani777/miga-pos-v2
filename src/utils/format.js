@@ -49,6 +49,53 @@ export function downloadText(filename, text, mimeType) {
   URL.revokeObjectURL(url);
 }
 
+// Comparte texto plano (no un archivo) para que entre directo en el cuerpo
+// de un mail, WhatsApp, SMS, etc. — usa el share sheet nativo del dispositivo,
+// asi que funciona con lo que sea que tenga instalado la tablet (no hace
+// falta que la app tenga WhatsApp especificamente).
+export async function shareText(title, text) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text });
+      return "shared";
+    } catch (err) {
+      if (err.name === "AbortError") return "cancelled";
+    }
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return "clipboard";
+  }
+  return "unsupported";
+}
+
+// Abre el dialogo de impresion nativo del navegador con solo el texto del
+// ticket (no toda la pagina). Sirve hoy para imprimir en cualquier impresora
+// que ya tenga configurada el dispositivo (o guardar como PDF), y el dia que
+// consigan una impresora de tickets/termica, esto ya funciona sin tocar nada.
+export function printTicket(title, text) {
+  const printWindow = window.open("", "_blank", "width=380,height=600");
+  if (!printWindow) return false;
+  const safeText = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  printWindow.document.write(`<!doctype html>
+    <html>
+      <head>
+        <title>${title}</title>
+        <style>
+          body { font-family: "Courier New", monospace; font-size: 14px; white-space: pre-wrap; padding: 16px; }
+        </style>
+      </head>
+      <body>${safeText}</body>
+    </html>`);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+  return true;
+}
+
 export async function shareOrDownloadText(filename, text, mimeType) {
   const blob = new Blob([text], { type: mimeType });
   const file = new File([blob], filename, { type: mimeType });

@@ -5,9 +5,9 @@ import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProv
 import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
 import { trySyncVenta, trySyncMovimientosInsumos, trySyncInsumosSnapshot, trySyncRecetasSnapshot, setupAutoSync } from "../modules/sync.js";
 import { renderInsumosList, renderInsumoAjusteSelected, renderCalibracionAlert, renderListaComprasSmart, renderCalibracionDashboard, renderCalibracionRecetaSettings, renderRecetasEditor } from "../ui/render-aprovisionamiento.js";
-import { fetchPedidosDelDia, crearPedido, marcarPedidoListo, marcarPedidoEntregado } from "../modules/pedidos.js";
-import { renderPedidosGrid, renderPedidoProductPicker } from "../ui/render-pedidos.js";
-import { shareOrDownloadText } from "../utils/format.js";
+import { fetchPedidosDelDia, crearPedido, editarPedido, eliminarPedido, marcarPedidoListo, marcarPedidoEntregado } from "../modules/pedidos.js";
+import { renderPedidosGrid, renderPedidoProductPicker, formatPedidoTicket } from "../ui/render-pedidos.js";
+import { shareOrDownloadText, shareText, printTicket } from "../utils/format.js";
 import { calculateCartPricing } from "../modules/pricing.js";
 import {
   adjustStockLevel,
@@ -18,6 +18,7 @@ import {
   salesForDay,
   saveDailyProduction,
   saveProductionComment,
+  undoSale,
   TOGOO_FLAT_TOTAL_CENTAVOS
 } from "../modules/business.js";
 import { seedDatabase, getAll } from "../db/idb.js";
@@ -27,7 +28,8 @@ import {
   renderCart,
   renderHistory,
   renderProductGrid,
-  renderProduction
+  renderProduction,
+  formatVentaTicket
 } from "../ui/render.js";
 
 const cart = new Map();
@@ -67,9 +69,12 @@ let provProdMode = "add";
 let provEditSheetOpen = false;
 let provProdSheetOpen = false;
 const pedidoCart = new Map();
+const expandedPedidoIds = new Set();
 let pedidoSheetOpen = false;
+let editingPedidoId = null;
 let pedidoCreateInProgress = false;
 let pedidoActionInProgress = false;
+let undoSaleInProgress = false;
 let pedidosPollTimer = null;
 let pedidoPrecioEditadoManualmente = false;
 let currentGestionSubView = "insumos";
@@ -148,6 +153,12 @@ const dom = {
   insumosAjusteMotivos: document.querySelector("#insumos-ajuste-motivos"),
   insumosAjusteTipoCompra: document.querySelector("#insumo-tipo-compra"),
   insumosAjusteTipoAjuste: document.querySelector("#insumo-tipo-ajuste"),
+  confirmDialogBackdrop: document.querySelector("#confirm-dialog-backdrop"),
+  confirmDialog: document.querySelector("#confirm-dialog"),
+  confirmDialogTitle: document.querySelector("#confirm-dialog-title"),
+  confirmDialogMessage: document.querySelector("#confirm-dialog-message"),
+  confirmDialogAccept: document.querySelector("#confirm-dialog-accept"),
+  confirmDialogCancel: document.querySelector("#confirm-dialog-cancel"),
   calibracionSheet: document.querySelector("#calibracion-sheet"),
   calibracionBackdrop: document.querySelector("#calibracion-backdrop"),
   closeCalibracion: document.querySelector("#close-calibracion"),
@@ -196,6 +207,7 @@ const dom = {
   pedidosGrid: document.querySelector("#pedidos-grid"),
   openNuevoPedido: document.querySelector("#open-nuevo-pedido"),
   pedidoSheet: document.querySelector("#pedido-sheet"),
+  pedidoSheetTitle: document.querySelector("#pedido-sheet-title"),
   pedidoSheetBackdrop: document.querySelector("#pedido-sheet-backdrop"),
   closePedidoSheet: document.querySelector("#close-pedido-sheet"),
   pedidoForm: document.querySelector("#pedido-form"),
@@ -203,7 +215,8 @@ const dom = {
   pedidoCartItems: document.querySelector("#pedido-cart-items"),
   pedidoCartTotal: document.querySelector("#pedido-cart-total"),
   pedidoClienteNombre: document.querySelector("#pedido-cliente-nombre"),
-  pedidoFechaHora: document.querySelector("#pedido-fecha-hora"),
+  pedidoFechaRetiro: document.querySelector("#pedido-fecha-retiro"),
+  pedidoHoraRetiro: document.querySelector("#pedido-hora-retiro"),
   pedidoPrecioTotal: document.querySelector("#pedido-precio-total"),
   pedidoPagado: document.querySelector("#pedido-pagado"),
   pedidoCortadoMitad: document.querySelector("#pedido-cortado-mitad"),
@@ -219,6 +232,40 @@ function setFlash(text, type = "success") {
   setFlash.timeout = window.setTimeout(() => {
     dom.appMessage.hidden = true;
   }, 4200);
+}
+
+// Reemplaza window.confirm con un modal propio (mismo estilo que el resto de
+// la app). Devuelve una Promise<boolean> igual que confirm(), asi que se usa
+// con await en el lugar de la llamada.
+function confirmDialog({ title = "Confirmar", message, acceptText = "Confirmar", cancelText = "Cancelar" }) {
+  return new Promise((resolve) => {
+    dom.confirmDialogTitle.textContent = title;
+    dom.confirmDialogMessage.textContent = message;
+    dom.confirmDialogAccept.textContent = acceptText;
+    dom.confirmDialogCancel.textContent = cancelText;
+
+    function close(result) {
+      dom.confirmDialog.classList.remove("open");
+      dom.confirmDialog.setAttribute("aria-hidden", "true");
+      dom.confirmDialogBackdrop.classList.remove("open");
+      dom.confirmDialogBackdrop.hidden = true;
+      dom.confirmDialogAccept.removeEventListener("click", onAccept);
+      dom.confirmDialogCancel.removeEventListener("click", onCancel);
+      dom.confirmDialogBackdrop.removeEventListener("click", onCancel);
+      resolve(result);
+    }
+    function onAccept() { close(true); }
+    function onCancel() { close(false); }
+
+    dom.confirmDialogAccept.addEventListener("click", onAccept);
+    dom.confirmDialogCancel.addEventListener("click", onCancel);
+    dom.confirmDialogBackdrop.addEventListener("click", onCancel);
+
+    dom.confirmDialogBackdrop.hidden = false;
+    dom.confirmDialogBackdrop.classList.add("open");
+    dom.confirmDialog.classList.add("open");
+    dom.confirmDialog.setAttribute("aria-hidden", "false");
+  });
 }
 
 function setSaleMessage(text, ok = false) {
@@ -580,7 +627,54 @@ async function renderHistoryView() {
   );
   const totalStockAyer = totalSandwichesDisponibles - totalSandwichesProduced + totalSandwichesSold;
   dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
-  renderHistory(dom.historyList, sales);
+  renderHistory(dom.historyList, sales, {
+    onUndoSale: handleUndoSale,
+    onShareSale: handleShareSale,
+    onPrintSale: handlePrintSale
+  });
+}
+
+async function handleShareSale(sale) {
+  const texto = formatVentaTicket(sale);
+  const resultado = await shareText(texto.split("\n")[0], texto);
+  if (resultado === "clipboard") {
+    setFlash("El navegador no tiene para compartir directo: copiado al portapapeles.", "success");
+  } else if (resultado === "unsupported") {
+    setFlash("Este navegador no permite compartir ni copiar el ticket.", "error");
+  }
+}
+
+function handlePrintSale(sale) {
+  const texto = formatVentaTicket(sale);
+  const abierto = printTicket(texto.split("\n")[0], texto);
+  if (!abierto) {
+    setFlash("El navegador bloqueo la ventana de impresion. Revisa el bloqueador de pop-ups.", "error");
+  }
+}
+
+async function handleUndoSale(sale) {
+  if (undoSaleInProgress) return;
+  const confirmado = await confirmDialog({
+    title: "Deshacer venta",
+    message: `¿Deshacer ${saleTitleForConfirm(sale)}? Se va a reintegrar el stock vendido y la venta desaparece del historial. No se puede deshacer esta accion.`,
+    acceptText: "Deshacer venta"
+  });
+  if (!confirmado) return;
+  try {
+    undoSaleInProgress = true;
+    await undoSale(sale.id);
+    setFlash("Venta deshecha, stock reintegrado.", "success");
+    await renderHistoryView();
+    await renderCashier();
+  } catch (error) {
+    setFlash(error.message || "No se pudo deshacer la venta.", "error");
+  } finally {
+    undoSaleInProgress = false;
+  }
+}
+
+function saleTitleForConfirm(sale) {
+  return sale.origen === "pedido" && sale.clienteNombre ? `el pedido de ${sale.clienteNombre}` : `la venta #${sale.id}`;
 }
 
 function setInsumosAjusteTipo(tipo) {
@@ -819,7 +913,15 @@ async function renderPedidosView() {
     const pedidos = await fetchPedidosDelDia();
     renderPedidosGrid(dom.pedidosGrid, pedidos, {
       onMarcarListo: handleMarcarListo,
-      onMarcarEntregado: handleMarcarEntregado
+      onMarcarEntregado: handleMarcarEntregado,
+      onEditarPedido: openEditarPedidoSheet,
+      onBorrarPedido: handleBorrarPedido,
+      onCompartirPedido: handleCompartirPedido,
+      expandedPedidoIds,
+      onToggleItems: (pedidoId) => {
+        if (expandedPedidoIds.has(pedidoId)) expandedPedidoIds.delete(pedidoId);
+        else expandedPedidoIds.add(pedidoId);
+      }
     });
   } catch (error) {
     dom.pedidosGrid.textContent = "No se pudo cargar los pedidos (revisa la conexion).";
@@ -871,20 +973,54 @@ function decrementPedidoCartItem(productId) {
 }
 
 function openNuevoPedidoSheet() {
+  editingPedidoId = null;
   pedidoCart.clear();
   pedidoPrecioEditadoManualmente = false;
   dom.pedidoClienteNombre.value = "";
-  dom.pedidoFechaHora.value = "";
+  dom.pedidoFechaRetiro.value = "";
+  dom.pedidoHoraRetiro.value = "";
   dom.pedidoPrecioTotal.value = "";
   dom.pedidoPagado.checked = false;
   dom.pedidoCortadoMitad.checked = false;
   dom.pedidoAclaraciones.value = "";
+  dom.pedidoSheetTitle.textContent = "Nuevo pedido";
+  dom.confirmPedido.textContent = "Crear pedido";
+  renderPedidoSheetContents();
+  setPedidoSheetOpen(true);
+}
+
+// Reutiliza el mismo sheet de "Nuevo pedido", pre-llenado con los datos del
+// pedido existente. Al guardar, handleCrearPedido detecta editingPedidoId y
+// hace un update en vez de crear uno nuevo.
+function openEditarPedidoSheet(pedido) {
+  editingPedidoId = pedido.id;
+  pedidoCart.clear();
+  for (const item of pedido.items) {
+    pedidoCart.set(item.productId, {
+      productId: item.productId,
+      nombre: item.nombre,
+      cantidad: item.cantidad,
+      precioUnitarioCentavos: item.precioUnitarioCentavos
+    });
+  }
+  pedidoPrecioEditadoManualmente = true;
+  dom.pedidoClienteNombre.value = pedido.clienteNombre;
+  const retiro = new Date(pedido.fechaHoraRetiro);
+  dom.pedidoFechaRetiro.value = `${retiro.getFullYear()}-${String(retiro.getMonth() + 1).padStart(2, "0")}-${String(retiro.getDate()).padStart(2, "0")}`;
+  dom.pedidoHoraRetiro.value = `${String(retiro.getHours()).padStart(2, "0")}:${String(retiro.getMinutes()).padStart(2, "0")}`;
+  dom.pedidoPrecioTotal.value = (pedido.totalCentavos / 100).toFixed(2);
+  dom.pedidoPagado.checked = pedido.pagado;
+  dom.pedidoCortadoMitad.checked = pedido.cortadoMitad;
+  dom.pedidoAclaraciones.value = pedido.aclaraciones || "";
+  dom.pedidoSheetTitle.textContent = "Editar pedido";
+  dom.confirmPedido.textContent = "Guardar cambios";
   renderPedidoSheetContents();
   setPedidoSheetOpen(true);
 }
 
 function closePedidoSheet() {
   setPedidoSheetOpen(false);
+  editingPedidoId = null;
 }
 
 async function handleCrearPedido(event) {
@@ -893,24 +1029,64 @@ async function handleCrearPedido(event) {
   try {
     pedidoCreateInProgress = true;
     if (pedidoCart.size === 0) throw new Error("Agrega al menos un producto al pedido.");
-    if (!dom.pedidoFechaHora.value) throw new Error("Falta la fecha y hora de retiro.");
+    if (!dom.pedidoFechaRetiro.value) throw new Error("Falta la fecha de retiro.");
+    const horaRetiro = dom.pedidoHoraRetiro.value.trim();
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(horaRetiro)) {
+      throw new Error("La hora de retiro tiene que tener formato 24hs, ej: 21:00.");
+    }
     const totalCentavos = Math.round(parseFloat(dom.pedidoPrecioTotal.value) * 100);
-    await crearPedido({
+    const payload = {
       clienteNombre: dom.pedidoClienteNombre.value,
-      fechaHoraRetiro: new Date(dom.pedidoFechaHora.value).toISOString(),
+      fechaHoraRetiro: new Date(`${dom.pedidoFechaRetiro.value}T${horaRetiro}:00`).toISOString(),
       pagado: dom.pedidoPagado.checked,
       cortadoMitad: dom.pedidoCortadoMitad.checked,
       aclaraciones: dom.pedidoAclaraciones.value,
       totalCentavos,
       items: Array.from(pedidoCart.values())
-    });
-    setFlash("Pedido creado.", "success");
+    };
+    if (editingPedidoId) {
+      await editarPedido(editingPedidoId, payload);
+      setFlash("Pedido actualizado.", "success");
+    } else {
+      await crearPedido(payload);
+      setFlash("Pedido creado.", "success");
+    }
     closePedidoSheet();
     await renderPedidosView();
   } catch (error) {
-    setFlash(error.message || "No se pudo crear el pedido.", "error");
+    setFlash(error.message || "No se pudo guardar el pedido.", "error");
   } finally {
     pedidoCreateInProgress = false;
+  }
+}
+
+async function handleCompartirPedido(pedido) {
+  const texto = formatPedidoTicket(pedido);
+  const resultado = await shareText(`Pedido - ${pedido.clienteNombre}`, texto);
+  if (resultado === "clipboard") {
+    setFlash("El navegador no tiene para compartir directo: copiado al portapapeles.", "success");
+  } else if (resultado === "unsupported") {
+    setFlash("Este navegador no permite compartir ni copiar. Copialo a mano:\n" + texto, "error");
+  }
+}
+
+async function handleBorrarPedido(pedido) {
+  if (pedidoActionInProgress) return;
+  const confirmado = await confirmDialog({
+    title: "Borrar pedido",
+    message: `¿Borrar el pedido de ${pedido.clienteNombre}? Esta accion no se puede deshacer.`,
+    acceptText: "Borrar"
+  });
+  if (!confirmado) return;
+  try {
+    pedidoActionInProgress = true;
+    await eliminarPedido(pedido.id);
+    setFlash("Pedido borrado.", "success");
+    await renderPedidosView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo borrar el pedido.", "error");
+  } finally {
+    pedidoActionInProgress = false;
   }
 }
 

@@ -177,6 +177,19 @@ function saleTitle(sale) {
   return `Venta #${sale.id}`;
 }
 
+// Texto plano del ticket, para compartir (mail/WhatsApp/etc) o imprimir.
+export function formatVentaTicket(sale) {
+  const lineas = [
+    saleTitle(sale),
+    `${sale.fecha} - ${sale.hora}`,
+    "",
+    ...sale.detalles.map((d) => `${d.cantidad}x ${d.productoNombre} - ${centsToMoney(d.subtotalCentavos)}`),
+    "",
+    `Total: ${centsToMoney(sale.totalCentavos)}`
+  ];
+  return lineas.join("\n");
+}
+
 function renderProductionRow(product, selectedProductId, onProductionProductSelect, onAdjustStock) {
   const wrapper = el("div", "production-row-wrapper");
   const stockBtn = el("button", "ghost-button compact production-stock-button", "Modificar stock");
@@ -233,7 +246,7 @@ export function renderProduction(snapshot, selectedBox, selectedProductId, onPro
   }
 }
 
-export function renderHistory(container, sales) {
+export function renderHistory(container, sales, { onUndoSale, onShareSale, onPrintSale } = {}) {
   container.innerHTML = "";
   if (sales.length === 0) {
     container.appendChild(el("p", "empty-state", "No hay ventas registradas para esta fecha."));
@@ -251,6 +264,11 @@ export function renderHistory(container, sales) {
         <strong></strong>
       </div>
       <ul></ul>
+      <div class="sale-actions">
+        <button type="button" class="ghost-button compact sale-share">Compartir</button>
+        <button type="button" class="ghost-button compact sale-print">Imprimir</button>
+        <button type="button" class="ghost-button compact sale-undo">Deshacer venta</button>
+      </div>
     `;
     row.querySelector("h2").textContent = saleTitle(sale);
     row.querySelector("p").textContent = `${sale.fecha} - ${sale.hora}`;
@@ -261,6 +279,9 @@ export function renderHistory(container, sales) {
       item.textContent = `${detail.cantidad} x ${detail.productoNombre} - ${centsToMoney(detail.subtotalCentavos)}`;
       list.appendChild(item);
     }
+    row.querySelector(".sale-share").addEventListener("click", () => onShareSale?.(sale));
+    row.querySelector(".sale-print").addEventListener("click", () => onPrintSale?.(sale));
+    row.querySelector(".sale-undo").addEventListener("click", () => onUndoSale?.(sale));
     container.appendChild(row);
   }
 }

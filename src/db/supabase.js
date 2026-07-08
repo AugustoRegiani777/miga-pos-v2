@@ -30,11 +30,20 @@ function sessionFromAuthResponse(data) {
 }
 
 async function authFetch(path, body) {
-  const res = await fetch(`${AUTH_BASE}${path}`, {
-    method: "POST",
-    headers: { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
+  let res;
+  try {
+    res = await fetch(`${AUTH_BASE}${path}`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    // fetch tira una excepcion cuando no hay red (no un status de error) —
+    // se marca aparte para no confundirla con un rechazo real del servidor.
+    const networkError = new Error("Sin conexion con el servidor de autenticacion.");
+    networkError.isNetworkError = true;
+    throw networkError;
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
@@ -64,12 +73,18 @@ async function refreshSession(session) {
 // Se llama al arrancar la app: si hay sesion guardada, la refresca para
 // confirmar que el refresh token sigue vivo (el access token dura 1h, poco
 // importa si ya vencio con tal de que se pueda renovar).
+// Offline-first: si el refresh falla porque NO HAY RED, no se cierra la
+// sesion (la app tiene que poder abrirse sin wifi) — se confia en la sesion
+// guardada y se reintenta sola la proxima vez que haya una llamada a
+// Supabase. Solo se cierra sesion si el servidor confirma que el refresh
+// token es invalido (rechazo real, no un problema de conexion).
 export async function restoreSession() {
   const session = loadSession();
   if (!session) return null;
   try {
     return await refreshSession(session);
-  } catch {
+  } catch (error) {
+    if (error.isNetworkError) return session;
     clearSession();
     return null;
   }
@@ -260,6 +275,37 @@ export async function pushPedido({ pedido, detalles }) {
   }
 
   return pedidoId;
+}
+
+export async function updatePedido(pedidoId, pedido) {
+  return sbFetch(`/pedidos?id=eq.${pedidoId}`, "PATCH", {
+    cliente_nombre: pedido.clienteNombre,
+    fecha_hora_retiro: pedido.fechaHoraRetiro,
+    pagado: pedido.pagado,
+    cortado_mitad: pedido.cortadoMitad,
+    aclaraciones: pedido.aclaraciones || null,
+    total_centavos: pedido.totalCentavos
+  });
+}
+
+// Reemplaza todas las lineas del pedido (borra las viejas, inserta las nuevas)
+// en vez de tratar de calcular un diff — mas simple y sin casos raros.
+export async function replaceDetallesPedido(pedidoId, detalles) {
+  await sbFetch(`/detalle_pedido?pedido_id=eq.${pedidoId}`, "DELETE");
+  if (detalles.length > 0) {
+    await insert("detalle_pedido", detalles.map(d => ({
+      pedido_id: pedidoId,
+      producto_id: d.productoId,
+      producto_nombre: d.productoNombre,
+      cantidad: d.cantidad,
+      precio_unitario_centavos: d.precioUnitarioCentavos
+    })));
+  }
+}
+
+// Borra el pedido; detalle_pedido se borra en cascada (ON DELETE CASCADE).
+export async function deletePedido(pedidoId) {
+  return sbFetch(`/pedidos?id=eq.${pedidoId}`, "DELETE");
 }
 
 // Filtro de concurrencia: solo aplica la transicion si el pedido sigue en estadoEsperado.

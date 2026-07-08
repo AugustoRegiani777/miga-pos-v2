@@ -602,7 +602,7 @@ button {
 .insumo-warning-actions {
   display: flex;
   gap: 10px;
-  padding: 0 18px 18px;
+  padding: 14px 18px 18px;
 }
 
 .insumo-warning-actions button {
@@ -783,13 +783,50 @@ button {
   gap: 10px;
 }
 
+.pedido-card-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-button.pedido-delete {
+  color: var(--out);
+}
+
 .pedido-items {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 10px 12px;
   display: grid;
-  gap: 4px;
+  gap: 0;
   color: var(--ink);
+  background: var(--page);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.pedido-items li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pedido-items li:last-child {
+  border-bottom: none;
 }
 
 .pedido-retiro,
@@ -1145,6 +1182,22 @@ button {
   margin: 10px 0 0;
   padding-left: 18px;
   color: var(--muted);
+}
+
+.sale-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sale-actions button {
+  flex: 1;
+  min-width: 110px;
+}
+
+.sale-undo {
+  color: var(--out);
 }
 
 .backup-panel {
