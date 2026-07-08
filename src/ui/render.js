@@ -1,4 +1,5 @@
 import { centsToMoney, normalizeText, stockStatus } from "../utils/format.js";
+import { SHARE_ICON, PRINT_ICON, UNDO_ICON } from "./icons.js";
 
 function el(tagName, className, text) {
   const node = document.createElement(tagName);
@@ -265,9 +266,9 @@ export function renderHistory(container, sales, { onUndoSale, onShareSale, onPri
       </div>
       <ul></ul>
       <div class="sale-actions">
-        <button type="button" class="ghost-button compact sale-share">Compartir</button>
-        <button type="button" class="ghost-button compact sale-print">Imprimir</button>
-        <button type="button" class="ghost-button compact sale-undo">Deshacer venta</button>
+        <button type="button" class="icon-button sale-share" aria-label="Compartir venta">${SHARE_ICON}</button>
+        <button type="button" class="icon-button sale-print" aria-label="Imprimir ticket">${PRINT_ICON}</button>
+        <button type="button" class="icon-button sale-undo" aria-label="Deshacer venta">${UNDO_ICON}</button>
       </div>
     `;
     row.querySelector("h2").textContent = saleTitle(sale);

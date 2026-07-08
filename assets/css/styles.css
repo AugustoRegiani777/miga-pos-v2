@@ -1186,17 +1186,12 @@ button {
 
 .sale-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px;
   margin-top: 10px;
 }
 
-.sale-actions button {
-  flex: 1;
-  min-width: 110px;
-}
-
-.sale-undo {
+.icon-button.sale-undo {
   color: var(--out);
 }
 
