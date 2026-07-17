@@ -3,7 +3,10 @@ import {
   pushCalibracion,
   pushInsumosSnapshot,
   pushRecetasSnapshot,
-  pushMovimientosInsumos
+  pushMovimientosInsumos,
+  pushStockProductos,
+  pushProduccionDiaria,
+  updateVentaAnulada
 } from "../db/supabase.js";
 
 const QUEUE_KEY = "miga_sync_queue";
@@ -40,6 +43,12 @@ async function executeOp(op) {
       return pushRecetasSnapshot(op.payload);
     case "movimientos_insumos":
       return pushMovimientosInsumos(op.payload);
+    case "stock_productos":
+      return pushStockProductos(op.payload);
+    case "produccion_diaria":
+      return pushProduccionDiaria(op.payload);
+    case "venta_anulada":
+      return updateVentaAnulada(op.payload.fecha, op.payload.creadoEn);
     default:
       throw new Error(`Tipo de sync desconocido: ${op.type}`);
   }
@@ -95,6 +104,20 @@ export function trySyncRecetasSnapshot(recetas) {
 
 export function trySyncMovimientosInsumos(movimientos) {
   return tryNow({ type: "movimientos_insumos", payload: movimientos });
+}
+
+// Para "modo consulta" en otros dispositivos: mantiene stock_productos y
+// produccion_diaria al dia en Supabase despues de cada venta/produccion/ajuste.
+export function trySyncStockProductos(productos) {
+  return tryNow({ type: "stock_productos", payload: productos });
+}
+
+export function trySyncProduccionDiaria(rows) {
+  return tryNow({ type: "produccion_diaria", payload: rows });
+}
+
+export function trySyncVentaAnulada({ fecha, creadoEn }) {
+  return tryNow({ type: "venta_anulada", payload: { fecha, creadoEn } });
 }
 
 // Retry automático al recuperar conexión

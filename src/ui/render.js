@@ -247,6 +247,52 @@ export function renderProduction(snapshot, selectedBox, selectedProductId, onPro
   }
 }
 
+// "Modo consulta": listas de solo lectura, sin formularios ni carrito, para
+// dispositivos que solo miran el estado del local (no operan).
+export function renderStockConsulta(container, products) {
+  container.innerHTML = "";
+  if (products.length === 0) {
+    container.appendChild(el("p", "empty-state", "Sin productos."));
+    return;
+  }
+  for (const product of products) {
+    const row = el("article", "stock-row");
+    row.innerHTML = `
+      <div>
+        <h2></h2>
+        <p></p>
+      </div>
+      <strong></strong>
+    `;
+    row.querySelector("h2").textContent = product.nombre;
+    row.querySelector("p").textContent = centsToMoney(product.precioCentavos);
+    row.querySelector("strong").textContent = product.stockActual;
+    container.appendChild(row);
+  }
+}
+
+export function renderProduccionConsulta(container, products) {
+  container.innerHTML = "";
+  if (products.length === 0) {
+    container.appendChild(el("p", "empty-state", "Sin productos."));
+    return;
+  }
+  for (const product of products) {
+    const row = el("article", "stock-row");
+    row.innerHTML = `
+      <div>
+        <h2></h2>
+        <div class="stock-row-total"></div>
+      </div>
+      <strong></strong>
+    `;
+    row.querySelector("h2").textContent = product.nombre;
+    row.querySelector(".stock-row-total").textContent = `Producido hoy: ${product.cantidadProducida}`;
+    row.querySelector("strong").textContent = product.stockActual;
+    container.appendChild(row);
+  }
+}
+
 export function renderHistory(container, sales, { onUndoSale, onShareSale, onPrintSale } = {}) {
   container.innerHTML = "";
   if (sales.length === 0) {
@@ -282,7 +328,11 @@ export function renderHistory(container, sales, { onUndoSale, onShareSale, onPri
     }
     row.querySelector(".sale-share").addEventListener("click", () => onShareSale?.(sale));
     row.querySelector(".sale-print").addEventListener("click", () => onPrintSale?.(sale));
-    row.querySelector(".sale-undo").addEventListener("click", () => onUndoSale?.(sale));
+    if (onUndoSale) {
+      row.querySelector(".sale-undo").addEventListener("click", () => onUndoSale(sale));
+    } else {
+      row.querySelector(".sale-undo").remove();
+    }
     container.appendChild(row);
   }
 }

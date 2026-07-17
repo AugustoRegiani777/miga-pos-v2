@@ -199,7 +199,12 @@ export async function marcarPedidoListo(pedido) {
 
     return {
       _syncPayload: {
-        venta: { fecha, hora, totalCentavos, saleMode: "normal", creadoEn: now },
+        venta: {
+          fecha, hora, totalCentavos, saleMode: "normal", creadoEn: now,
+          origen: "pedido",
+          pedidoId: pedido.id,
+          clienteNombre: pedido.clienteNombre
+        },
         detalles: _detallesSync,
         movimientosStock: _movStockSync
       }

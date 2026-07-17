@@ -38,6 +38,7 @@
       <button class="nav-link" type="button" data-view="historial">Historial</button>
       <button class="nav-link" type="button" data-view="gestion">Gestión</button>
     </nav>
+    <button class="ghost-button compact" type="button" id="modo-consulta-toggle">Modo consulta: OFF</button>
     <button class="ghost-button compact" type="button" id="logout-button">Cerrar sesión</button>
   </header>
 
@@ -90,7 +91,8 @@
     </section>
 
     <section class="view active" id="view-caja" aria-labelledby="caja-title">
-      <div class="sales-layout">
+      <div class="stock-list" id="caja-consulta" hidden></div>
+      <div class="sales-layout" id="sales-layout">
         <div class="products-panel">
           <div class="section-heading">
             <h1 id="caja-title">Caja</h1>
@@ -283,7 +285,9 @@
         </form>
       </section>
 
-      <section class="production-groups">
+      <div class="stock-list" id="produccion-consulta" hidden></div>
+
+      <section class="production-groups" id="production-groups">
         <section>
           <h2 class="category-title">Sandwiches</h2>
           <div class="stock-list" id="production-sandwiches-list"></div>
@@ -316,7 +320,7 @@
         <button class="primary-button compact" type="submit">Ver</button>
       </form>
 
-      <section class="backup-panel">
+      <section class="backup-panel" id="historial-backup-panel">
         <div>
           <h2>Exportacion local</h2>
           <p>Exporta el cierre del dia en TXT (para imprimir/compartir) o JSON (para analisis de datos).</p>

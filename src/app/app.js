@@ -1,9 +1,18 @@
 import { exportSalesSummary, exportDailySummaryJSON } from "../modules/backup.js";
-import { signIn, signOut, restoreSession } from "../db/supabase.js";
+import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
-import { trySyncVenta, trySyncMovimientosInsumos, trySyncInsumosSnapshot, trySyncRecetasSnapshot, setupAutoSync } from "../modules/sync.js";
+import {
+  trySyncVenta,
+  trySyncMovimientosInsumos,
+  trySyncInsumosSnapshot,
+  trySyncRecetasSnapshot,
+  trySyncStockProductos,
+  trySyncProduccionDiaria,
+  trySyncVentaAnulada,
+  setupAutoSync
+} from "../modules/sync.js";
 import { renderInsumosList, renderInsumoAjusteSelected, renderCalibracionAlert, renderListaComprasSmart, renderCalibracionDashboard, renderCalibracionRecetaSettings, renderRecetasEditor } from "../ui/render-aprovisionamiento.js";
 import { fetchPedidosDelDia, crearPedido, editarPedido, eliminarPedido, marcarPedidoListo, marcarPedidoEntregado } from "../modules/pedidos.js";
 import { renderPedidosGrid, renderPedidoProductPicker, formatPedidoTicket } from "../ui/render-pedidos.js";
@@ -29,7 +38,9 @@ import {
   renderHistory,
   renderProductGrid,
   renderProduction,
-  formatVentaTicket
+  formatVentaTicket,
+  renderStockConsulta,
+  renderProduccionConsulta
 } from "../ui/render.js";
 
 const cart = new Map();
@@ -79,6 +90,24 @@ let pedidosPollTimer = null;
 let pedidoPrecioEditadoManualmente = false;
 let currentGestionSubView = "insumos";
 
+// "Modo consulta": flag por dispositivo (no por cuenta) para los aparatos que
+// solo miran el local (Sharon, Guadalupe, etc). En ese modo, Caja/Produccion/
+// Historial leen de Supabase en vez de IDB local y esconden las acciones de
+// escritura. El dispositivo que realmente opera (la tablet del local) lo deja
+// apagado y sigue funcionando exactamente igual que siempre.
+const MODO_CONSULTA_KEY = "miga_modo_consulta";
+let consultaPollTimer = null;
+
+function isModoConsulta() {
+  try { return localStorage.getItem(MODO_CONSULTA_KEY) === "1"; }
+  catch { return false; }
+}
+
+function setModoConsulta(activo) {
+  try { localStorage.setItem(MODO_CONSULTA_KEY, activo ? "1" : "0"); }
+  catch { /* localStorage no disponible — ignorar */ }
+}
+
 
 const dom = {
   loginScreen: document.querySelector("#login-screen"),
@@ -87,10 +116,13 @@ const dom = {
   loginPassword: document.querySelector("#login-password"),
   loginError: document.querySelector("#login-error"),
   logoutButton: document.querySelector("#logout-button"),
+  modoConsultaToggle: document.querySelector("#modo-consulta-toggle"),
   appMessage: document.querySelector("#app-message"),
   navLinks: document.querySelectorAll(".nav:not(.sub-nav) > .nav-link"),
   views: document.querySelectorAll(".view"),
   productCategories: document.querySelector("#product-categories"),
+  salesLayout: document.querySelector("#sales-layout"),
+  cajaConsulta: document.querySelector("#caja-consulta"),
   salesSearch: document.querySelector("#sales-search"),
   clearSalesSearch: document.querySelector("#clear-sales-search"),
   salesSearchEmpty: document.querySelector("#sales-search-empty"),
@@ -113,6 +145,8 @@ const dom = {
   productionQuantity: document.querySelector("#production-quantity"),
   productionSandwichesList: document.querySelector("#production-sandwiches-list"),
   productionBolleriaList: document.querySelector("#production-bolleria-list"),
+  productionGroups: document.querySelector("#production-groups"),
+  produccionConsulta: document.querySelector("#produccion-consulta"),
   insumoWarningSheet: document.querySelector("#insumo-warning-sheet"),
   insumoWarningBackdrop: document.querySelector("#insumo-warning-backdrop"),
   closeInsumoWarning: document.querySelector("#close-insumo-warning"),
@@ -132,6 +166,7 @@ const dom = {
   historyDate: document.querySelector("#history-date"),
   historyProductionText: document.querySelector("#history-production-text"),
   historyList: document.querySelector("#history-list"),
+  historialBackupPanel: document.querySelector("#historial-backup-panel"),
   exportSalesSummary: document.querySelector("#export-sales-summary"),
   exportSalesJson: document.querySelector("#export-sales-json"),
   insumosList: document.querySelector("#insumos-list"),
@@ -346,6 +381,20 @@ function startPedidosPolling() {
   pedidosPollTimer = window.setInterval(() => { renderPedidosView(); }, 9000);
 }
 
+const CONSULTA_VIEWS = ["caja", "produccion", "historial"];
+
+function stopConsultaPolling() {
+  if (consultaPollTimer) {
+    window.clearInterval(consultaPollTimer);
+    consultaPollTimer = null;
+  }
+}
+
+function startConsultaPolling() {
+  stopConsultaPolling();
+  consultaPollTimer = window.setInterval(() => { refreshView(); }, 9000);
+}
+
 function closeAllGestionSheets() {
   setInsumosAjusteSheetOpen(false);
   setInsumosCalibracionSheetOpen(false);
@@ -383,11 +432,15 @@ function showView(viewName) {
     setPedidoSheetOpen(false);
     stopPedidosPolling();
   }
+  if (!CONSULTA_VIEWS.includes(viewName)) {
+    stopConsultaPolling();
+  }
   dom.views.forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
   dom.navLinks.forEach((link) => link.classList.toggle("active", link.dataset.view === viewName));
   window.location.hash = viewName;
   refreshView(viewName);
   if (viewName === "pedidos") startPedidosPolling();
+  if (isModoConsulta() && CONSULTA_VIEWS.includes(viewName)) startConsultaPolling();
 }
 
 function quantityInCartForProduct(productId) {
@@ -498,13 +551,55 @@ async function loadProducts() {
   [categories, products] = await Promise.all([listCategories(), listProducts()]);
 }
 
+// Catalogo local (nombre/precio/categoria, igual en todos los dispositivos
+// via seed) con el stock actual pisado por el ultimo valor que pusheo el
+// dispositivo que realmente opera. Solo se usa para "modo consulta".
+async function catalogoConStockRemoto() {
+  const [catalogo, stockRemoto] = await Promise.all([listProducts(), fetchStockProductos()]);
+  const stockById = new Map(stockRemoto.map((row) => [row.id, Number(row.stock_actual)]));
+  return catalogo.map((product) => ({
+    ...product,
+    stockActual: stockById.has(product.id) ? stockById.get(product.id) : product.stockActual
+  }));
+}
+
 async function renderCashier() {
+  if (isModoConsulta()) {
+    dom.salesLayout.hidden = true;
+    dom.cajaConsulta.hidden = false;
+    try {
+      const catalogo = await catalogoConStockRemoto();
+      renderStockConsulta(dom.cajaConsulta, catalogo.filter((p) => p.activo && p.controlaStock));
+    } catch {
+      dom.cajaConsulta.textContent = "No se pudo traer el stock (revisa la conexion).";
+    }
+    return;
+  }
+  dom.salesLayout.hidden = false;
+  dom.cajaConsulta.hidden = true;
   await loadProducts();
   renderReservedStock();
   renderCurrentCart();
 }
 
 async function renderProductionView() {
+  if (isModoConsulta()) {
+    dom.productionGroups.hidden = true;
+    dom.produccionConsulta.hidden = false;
+    try {
+      const [catalogo, produccionRows] = await Promise.all([catalogoConStockRemoto(), fetchProduccionDiaria(todayISO())]);
+      const producidoPorProducto = new Map(produccionRows.map((row) => [row.producto_id, row.cantidad]));
+      const productosProduccion = catalogo
+        .filter((p) => p.activo && p.controlaStock && (p.categoriaId === "sandwiches" || p.categoriaId === "bolleria"))
+        .map((p) => ({ ...p, cantidadProducida: producidoPorProducto.get(p.id) || 0 }));
+      renderProduccionConsulta(dom.produccionConsulta, productosProduccion);
+    } catch {
+      dom.produccionConsulta.textContent = "No se pudo traer la produccion (revisa la conexion).";
+    }
+    return;
+  }
+  dom.productionGroups.hidden = false;
+  dom.produccionConsulta.hidden = true;
   await loadProducts();
   const snapshot = await productionSnapshot();
   if (selectedProductionProductId && !snapshot.productionProducts.some((product) => product.id === selectedProductionProductId)) {
@@ -604,9 +699,66 @@ function nudgeStockAdjust(delta) {
   dom.stockAdjustQuantity.value = String(nextValue);
 }
 
+function mapVentaRemota(row) {
+  return {
+    id: row.id,
+    fecha: row.fecha,
+    hora: row.hora,
+    totalCentavos: row.total_centavos,
+    saleMode: row.sale_mode || "normal",
+    origen: row.origen,
+    pedidoId: row.pedido_id,
+    clienteNombre: row.cliente_nombre,
+    detalles: (row.detalle_venta || []).map((d) => ({
+      id: d.id,
+      ventaId: d.venta_id,
+      productoId: d.producto_id,
+      productoNombre: d.producto_nombre,
+      cantidad: d.cantidad,
+      precioUnitarioCentavos: d.precio_unitario_centavos,
+      subtotalCentavos: d.subtotal_centavos
+    }))
+  };
+}
+
 async function renderHistoryView() {
   const fecha = dom.historyDate.value || todayISO();
   dom.historyDate.value = fecha;
+
+  if (isModoConsulta()) {
+    dom.historialBackupPanel.hidden = true;
+    try {
+      const [catalogo, produccionRows, ventasRemotas] = await Promise.all([
+        catalogoConStockRemoto(),
+        fetchProduccionDiaria(fecha),
+        fetchVentasDelDia(fecha)
+      ]);
+      const sales = ventasRemotas.map(mapVentaRemota);
+      const sandwiches = catalogo.filter((p) => p.categoriaId === "sandwiches" && p.controlaStock);
+      const sandwichIds = new Set(sandwiches.map((p) => p.id));
+      const producidoPorProducto = new Map(produccionRows.map((row) => [row.producto_id, row.cantidad]));
+      const totalSandwichesProduced = sandwiches.reduce((total, p) => total + (producidoPorProducto.get(p.id) || 0), 0);
+      const totalSandwichesSold = sales.reduce(
+        (total, sale) => total + sale.detalles.reduce(
+          (saleTotal, detail) => saleTotal + (sandwichIds.has(detail.productoId) ? Number(detail.cantidad) || 0 : 0),
+          0
+        ),
+        0
+      );
+      const totalSandwichesDisponibles = sandwiches.reduce((total, p) => total + (Number(p.stockActual) || 0), 0);
+      const totalStockAyer = totalSandwichesDisponibles - totalSandwichesProduced + totalSandwichesSold;
+      dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
+      renderHistory(dom.historyList, sales, {
+        onShareSale: handleShareSale,
+        onPrintSale: handlePrintSale
+      });
+    } catch {
+      dom.historyList.textContent = "No se pudo traer el historial (revisa la conexion).";
+    }
+    return;
+  }
+
+  dom.historialBackupPanel.hidden = false;
   const snapshot = await productionSnapshot(fecha);
   const sales = await salesForDay(fecha);
   const totalSandwichesProduced = snapshot.sandwiches.reduce(
@@ -662,8 +814,10 @@ async function handleUndoSale(sale) {
   if (!confirmado) return;
   try {
     undoSaleInProgress = true;
-    await undoSale(sale.id);
+    const { fecha, creadoEn } = await undoSale(sale.id);
     setFlash("Venta deshecha, stock reintegrado.", "success");
+    trySyncVentaAnulada({ fecha, creadoEn }).catch(() => {});
+    syncStockYProduccion();
     await renderHistoryView();
     await renderCashier();
   } catch (error) {
@@ -1099,6 +1253,7 @@ async function handleMarcarListo(pedido) {
     // Sync fire-and-forget — nunca bloquea el flujo de pedidos
     const { venta, detalles, movimientosStock } = result._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
+    syncStockYProduccion();
   } catch (error) {
     setFlash(error.message || "No se pudo marcar el pedido como listo.", "error");
   } finally {
@@ -1144,6 +1299,7 @@ async function handleConfirmSale() {
     const { venta, detalles, movimientosStock, movimientosInsumos } = sale._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
     if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
+    syncStockYProduccion();
     await renderCashier();
   } catch (error) {
     setSaleMessage(error.message || "No se pudo registrar la venta.");
@@ -1162,10 +1318,27 @@ async function commitProduction(productId, quantityRaw) {
     setFlash("Produccion guardada.", "success");
   }
   closeProductionSheet();
+  syncStockYProduccion();
   await renderCashier();
 }
 
+function updateModoConsultaButton() {
+  const activo = isModoConsulta();
+  dom.modoConsultaToggle.textContent = `Modo consulta: ${activo ? "ON" : "OFF"}`;
+  dom.modoConsultaToggle.classList.toggle("active", activo);
+}
+
 function bindEvents() {
+  dom.modoConsultaToggle.addEventListener("click", () => {
+    setModoConsulta(!isModoConsulta());
+    updateModoConsultaButton();
+    refreshView();
+    if (isModoConsulta() && CONSULTA_VIEWS.includes(currentView)) {
+      startConsultaPolling();
+    } else {
+      stopConsultaPolling();
+    }
+  });
   dom.navLinks.forEach((link) => link.addEventListener("click", () => showView(link.dataset.view)));
   document.querySelectorAll(".sub-nav-link").forEach((link) => link.addEventListener("click", () => showGestionSubView(link.dataset.subview)));
 
@@ -1291,6 +1464,7 @@ function bindEvents() {
         setFlash(`Stock de ${product.nombre} ajustado a ${newStock}.`, "success");
       }
       closeStockAdjustSheet();
+      syncStockYProduccion();
       await renderProductionView();
       await renderCashier();
     } catch (error) {
@@ -1553,6 +1727,17 @@ function bindAuthEvents() {
   });
 }
 
+// Empuja stock actual + produccion de hoy a Supabase, fire-and-forget.
+// Alimenta "modo consulta" en otros dispositivos (nunca bloquea la UI de este).
+function syncStockYProduccion() {
+  const fecha = todayISO();
+  Promise.all([getAll("productos"), getAll("produccion_diaria")]).then(([productos, produccion]) => {
+    trySyncStockProductos(productos).catch(() => {});
+    const produccionHoy = produccion.filter((row) => row.fecha === fecha);
+    if (produccionHoy.length > 0) trySyncProduccionDiaria(produccionHoy).catch(() => {});
+  }).catch(() => {});
+}
+
 async function bootApp() {
   await seedDatabase();
   await seedInsumos();
@@ -1563,8 +1748,10 @@ async function bootApp() {
     trySyncInsumosSnapshot(insumos).catch(() => {});
     trySyncRecetasSnapshot(recetas).catch(() => {});
   }).catch(() => {});
+  syncStockYProduccion();
   dom.historyDate.value = todayISO();
   bindEvents();
+  updateModoConsultaButton();
   const initialView = window.location.hash.replace("#", "") || "caja";
   showView(["caja", "pedidos", "produccion", "historial", "gestion"].includes(initialView) ? initialView : "caja");
 }

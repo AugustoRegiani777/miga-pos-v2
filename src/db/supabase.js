@@ -153,6 +153,9 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
     hora: venta.hora,
     total_centavos: venta.totalCentavos,
     sale_mode: venta.saleMode || "normal",
+    origen: venta.origen || null,
+    pedido_id: venta.pedidoId || null,
+    cliente_nombre: venta.clienteNombre || null,
     creado_en: venta.creadoEn
   });
   const ventaId = ventaRow.id;
@@ -245,6 +248,54 @@ export async function pushMovimientosInsumos(movimientos) {
     fecha: m.fecha,
     creado_en: m.creadoEn
   })));
+}
+
+// --- Sync para "modo consulta" (Caja/Produccion/Historial de solo lectura
+// en otros dispositivos) — el dispositivo que opera de verdad empuja estos
+// snapshots fire-and-forget; los demas los leen en vez de su IDB local. ---
+
+export async function pushStockProductos(productos) {
+  return upsert("stock_productos", productos.map(p => ({
+    id: p.id,
+    stock_actual: p.stockActual,
+    actualizado_en: p.actualizadoEn || new Date().toISOString()
+  })));
+}
+
+export async function pushProduccionDiaria(rows) {
+  if (!rows || rows.length === 0) return;
+  return upsert("produccion_diaria", rows.map(r => ({
+    id: r.id,
+    producto_id: r.productoId,
+    fecha: r.fecha,
+    cantidad: r.cantidad,
+    creado_en: r.creadoEn,
+    actualizado_en: r.actualizadoEn || new Date().toISOString()
+  })));
+}
+
+// Se llama cuando se deshace una venta localmente, para que "modo consulta"
+// deje de contarla tambien. El id local de la venta NO es el mismo que el id
+// que le asigno Supabase al pushearla (son secuencias auto-increment
+// distintas) — por eso se matchea por fecha + creado_en, que es el mismo
+// timestamp que ya viaja sin cambios en pushVenta().
+export async function updateVentaAnulada(fecha, creadoEn) {
+  return sbFetch(`/ventas?fecha=eq.${fecha}&creado_en=eq.${encodeURIComponent(creadoEn)}`, "PATCH", {
+    anulada: true,
+    anulada_en: new Date().toISOString()
+  });
+}
+
+export async function fetchStockProductos() {
+  return sbFetch("/stock_productos?select=id,stock_actual,actualizado_en");
+}
+
+export async function fetchProduccionDiaria(fecha) {
+  return sbFetch(`/produccion_diaria?fecha=eq.${fecha}`);
+}
+
+export async function fetchVentasDelDia(fecha) {
+  return sbFetch(`/ventas?fecha=eq.${fecha}&anulada=not.is.true&select=*,detalle_venta(*)&order=id.desc`);
 }
 
 // Pedidos: fuente de verdad en Supabase (no hay store espejo en IDB local),

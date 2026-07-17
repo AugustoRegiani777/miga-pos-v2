@@ -490,5 +490,10 @@ export async function undoSale(ventaId) {
     }
 
     stores.ventas.put({ ...venta, anulada: true, anuladaEn: now });
+
+    // Se devuelve fecha + creadoEn (no el id local) porque es lo que hace
+    // falta para encontrar la fila correspondiente en Supabase: el id local
+    // y el id que le asigna Supabase a la venta son secuencias distintas.
+    return { fecha: venta.fecha, creadoEn: venta.creadoEn };
   });
 }

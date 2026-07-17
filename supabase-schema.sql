@@ -10,6 +10,13 @@ CREATE TABLE IF NOT EXISTS ventas (
   hora        TEXT,
   total_centavos INTEGER NOT NULL DEFAULT 0,
   sale_mode   TEXT NOT NULL DEFAULT 'normal',
+  anulada     BOOLEAN NOT NULL DEFAULT false,
+  anulada_en  TIMESTAMPTZ,
+  -- Si la venta viene de un pedido (Pedidos > marcar preparado), para que
+  -- "modo consulta" muestre "Pedido: cliente" igual que el dispositivo que opera.
+  origen         TEXT,
+  pedido_id      BIGINT,
+  cliente_nombre TEXT,
   creado_en   TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -94,6 +101,16 @@ CREATE TABLE IF NOT EXISTS produccion_diaria (
   actualizado_en TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Stock actual de productos terminados — solo lo que cambia (el catalogo
+-- nombre/precio/categoria ya es identico en todos los dispositivos via seed
+-- local). Se usa para que "modo consulta" en otros dispositivos vea el mismo
+-- stock que la tablet del local, sin duplicar el catalogo completo.
+CREATE TABLE IF NOT EXISTS stock_productos (
+  id             TEXT PRIMARY KEY,
+  stock_actual   NUMERIC NOT NULL DEFAULT 0,
+  actualizado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Movimientos de stock de productos
 CREATE TABLE IF NOT EXISTS movimientos_stock (
   id              BIGSERIAL PRIMARY KEY,
@@ -150,6 +167,7 @@ ALTER TABLE produccion_diaria    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_stock    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detalle_pedido       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_productos      ENABLE ROW LEVEL SECURITY;
 
 -- Cualquier usuario autenticado (las 3 cuentas) puede leer, insertar y
 -- actualizar todas las tablas. DELETE solo existe en pedidos/detalle_pedido
@@ -200,6 +218,10 @@ CREATE POLICY detalle_pedido_insert ON detalle_pedido FOR INSERT TO authenticate
 CREATE POLICY detalle_pedido_update ON detalle_pedido FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY detalle_pedido_delete ON detalle_pedido FOR DELETE TO authenticated USING (true);
 
+CREATE POLICY stock_productos_select ON stock_productos FOR SELECT TO authenticated USING (true);
+CREATE POLICY stock_productos_insert ON stock_productos FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY stock_productos_update ON stock_productos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
 -- Índices útiles para queries del dashboard
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha               ON ventas(fecha);
 CREATE INDEX IF NOT EXISTS idx_detalle_venta_venta_id     ON detalle_venta(venta_id);
@@ -211,3 +233,4 @@ CREATE INDEX IF NOT EXISTS idx_mov_stock_fecha            ON movimientos_stock(f
 CREATE INDEX IF NOT EXISTS idx_pedidos_estado             ON pedidos(estado);
 CREATE INDEX IF NOT EXISTS idx_pedidos_fecha_retiro        ON pedidos(fecha_hora_retiro);
 CREATE INDEX IF NOT EXISTS idx_detalle_pedido_pedido_id   ON detalle_pedido(pedido_id);
+CREATE INDEX IF NOT EXISTS idx_produccion_diaria_fecha    ON produccion_diaria(fecha);
