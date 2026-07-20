@@ -76,18 +76,8 @@ button {
   display: none;
 }
 
-#modo-consulta-toggle {
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-#modo-consulta-toggle.active {
-  background: var(--low);
-  color: #ffffff;
-  border-color: var(--low);
-}
-
 #logout-button {
+  margin-left: auto;
   flex-shrink: 0;
 }
 

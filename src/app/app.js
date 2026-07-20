@@ -133,7 +133,6 @@ const dom = {
   loginPassword: document.querySelector("#login-password"),
   loginError: document.querySelector("#login-error"),
   logoutButton: document.querySelector("#logout-button"),
-  modoConsultaToggle: document.querySelector("#modo-consulta-toggle"),
   appMessage: document.querySelector("#app-message"),
   navLinks: document.querySelectorAll(".nav:not(.sub-nav) > .nav-link"),
   views: document.querySelectorAll(".view"),
@@ -587,8 +586,8 @@ async function renderCashier() {
     try {
       const catalogo = await catalogoConStockRemoto();
       renderStockConsulta(dom.cajaConsulta, catalogo.filter((p) => p.activo && p.controlaStock));
-    } catch {
-      dom.cajaConsulta.textContent = "No se pudo traer el stock (revisa la conexion).";
+    } catch (error) {
+      dom.cajaConsulta.textContent = `No se pudo traer el stock: ${error.message || error}`;
     }
     return;
   }
@@ -610,8 +609,8 @@ async function renderProductionView() {
         .filter((p) => p.activo && p.controlaStock && (p.categoriaId === "sandwiches" || p.categoriaId === "bolleria"))
         .map((p) => ({ ...p, cantidadProducida: producidoPorProducto.get(p.id) || 0 }));
       renderProduccionConsulta(dom.produccionConsulta, productosProduccion);
-    } catch {
-      dom.produccionConsulta.textContent = "No se pudo traer la produccion (revisa la conexion).";
+    } catch (error) {
+      dom.produccionConsulta.textContent = `No se pudo traer la produccion: ${error.message || error}`;
     }
     return;
   }
@@ -769,8 +768,8 @@ async function renderHistoryView() {
         onShareSale: handleShareSale,
         onPrintSale: handlePrintSale
       });
-    } catch {
-      dom.historyList.textContent = "No se pudo traer el historial (revisa la conexion).";
+    } catch (error) {
+      dom.historyList.textContent = `No se pudo traer el historial: ${error.message || error}`;
     }
     return;
   }
@@ -1339,23 +1338,7 @@ async function commitProduction(productId, quantityRaw) {
   await renderCashier();
 }
 
-function updateModoConsultaButton() {
-  const activo = isModoConsulta();
-  dom.modoConsultaToggle.textContent = `Modo consulta: ${activo ? "ON" : "OFF"}`;
-  dom.modoConsultaToggle.classList.toggle("active", activo);
-}
-
 function bindEvents() {
-  dom.modoConsultaToggle.addEventListener("click", () => {
-    setModoConsulta(!isModoConsulta());
-    updateModoConsultaButton();
-    refreshView();
-    if (isModoConsulta() && CONSULTA_VIEWS.includes(currentView)) {
-      startConsultaPolling();
-    } else {
-      stopConsultaPolling();
-    }
-  });
   dom.navLinks.forEach((link) => link.addEventListener("click", () => showView(link.dataset.view)));
   document.querySelectorAll(".sub-nav-link").forEach((link) => link.addEventListener("click", () => showGestionSubView(link.dataset.subview)));
 
@@ -1775,7 +1758,6 @@ async function bootApp() {
   if (!isModoConsulta()) syncStockYProduccion();
   dom.historyDate.value = todayISO();
   bindEvents();
-  updateModoConsultaButton();
   const initialView = window.location.hash.replace("#", "") || "caja";
   showView(["caja", "pedidos", "produccion", "historial", "gestion"].includes(initialView) ? initialView : "caja");
 }
