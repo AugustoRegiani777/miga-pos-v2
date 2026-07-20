@@ -565,8 +565,8 @@ async function catalogoConStockRemoto() {
 
 async function renderCashier() {
   if (isModoConsulta()) {
-    dom.salesLayout.hidden = true;
-    dom.cajaConsulta.hidden = false;
+    dom.salesLayout.style.display = "none";
+    dom.cajaConsulta.style.display = "";
     try {
       const catalogo = await catalogoConStockRemoto();
       renderStockConsulta(dom.cajaConsulta, catalogo.filter((p) => p.activo && p.controlaStock));
@@ -575,8 +575,8 @@ async function renderCashier() {
     }
     return;
   }
-  dom.salesLayout.hidden = false;
-  dom.cajaConsulta.hidden = true;
+  dom.salesLayout.style.display = "";
+  dom.cajaConsulta.style.display = "none";
   await loadProducts();
   renderReservedStock();
   renderCurrentCart();
@@ -584,8 +584,8 @@ async function renderCashier() {
 
 async function renderProductionView() {
   if (isModoConsulta()) {
-    dom.productionGroups.hidden = true;
-    dom.produccionConsulta.hidden = false;
+    dom.productionGroups.style.display = "none";
+    dom.produccionConsulta.style.display = "";
     try {
       const [catalogo, produccionRows] = await Promise.all([catalogoConStockRemoto(), fetchProduccionDiaria(todayISO())]);
       const producidoPorProducto = new Map(produccionRows.map((row) => [row.producto_id, row.cantidad]));
@@ -598,8 +598,8 @@ async function renderProductionView() {
     }
     return;
   }
-  dom.productionGroups.hidden = false;
-  dom.produccionConsulta.hidden = true;
+  dom.productionGroups.style.display = "";
+  dom.produccionConsulta.style.display = "none";
   await loadProducts();
   const snapshot = await productionSnapshot();
   if (selectedProductionProductId && !snapshot.productionProducts.some((product) => product.id === selectedProductionProductId)) {
@@ -726,7 +726,7 @@ async function renderHistoryView() {
   dom.historyDate.value = fecha;
 
   if (isModoConsulta()) {
-    dom.historialBackupPanel.hidden = true;
+    dom.historialBackupPanel.style.display = "none";
     try {
       const [catalogo, produccionRows, ventasRemotas] = await Promise.all([
         catalogoConStockRemoto(),
@@ -758,7 +758,7 @@ async function renderHistoryView() {
     return;
   }
 
-  dom.historialBackupPanel.hidden = false;
+  dom.historialBackupPanel.style.display = "";
   const snapshot = await productionSnapshot(fecha);
   const sales = await salesForDay(fecha);
   const totalSandwichesProduced = snapshot.sandwiches.reduce(
