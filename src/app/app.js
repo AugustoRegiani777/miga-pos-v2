@@ -1686,6 +1686,17 @@ function bindEvents() {
     const viewName = window.location.hash.replace("#", "") || "caja";
     if (["caja", "pedidos", "produccion", "historial", "gestion"].includes(viewName)) showView(viewName);
   });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopPedidosPolling();
+      stopConsultaPolling();
+      return;
+    }
+    if (currentView === "pedidos") startPedidosPolling();
+    if (isModoConsulta() && CONSULTA_VIEWS.includes(currentView)) startConsultaPolling();
+    refreshView();
+  });
 }
 
 function showLoginScreen(message) {
