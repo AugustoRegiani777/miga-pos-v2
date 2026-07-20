@@ -108,6 +108,23 @@ function setModoConsulta(activo) {
   catch { /* localStorage no disponible — ignorar */ }
 }
 
+// La primera vez que un dispositivo arranca (nunca se toco el toggle a mano),
+// se decide el default solo: si ya tiene ventas guardadas localmente, es la
+// tablet que opera de verdad -> modo consulta apagado. Si no tiene ninguna
+// (un celular nuevo que nunca vendio nada), es un dispositivo de consulta ->
+// modo consulta prendido de entrada, sin tener que tocar nada.
+async function initModoConsultaDefault() {
+  let yaConfigurado = false;
+  try { yaConfigurado = localStorage.getItem(MODO_CONSULTA_KEY) !== null; } catch { /* ignorar */ }
+  if (yaConfigurado) return;
+  let defaultConsulta = true;
+  try {
+    const ventas = await getAll("ventas");
+    defaultConsulta = ventas.length === 0;
+  } catch { /* si falla, default mas seguro: consulta prendida */ }
+  setModoConsulta(defaultConsulta);
+}
+
 
 const dom = {
   loginScreen: document.querySelector("#login-screen"),
@@ -1368,6 +1385,10 @@ function bindEvents() {
   dom.pedidoPrecioTotal.addEventListener("input", () => {
     pedidoPrecioEditadoManualmente = true;
   });
+  dom.pedidoHoraRetiro.addEventListener("input", () => {
+    const digitos = dom.pedidoHoraRetiro.value.replace(/\D/g, "").slice(0, 4);
+    dom.pedidoHoraRetiro.value = digitos.length >= 3 ? `${digitos.slice(0, 2)}:${digitos.slice(2)}` : digitos;
+  });
   dom.closeStockAdjust.addEventListener("click", closeStockAdjustSheet);
   dom.stockAdjustBackdrop.addEventListener("click", closeStockAdjustSheet);
   dom.stockAdjustMinus.addEventListener("click", () => nudgeStockAdjust(-1));
@@ -1742,6 +1763,7 @@ async function bootApp() {
   await seedDatabase();
   await seedInsumos();
   await seedProveedores();
+  await initModoConsultaDefault();
   setupAutoSync();
   // Subir insumos y recetas a Supabase al arrancar (upsert idempotente)
   Promise.all([getAll("insumos"), getAll("recetas")]).then(([insumos, recetas]) => {

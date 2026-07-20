@@ -199,7 +199,6 @@ function renderProductionRow(product, selectedProductId, onProductionProductSele
     event.stopPropagation();
     onAdjustStock(product);
   });
-  wrapper.appendChild(stockBtn);
   wrapper.appendChild(
     renderStockRow(
       product,
@@ -211,6 +210,7 @@ function renderProductionRow(product, selectedProductId, onProductionProductSele
       }
     )
   );
+  wrapper.appendChild(stockBtn);
   return wrapper;
 }
 
@@ -354,6 +354,7 @@ function renderStockRow(product, subtitle, options = {}) {
   row.innerHTML = `
     <div>
       <h2></h2>
+      <span class="production-cta"></span>
       <div class="stock-row-total"></div>
       <p></p>
     </div>
@@ -361,6 +362,12 @@ function renderStockRow(product, subtitle, options = {}) {
     <strong></strong>
   `;
   row.querySelector("h2").textContent = product.nombre;
+  const ctaNode = row.querySelector(".production-cta");
+  if (options.clickable) {
+    ctaNode.textContent = "Cargar producción";
+  } else {
+    ctaNode.remove();
+  }
   const totalNode = row.querySelector(".stock-row-total");
   if (options.clickable) {
     totalNode.textContent = `Total hoy: ${product.cantidadProducida}`;
