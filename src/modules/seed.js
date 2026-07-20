@@ -354,6 +354,17 @@ export const initialProducts = [
     activo: true
   },
   {
+    id: "cookies",
+    categoriaId: "bolleria",
+    nombre: "Cookies",
+    precioCentavos: 300,
+    stockActual: 0,
+    umbralBajo: 4,
+    controlaStock: true,
+    orden: 7,
+    activo: true
+  },
+  {
     id: "expresso-30ml",
     categoriaId: "cafe",
     nombre: "Expresso 30ml",
