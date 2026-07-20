@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS ventas (
 -- Detalle de venta (líneas)
 CREATE TABLE IF NOT EXISTS detalle_venta (
   id                    BIGSERIAL PRIMARY KEY,
-  venta_id              BIGINT NOT NULL,
+  venta_id              BIGINT NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
   producto_id           TEXT,
   producto_nombre       TEXT,
   cantidad              INTEGER NOT NULL DEFAULT 1,

@@ -583,6 +583,7 @@ async function renderCashier() {
   if (isModoConsulta()) {
     dom.salesLayout.style.display = "none";
     dom.cajaConsulta.style.display = "";
+    dom.cajaConsulta.textContent = "Cargando...";
     try {
       const catalogo = await catalogoConStockRemoto();
       renderStockConsulta(dom.cajaConsulta, catalogo.filter((p) => p.activo && p.controlaStock));
@@ -602,6 +603,7 @@ async function renderProductionView() {
   if (isModoConsulta()) {
     dom.productionGroups.style.display = "none";
     dom.produccionConsulta.style.display = "";
+    dom.produccionConsulta.textContent = "Cargando...";
     try {
       const [catalogo, produccionRows] = await Promise.all([catalogoConStockRemoto(), fetchProduccionDiaria(todayISO())]);
       const producidoPorProducto = new Map(produccionRows.map((row) => [row.producto_id, row.cantidad]));
@@ -743,6 +745,7 @@ async function renderHistoryView() {
 
   if (isModoConsulta()) {
     dom.historialBackupPanel.style.display = "none";
+    dom.historyList.textContent = "Cargando...";
     try {
       const [catalogo, produccionRows, ventasRemotas] = await Promise.all([
         catalogoConStockRemoto(),
