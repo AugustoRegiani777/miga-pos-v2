@@ -582,6 +582,7 @@ async function catalogoConStockRemoto() {
 async function renderCashier() {
   if (isModoConsulta()) {
     dom.salesLayout.style.display = "none";
+    dom.cajaConsulta.hidden = false;
     dom.cajaConsulta.style.display = "";
     dom.cajaConsulta.textContent = "Cargando...";
     try {
@@ -593,6 +594,7 @@ async function renderCashier() {
     return;
   }
   dom.salesLayout.style.display = "";
+  dom.cajaConsulta.hidden = true;
   dom.cajaConsulta.style.display = "none";
   await loadProducts();
   renderReservedStock();
@@ -602,6 +604,7 @@ async function renderCashier() {
 async function renderProductionView() {
   if (isModoConsulta()) {
     dom.productionGroups.style.display = "none";
+    dom.produccionConsulta.hidden = false;
     dom.produccionConsulta.style.display = "";
     dom.produccionConsulta.textContent = "Cargando...";
     try {
@@ -617,6 +620,7 @@ async function renderProductionView() {
     return;
   }
   dom.productionGroups.style.display = "";
+  dom.produccionConsulta.hidden = true;
   dom.produccionConsulta.style.display = "none";
   await loadProducts();
   const snapshot = await productionSnapshot();
