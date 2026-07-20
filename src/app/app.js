@@ -1770,7 +1770,9 @@ async function bootApp() {
     trySyncInsumosSnapshot(insumos).catch(() => {});
     trySyncRecetasSnapshot(recetas).catch(() => {});
   }).catch(() => {});
-  syncStockYProduccion();
+  // Solo el dispositivo que opera de verdad empuja su stock al arrancar — un
+  // celular en modo consulta nunca debe pisar el stock real con sus ceros locales.
+  if (!isModoConsulta()) syncStockYProduccion();
   dom.historyDate.value = todayISO();
   bindEvents();
   updateModoConsultaButton();
