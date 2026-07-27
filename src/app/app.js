@@ -1,5 +1,5 @@
 import { exportSalesSummary, exportDailySummaryJSON } from "../modules/backup.js";
-import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock } from "../db/supabase.js";
+import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
@@ -11,6 +11,8 @@ import {
   trySyncStockProductos,
   trySyncProduccionDiaria,
   trySyncMovimientoStock,
+  trySyncProveedoresSnapshot,
+  trySyncProveedorInsumosSnapshot,
   trySyncVentaAnulada,
   setupAutoSync
 } from "../modules/sync.js";
@@ -28,6 +30,7 @@ import {
   salesForDay,
   saveDailyProduction,
   saveProductionComment,
+  stockHistoricoPorFecha,
   undoSale,
   TOGOO_FLAT_TOTAL_CENTAVOS
 } from "../modules/business.js";
@@ -602,6 +605,29 @@ function esMovimientoDeProduccion(row) {
   return row.tipo === "ajuste_stock" && (row.motivo === "Error de produccion" || row.motivo === "Error");
 }
 
+// Version remota de stockHistoricoPorFecha() (business.js): reconstruye
+// cuanto stock habia en una fecha pasada a partir del stock actual y los
+// movimientos sincronizados a Supabase desde esa fecha en adelante.
+function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fecha) {
+  const sumaPorProducto = (lista) => {
+    const map = new Map();
+    for (const m of lista) {
+      map.set(m.producto_id, (map.get(m.producto_id) || 0) + (Number(m.cantidad) || 0));
+    }
+    return map;
+  };
+  const sumaPosterior = sumaPorProducto(movimientosDesde.filter((m) => m.fecha > fecha));
+  const sumaDelDia = sumaPorProducto(movimientosDesde.filter((m) => m.fecha === fecha));
+  const resultado = new Map();
+  for (const producto of catalogo) {
+    const stockHoy = Number(producto.stockActual) || 0;
+    const stockAlFinal = stockHoy - (sumaPosterior.get(producto.id) || 0);
+    const stockAlInicio = stockAlFinal - (sumaDelDia.get(producto.id) || 0);
+    resultado.set(producto.id, { stockAlInicio, stockAlFinal });
+  }
+  return resultado;
+}
+
 async function renderCashier() {
   if (isModoConsulta()) {
     dom.salesLayout.style.display = "none";
@@ -806,10 +832,11 @@ async function renderHistoryView() {
     dom.historialBackupPanel.style.display = "none";
     showConsultaPlaceholder(dom.historyList, "Cargando...");
     try {
-      const [catalogo, produccionRows, ventasRemotas] = await Promise.all([
+      const [catalogo, produccionRows, ventasRemotas, movimientosDesde] = await Promise.all([
         catalogoConStockRemoto(),
         fetchProduccionDiaria(fecha),
-        fetchVentasDelDia(fecha)
+        fetchVentasDelDia(fecha),
+        fetchMovimientosStockDesde(fecha)
       ]);
       const sales = ventasRemotas.map(mapVentaRemota);
       const sandwiches = catalogo.filter((p) => p.categoriaId === "sandwiches" && p.controlaStock);
@@ -823,8 +850,15 @@ async function renderHistoryView() {
         ),
         0
       );
-      const totalSandwichesDisponibles = sandwiches.reduce((total, p) => total + (Number(p.stockActual) || 0), 0);
-      const totalStockAyer = totalSandwichesDisponibles - totalSandwichesProduced + totalSandwichesSold;
+      const historico = historicoDesdeMovimientosRemotos(sandwiches, movimientosDesde, fecha);
+      const totalSandwichesDisponibles = sandwiches.reduce(
+        (total, p) => total + (historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0),
+        0
+      );
+      const totalStockAyer = sandwiches.reduce(
+        (total, p) => total + (historico.get(p.id)?.stockAlInicio ?? 0),
+        0
+      );
       dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
       renderHistory(dom.historyList, sales, {
         onShareSale: handleShareSale,
@@ -852,11 +886,15 @@ async function renderHistoryView() {
     ),
     0
   );
+  const historico = await stockHistoricoPorFecha(fecha);
   const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
-    (total, product) => total + (Number(product.stockActual) || 0),
+    (total, product) => total + (historico.get(product.id)?.stockAlFinal ?? Number(product.stockActual) || 0),
     0
   );
-  const totalStockAyer = totalSandwichesDisponibles - totalSandwichesProduced + totalSandwichesSold;
+  const totalStockAyer = snapshot.sandwiches.reduce(
+    (total, product) => total + (historico.get(product.id)?.stockAlInicio ?? 0),
+    0
+  );
   dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
   renderHistory(dom.historyList, sales, {
     onUndoSale: handleUndoSale,
@@ -893,9 +931,9 @@ async function handleUndoSale(sale) {
   if (!confirmado) return;
   try {
     undoSaleInProgress = true;
-    const { fecha, creadoEn } = await undoSale(sale.id);
+    const { uuid, fecha, creadoEn } = await undoSale(sale.id);
     setFlash("Venta deshecha, stock reintegrado.", "success");
-    trySyncVentaAnulada({ fecha, creadoEn }).catch(() => {});
+    trySyncVentaAnulada({ uuid, fecha, creadoEn }).catch(() => {});
     syncStockYProduccion();
     await renderHistoryView();
     await renderCashier();
@@ -1824,11 +1862,16 @@ async function bootApp() {
   await seedProveedores();
   await initModoConsultaDefault();
   setupAutoSync();
-  // Subir insumos y recetas a Supabase al arrancar (upsert idempotente)
-  Promise.all([getAll("insumos"), getAll("recetas")]).then(([insumos, recetas]) => {
-    trySyncInsumosSnapshot(insumos).catch(() => {});
-    trySyncRecetasSnapshot(recetas).catch(() => {});
-  }).catch(() => {});
+  // Subir insumos, recetas, proveedores y proveedor_insumos a Supabase al
+  // arrancar (upsert idempotente) — la lectura de facturas necesita esto del
+  // lado del servidor, no solo la tablet lo usa mas.
+  Promise.all([getAll("insumos"), getAll("recetas"), getAll("proveedores"), getAll("proveedor_insumos")])
+    .then(([insumos, recetas, proveedores, proveedorInsumos]) => {
+      trySyncInsumosSnapshot(insumos).catch(() => {});
+      trySyncRecetasSnapshot(recetas).catch(() => {});
+      trySyncProveedoresSnapshot(proveedores).catch(() => {});
+      trySyncProveedorInsumosSnapshot(proveedorInsumos).catch(() => {});
+    }).catch(() => {});
   // Solo el dispositivo que opera de verdad empuja su stock al arrancar — un
   // celular en modo consulta nunca debe pisar el stock real con sus ceros locales.
   if (!isModoConsulta()) syncStockYProduccion();

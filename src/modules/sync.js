@@ -3,6 +3,8 @@ import {
   pushCalibracion,
   pushInsumosSnapshot,
   pushRecetasSnapshot,
+  pushProveedoresSnapshot,
+  pushProveedorInsumosSnapshot,
   pushMovimientosInsumos,
   pushStockProductos,
   pushProduccionDiaria,
@@ -48,10 +50,14 @@ async function executeOp(op) {
       return pushStockProductos(op.payload);
     case "produccion_diaria":
       return pushProduccionDiaria(op.payload);
+    case "proveedores_snapshot":
+      return pushProveedoresSnapshot(op.payload);
+    case "proveedor_insumos_snapshot":
+      return pushProveedorInsumosSnapshot(op.payload);
     case "movimiento_stock":
       return pushMovimientoStock(op.payload);
     case "venta_anulada":
-      return updateVentaAnulada(op.payload.fecha, op.payload.creadoEn);
+      return updateVentaAnulada(op.payload);
     default:
       throw new Error(`Tipo de sync desconocido: ${op.type}`);
   }
@@ -105,6 +111,14 @@ export function trySyncRecetasSnapshot(recetas) {
   return tryNow({ type: "recetas_snapshot", payload: recetas });
 }
 
+export function trySyncProveedoresSnapshot(proveedores) {
+  return tryNow({ type: "proveedores_snapshot", payload: proveedores });
+}
+
+export function trySyncProveedorInsumosSnapshot(proveedorInsumos) {
+  return tryNow({ type: "proveedor_insumos_snapshot", payload: proveedorInsumos });
+}
+
 export function trySyncMovimientosInsumos(movimientos) {
   return tryNow({ type: "movimientos_insumos", payload: movimientos });
 }
@@ -125,8 +139,8 @@ export function trySyncMovimientoStock(movimiento) {
   return tryNow({ type: "movimiento_stock", payload: movimiento });
 }
 
-export function trySyncVentaAnulada({ fecha, creadoEn }) {
-  return tryNow({ type: "venta_anulada", payload: { fecha, creadoEn } });
+export function trySyncVentaAnulada({ uuid, fecha, creadoEn }) {
+  return tryNow({ type: "venta_anulada", payload: { uuid, fecha, creadoEn } });
 }
 
 // Retry automático al recuperar conexión

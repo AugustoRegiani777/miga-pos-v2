@@ -184,6 +184,38 @@ export async function stockSnapshot(fecha = todayISO()) {
     }));
 }
 
+// productos.stockActual es un valor EN VIVO (se pisa constantemente), no un
+// historial por dia. Para saber cuanto stock habia en una fecha pasada hay
+// que reconstruirlo: partir del stock de hoy y deshacer los movimientos
+// posteriores a esa fecha. movimientos_stock guarda cada cambio con signo
+// (cantidad ya incluye el +/-), asi que es una resta directa.
+export async function stockHistoricoPorFecha(fecha) {
+  const [productos, movimientos] = await Promise.all([getAll("productos"), getAll("movimientos_stock")]);
+
+  const sumaPorProducto = (lista) => {
+    const map = new Map();
+    for (const movimiento of lista) {
+      map.set(
+        movimiento.productoId,
+        (map.get(movimiento.productoId) || 0) + (Number(movimiento.cantidad) || 0)
+      );
+    }
+    return map;
+  };
+
+  const sumaPosterior = sumaPorProducto(movimientos.filter((m) => m.fecha > fecha));
+  const sumaDelDia = sumaPorProducto(movimientos.filter((m) => m.fecha === fecha));
+
+  const resultado = new Map();
+  for (const producto of productos) {
+    const stockHoy = Number(producto.stockActual) || 0;
+    const stockAlFinal = stockHoy - (sumaPosterior.get(producto.id) || 0);
+    const stockAlInicio = stockAlFinal - (sumaDelDia.get(producto.id) || 0);
+    resultado.set(producto.id, { stockAlInicio, stockAlFinal });
+  }
+  return resultado;
+}
+
 export async function adjustStockLevel(productId, newStockValue, reason, fecha = todayISO()) {
   const nuevoStock = asNonNegativeInteger(newStockValue, "El nuevo stock");
   const motivo = String(reason || "").trim();
@@ -229,6 +261,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
 
     stores.productos.put({ ...product, stockActual: nuevoStock, actualizadoEn: now });
     const movimiento = {
+      uuid: crypto.randomUUID(),
       productoId: productId,
       tipo: "ajuste_stock",
       cantidad,
@@ -276,6 +309,7 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
     stores.produccion_diaria.put(productionRow);
     stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
     const movimiento = {
+      uuid: crypto.randomUUID(),
       productoId: productId,
       tipo: "produccion",
       cantidad,
@@ -356,10 +390,12 @@ export async function confirmSale(items) {
     const discountCentavos = pricing.discountCentavos;
     totalCentavos = pricing.totalCentavos + toGooTotalCentavos + bajaTotalCentavos;
 
-    const saleId = await requestToPromise(stores.ventas.add({ fecha, hora, totalCentavos, saleMode, creadoEn: now }));
+    const ventaUuid = crypto.randomUUID();
+    const saleId = await requestToPromise(stores.ventas.add({ fecha, hora, totalCentavos, saleMode, creadoEn: now, uuid: ventaUuid }));
 
     for (const line of lines) {
       const detalle = {
+        uuid: crypto.randomUUID(),
         ventaId: saleId,
         productoId: line.product.id,
         productoNombre: line.productName,
@@ -375,6 +411,7 @@ export async function confirmSale(items) {
 
     if (discountCentavos > 0) {
       const descuento = {
+        uuid: crypto.randomUUID(),
         ventaId: saleId,
         productoId: `combo-${pricing.combo.cantidad}`,
         productoNombre: `Descuento ${pricing.combo.nombre}`,
@@ -390,6 +427,7 @@ export async function confirmSale(items) {
 
     if (hasTogoo) {
       const tarifaTogoo = {
+        uuid: crypto.randomUUID(),
         ventaId: saleId,
         productoId: "togoo-fee",
         productoNombre: "Tarifa ToGoo",
@@ -410,6 +448,7 @@ export async function confirmSale(items) {
         const stockNuevo = stockAnterior - item.quantity;
         stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
         const mov = {
+          uuid: crypto.randomUUID(),
           productoId: product.id,
           tipo: "venta",
           cantidad: -item.quantity,
@@ -427,7 +466,7 @@ export async function confirmSale(items) {
     return {
       saleId, fecha, hora, totalCentavos, saleMode,
       _syncPayload: {
-        venta: { fecha, hora, totalCentavos, saleMode, creadoEn: now },
+        venta: { fecha, hora, totalCentavos, saleMode, creadoEn: now, uuid: ventaUuid },
         detalles: _detallesSync,
         movimientosStock: _movStockSync,
         movimientosInsumos: []
@@ -479,6 +518,7 @@ export async function undoSale(ventaId) {
         const stockNuevo = stockAnterior + detalle.cantidad;
         stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
         stores.movimientos_stock.add({
+          uuid: crypto.randomUUID(),
           productoId: product.id,
           tipo: "devolucion",
           cantidad: detalle.cantidad,
@@ -493,9 +533,11 @@ export async function undoSale(ventaId) {
 
     stores.ventas.put({ ...venta, anulada: true, anuladaEn: now });
 
-    // Se devuelve fecha + creadoEn (no el id local) porque es lo que hace
-    // falta para encontrar la fila correspondiente en Supabase: el id local
-    // y el id que le asigna Supabase a la venta son secuencias distintas.
-    return { fecha: venta.fecha, creadoEn: venta.creadoEn };
+    // Se devuelve el uuid (identidad compartida entre local y Supabase) para
+    // encontrar la fila correspondiente en la nube — el id local y el id que
+    // le asigna Supabase a la venta son secuencias distintas, no sirven para
+    // matchear. fecha/creadoEn quedan de respaldo por si la venta es de antes
+    // de este cambio y todavia no tiene uuid.
+    return { uuid: venta.uuid || null, fecha: venta.fecha, creadoEn: venta.creadoEn };
   });
 }

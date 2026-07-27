@@ -4,8 +4,16 @@
 -- =========================================
 
 -- Ventas (cabecera)
+-- uuid: identidad compartida con la fila local en IDB, generada en la tablet
+-- al crear la venta (crypto.randomUUID()). El id autoincremental de Supabase
+-- y el id autoincremental local NO son el mismo numero — son dos secuencias
+-- independientes — por eso el uuid es lo que hay que usar para referenciar
+-- "esta venta puntual" desde otro dispositivo (ver updateVentaAnulada en
+-- supabase.js). Tambien sirve como conflict target de upsert, asi que
+-- reintentar un push que en realidad ya se habia guardado no duplica la fila.
 CREATE TABLE IF NOT EXISTS ventas (
   id          BIGSERIAL PRIMARY KEY,
+  uuid        TEXT UNIQUE,
   fecha       TEXT NOT NULL,
   hora        TEXT,
   total_centavos INTEGER NOT NULL DEFAULT 0,
@@ -23,6 +31,7 @@ CREATE TABLE IF NOT EXISTS ventas (
 -- Detalle de venta (líneas)
 CREATE TABLE IF NOT EXISTS detalle_venta (
   id                    BIGSERIAL PRIMARY KEY,
+  uuid                  TEXT UNIQUE,
   venta_id              BIGINT NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
   producto_id           TEXT,
   producto_nombre       TEXT,
@@ -54,7 +63,7 @@ CREATE TABLE IF NOT EXISTS insumos (
 CREATE TABLE IF NOT EXISTS recetas (
   id                    TEXT PRIMARY KEY,
   producto_id           TEXT NOT NULL,
-  insumo_id             TEXT NOT NULL,
+  insumo_id             TEXT NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
   cantidad_por_unidad   NUMERIC NOT NULL,
   es_estimado           BOOLEAN DEFAULT false,
   actualizado_en        TIMESTAMPTZ DEFAULT NOW()
@@ -63,7 +72,8 @@ CREATE TABLE IF NOT EXISTS recetas (
 -- Movimientos de insumos (cada descuento por venta o ajuste)
 CREATE TABLE IF NOT EXISTS movimientos_insumos (
   id              BIGSERIAL PRIMARY KEY,
-  insumo_id       TEXT NOT NULL,
+  uuid            TEXT UNIQUE,
+  insumo_id       TEXT NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
   tipo            TEXT NOT NULL,
   cantidad        NUMERIC NOT NULL,
   stock_anterior  NUMERIC,
@@ -76,7 +86,8 @@ CREATE TABLE IF NOT EXISTS movimientos_insumos (
 -- Historial de calibraciones (datos del modelo ML)
 CREATE TABLE IF NOT EXISTS historial_calibraciones (
   id                BIGSERIAL PRIMARY KEY,
-  insumo_id         TEXT NOT NULL,
+  uuid              TEXT UNIQUE,
+  insumo_id         TEXT NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
   fecha             TEXT,
   stock_antes       NUMERIC,
   stock_real        NUMERIC,
@@ -89,6 +100,37 @@ CREATE TABLE IF NOT EXISTS historial_calibraciones (
   estimado_antes    NUMERIC,
   estimado_despues  NUMERIC,
   creado_en         TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Proveedores
+CREATE TABLE IF NOT EXISTS proveedores (
+  id             TEXT PRIMARY KEY,
+  nombre         TEXT NOT NULL,
+  tel            TEXT,
+  email          TEXT,
+  notas          TEXT,
+  dias_ciclo     INTEGER,
+  activo         BOOLEAN NOT NULL DEFAULT true,
+  creado_en      TIMESTAMPTZ DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Que insumos vende cada proveedor, a que precio, y bajo que nombre propio
+-- (nombre_producto es la denominacion real de la factura de ESE proveedor —
+-- pieza clave para matchear facturas automaticamente contra el catalogo de
+-- insumos). insumo_id puede ser NULL: un producto del proveedor todavia sin
+-- vincular a ningun insumo del catalogo.
+CREATE TABLE IF NOT EXISTS proveedor_insumos (
+  id                       TEXT PRIMARY KEY,
+  proveedor_id             TEXT NOT NULL REFERENCES proveedores(id) ON DELETE CASCADE,
+  insumo_id                TEXT REFERENCES insumos(id) ON DELETE CASCADE,
+  nombre_producto          TEXT,
+  unidad_compra            TEXT,
+  cantidad_por_unidad      NUMERIC,
+  precio_unitario_centavos INTEGER,
+  activo                   BOOLEAN NOT NULL DEFAULT true,
+  creado_en                TIMESTAMPTZ DEFAULT NOW(),
+  actualizado_en           TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Producción diaria
@@ -114,6 +156,7 @@ CREATE TABLE IF NOT EXISTS stock_productos (
 -- Movimientos de stock de productos
 CREATE TABLE IF NOT EXISTS movimientos_stock (
   id              BIGSERIAL PRIMARY KEY,
+  uuid            TEXT UNIQUE,
   producto_id     TEXT,
   tipo            TEXT,
   cantidad        INTEGER,
@@ -168,6 +211,8 @@ ALTER TABLE movimientos_stock    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detalle_pedido       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_productos      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proveedores          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proveedor_insumos    ENABLE ROW LEVEL SECURITY;
 
 -- Cualquier usuario autenticado (las 3 cuentas) puede leer, insertar y
 -- actualizar todas las tablas. DELETE solo existe en pedidos/detalle_pedido
@@ -222,6 +267,14 @@ CREATE POLICY stock_productos_select ON stock_productos FOR SELECT TO authentica
 CREATE POLICY stock_productos_insert ON stock_productos FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY stock_productos_update ON stock_productos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 
+CREATE POLICY proveedores_select ON proveedores FOR SELECT TO authenticated USING (true);
+CREATE POLICY proveedores_insert ON proveedores FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY proveedores_update ON proveedores FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY proveedor_insumos_select ON proveedor_insumos FOR SELECT TO authenticated USING (true);
+CREATE POLICY proveedor_insumos_insert ON proveedor_insumos FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY proveedor_insumos_update ON proveedor_insumos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
 -- Índices útiles para queries del dashboard
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha               ON ventas(fecha);
 CREATE INDEX IF NOT EXISTS idx_detalle_venta_venta_id     ON detalle_venta(venta_id);
@@ -234,3 +287,5 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_estado             ON pedidos(estado);
 CREATE INDEX IF NOT EXISTS idx_pedidos_fecha_retiro        ON pedidos(fecha_hora_retiro);
 CREATE INDEX IF NOT EXISTS idx_detalle_pedido_pedido_id   ON detalle_pedido(pedido_id);
 CREATE INDEX IF NOT EXISTS idx_produccion_diaria_fecha    ON produccion_diaria(fecha);
+CREATE INDEX IF NOT EXISTS idx_prov_insumos_proveedor_id  ON proveedor_insumos(proveedor_id);
+CREATE INDEX IF NOT EXISTS idx_prov_insumos_insumo_id     ON proveedor_insumos(insumo_id);

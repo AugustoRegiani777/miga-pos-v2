@@ -137,6 +137,18 @@ function upsert(table, data) {
   });
 }
 
+// Upsert contra una columna que NO es la primary key (por ejemplo "uuid" en
+// tablas con id autoincremental). Necesario para que reintentar un push que
+// en verdad ya se habia guardado (se corto la respuesta, no la escritura) no
+// termine creando una fila duplicada — resuelve contra el uuid en vez de
+// insertar una fila nueva cada vez.
+function upsertOnConflict(table, data, conflictColumn) {
+  const rows = Array.isArray(data) ? data : [data];
+  return sbFetch(`/${table}?on_conflict=${conflictColumn}`, "POST", rows, {
+    "Prefer": "resolution=merge-duplicates,return=representation"
+  });
+}
+
 export async function testConnection() {
   try {
     const session = loadSession();
@@ -147,8 +159,15 @@ export async function testConnection() {
   }
 }
 
+// Cada insert de abajo resuelve por "uuid" (generado en la tablet al crear
+// el registro, no por el id autoincremental de Supabase). Esto hace que
+// reintentar un push que en realidad ya se habia guardado (se corto la
+// respuesta pero la escritura llego) actualice la misma fila en vez de
+// duplicarla — y de paso, el uuid es el identificador que sirve para
+// referenciar esta venta puntual desde otro dispositivo (ver updateVentaAnulada).
 export async function pushVenta({ venta, detalles, movimientosStock }) {
-  const [ventaRow] = await insert("ventas", {
+  const [ventaRow] = await upsertOnConflict("ventas", {
+    uuid: venta.uuid,
     fecha: venta.fecha,
     hora: venta.hora,
     total_centavos: venta.totalCentavos,
@@ -157,11 +176,12 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
     pedido_id: venta.pedidoId || null,
     cliente_nombre: venta.clienteNombre || null,
     creado_en: venta.creadoEn
-  });
+  }, "uuid");
   const ventaId = ventaRow.id;
 
   if (detalles.length > 0) {
-    await insert("detalle_venta", detalles.map(d => ({
+    await upsertOnConflict("detalle_venta", detalles.map(d => ({
+      uuid: d.uuid,
       venta_id: ventaId,
       producto_id: d.productoId,
       producto_nombre: d.productoNombre,
@@ -170,11 +190,12 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
       subtotal_centavos: d.subtotalCentavos,
       fecha: d.fecha,
       creado_en: d.creadoEn
-    })));
+    })), "uuid");
   }
 
   if (movimientosStock.length > 0) {
-    await insert("movimientos_stock", movimientosStock.map(m => ({
+    await upsertOnConflict("movimientos_stock", movimientosStock.map(m => ({
+      uuid: m.uuid,
       producto_id: m.productoId,
       tipo: m.tipo,
       cantidad: m.cantidad,
@@ -184,14 +205,15 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
       referencia: m.referencia || null,
       fecha: m.fecha,
       creado_en: m.creadoEn
-    })));
+    })), "uuid");
   }
 
   return ventaId;
 }
 
 export async function pushCalibracion(evento) {
-  return insert("historial_calibraciones", {
+  return upsertOnConflict("historial_calibraciones", {
+    uuid: evento.uuid,
     insumo_id: evento.insumoId,
     fecha: evento.fecha,
     stock_antes: evento.stockAntes,
@@ -205,7 +227,7 @@ export async function pushCalibracion(evento) {
     estimado_antes: evento.estimadoAntes,
     estimado_despues: evento.estimadoDespues,
     creado_en: evento.creadoEn
-  });
+  }, "uuid");
 }
 
 export async function pushInsumosSnapshot(insumos) {
@@ -236,9 +258,39 @@ export async function pushRecetasSnapshot(recetas) {
   })));
 }
 
+export async function pushProveedoresSnapshot(proveedores) {
+  return upsert("proveedores", proveedores.map(p => ({
+    id: p.id,
+    nombre: p.nombre,
+    tel: p.tel || null,
+    email: p.email || null,
+    notas: p.notas || null,
+    dias_ciclo: p.diasCiclo,
+    activo: p.activo !== false,
+    actualizado_en: new Date().toISOString()
+  })));
+}
+
+// nombre_producto es la denominacion propia de cada proveedor para ese
+// insumo — la pieza que despues usa la lectura de facturas para matchear.
+export async function pushProveedorInsumosSnapshot(proveedorInsumos) {
+  return upsert("proveedor_insumos", proveedorInsumos.map(pi => ({
+    id: pi.id,
+    proveedor_id: pi.proveedorId,
+    insumo_id: pi.insumoId || null,
+    nombre_producto: pi.nombreProducto || null,
+    unidad_compra: pi.unidadCompra || null,
+    cantidad_por_unidad: pi.cantidadPorUnidad,
+    precio_unitario_centavos: pi.precioUnitarioCentavos,
+    activo: pi.activo !== false,
+    actualizado_en: new Date().toISOString()
+  })));
+}
+
 export async function pushMovimientosInsumos(movimientos) {
   if (!movimientos || movimientos.length === 0) return;
-  return insert("movimientos_insumos", movimientos.map(m => ({
+  return upsertOnConflict("movimientos_insumos", movimientos.map(m => ({
+    uuid: m.uuid,
     insumo_id: m.insumoId,
     tipo: m.tipo,
     cantidad: m.cantidad,
@@ -247,7 +299,7 @@ export async function pushMovimientosInsumos(movimientos) {
     venta_id_local: m.ventaId || null,
     fecha: m.fecha,
     creado_en: m.creadoEn
-  })));
+  })), "uuid");
 }
 
 // --- Sync para "modo consulta" (Caja/Produccion/Historial de solo lectura
@@ -277,10 +329,14 @@ export async function pushProduccionDiaria(rows) {
 // Se llama cuando se deshace una venta localmente, para que "modo consulta"
 // deje de contarla tambien. El id local de la venta NO es el mismo que el id
 // que le asigno Supabase al pushearla (son secuencias auto-increment
-// distintas) — por eso se matchea por fecha + creado_en, que es el mismo
-// timestamp que ya viaja sin cambios en pushVenta().
-export async function updateVentaAnulada(fecha, creadoEn) {
-  return sbFetch(`/ventas?fecha=eq.${fecha}&creado_en=eq.${encodeURIComponent(creadoEn)}`, "PATCH", {
+// distintas) — por eso se matchea por uuid (identidad compartida generada en
+// la tablet). fecha+creado_en queda como respaldo solo para ventas de antes
+// de este cambio, que todavia no tienen uuid.
+export async function updateVentaAnulada({ uuid, fecha, creadoEn }) {
+  const filtro = uuid
+    ? `uuid=eq.${encodeURIComponent(uuid)}`
+    : `fecha=eq.${fecha}&creado_en=eq.${encodeURIComponent(creadoEn)}`;
+  return sbFetch(`/ventas?${filtro}`, "PATCH", {
     anulada: true,
     anulada_en: new Date().toISOString()
   });
@@ -295,7 +351,8 @@ export async function fetchProduccionDiaria(fecha) {
 }
 
 export async function pushMovimientoStock(m) {
-  return insert("movimientos_stock", {
+  return upsertOnConflict("movimientos_stock", {
+    uuid: m.uuid,
     producto_id: m.productoId,
     tipo: m.tipo,
     cantidad: m.cantidad,
@@ -305,7 +362,7 @@ export async function pushMovimientoStock(m) {
     referencia: m.referencia || null,
     fecha: m.fecha,
     creado_en: m.creadoEn
-  });
+  }, "uuid");
 }
 
 // Trae todos los movimientos del dia; el filtro de cuales son "de produccion"
@@ -313,6 +370,16 @@ export async function pushMovimientoStock(m) {
 // igual que productionSnapshot() en business.js.
 export async function fetchMovimientosStock(fecha) {
   return sbFetch(`/movimientos_stock?fecha=eq.${fecha}&order=creado_en.asc`);
+}
+
+// Trae los movimientos DESDE una fecha en adelante (inclusive) — sirve para
+// reconstruir cuanto stock habia en un dia pasado, restando del stock actual
+// todo lo que cambio despues. Ojo: los movimientos de produccion recien
+// empiezan a sincronizarse desde que se agrego este sync (ver CLAUDE.md /
+// historial de cambios) — para fechas muy anteriores a eso, la reconstruccion
+// puede no ser exacta hasta que se acumule mas historial en Supabase.
+export async function fetchMovimientosStockDesde(fecha) {
+  return sbFetch(`/movimientos_stock?fecha=gte.${fecha}&order=fecha.asc`);
 }
 
 export async function fetchVentasDelDia(fecha) {

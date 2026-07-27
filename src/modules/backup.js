@@ -1,5 +1,5 @@
 import { exportAllData, getAll, importAllData } from "../db/idb.js";
-import { listProducts, productionSnapshot, salesForDay } from "./business.js";
+import { listProducts, productionSnapshot, salesForDay, stockHistoricoPorFecha } from "./business.js";
 import { centsToMoney, downloadText, shareOrDownloadText, normalizeText, todayISO } from "../utils/format.js";
 
 const FALLBACK_CATEGORIES = [
@@ -81,6 +81,7 @@ export async function exportSalesSummary(fecha) {
   const sales = await salesForDay(fecha);
   const products = await listProducts();
   const snapshot = await productionSnapshot(fecha);
+  const historico = await stockHistoricoPorFecha(fecha);
   const productsById = new Map(products.map((p) => [p.id, p]));
   const productsByName = new Map(products.map((p) => [normalizeText(p.nombre), p]));
   const stockAdjustments = (await getAll("movimientos_stock"))
@@ -160,9 +161,11 @@ export async function exportSalesSummary(fecha) {
     .reduce((sum, [, row]) => sum + row.cantidad, 0);
 
   const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
-    (sum, p) => sum + (Number(p.stockActual) || 0), 0
+    (sum, p) => sum + (historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0), 0
   );
-  const totalStockAyer = totalSandwichesDisponibles - totalSandwichesProduced + totalSandwichesVendidos;
+  const totalStockAyer = snapshot.sandwiches.reduce(
+    (sum, p) => sum + (historico.get(p.id)?.stockAlInicio ?? 0), 0
+  );
 
   let totalBebidasVendidas = 0;
   for (const [key, row] of salesSummary) {
@@ -290,8 +293,9 @@ export async function exportSalesSummary(fecha) {
   lines.push(`  ${SEP_THIN.slice(0, 56)}`);
   for (const p of snapshot.sandwiches) {
     const vendido = salesSummary.get(p.id)?.cantidad || 0;
-    const ayer = (Number(p.stockActual) || 0) - (Number(p.cantidadProducida) || 0) + vendido;
-    lines.push(`  ${padR(p.nombre, 28)}  ${padL(ayer, 5)}  ${padL(p.cantidadProducida, 5)}  ${padL(vendido, 5)}  ${padL(p.stockActual, 6)}`);
+    const stockFinal = historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0;
+    const ayer = historico.get(p.id)?.stockAlInicio ?? 0;
+    lines.push(`  ${padR(p.nombre, 28)}  ${padL(ayer, 5)}  ${padL(p.cantidadProducida, 5)}  ${padL(vendido, 5)}  ${padL(stockFinal, 6)}`);
   }
 
   // ToGoo
@@ -362,6 +366,7 @@ export async function exportDailySummaryJSON(fecha) {
   const sales = await salesForDay(fecha);
   const products = await listProducts();
   const snapshot = await productionSnapshot(fecha);
+  const historico = await stockHistoricoPorFecha(fecha);
   const productsById = new Map(products.map((p) => [p.id, p]));
   const productsByName = new Map(products.map((p) => [normalizeText(p.nombre), p]));
 
@@ -425,8 +430,12 @@ export async function exportDailySummaryJSON(fecha) {
   const totalSandwichesVendidos = Array.from(salesSummary.values())
     .filter(r => productsById.get(r.productoId)?.categoriaId === "sandwiches" && productsById.get(r.productoId)?.controlaStock)
     .reduce((s, r) => s + r.cantidad, 0);
-  const totalSandwichesRestantes = snapshot.sandwiches.reduce((s, p) => s + (Number(p.stockActual) || 0), 0);
-  const sandwichesAyer = totalSandwichesRestantes - totalSandwichesProducidos + totalSandwichesVendidos;
+  const totalSandwichesRestantes = snapshot.sandwiches.reduce(
+    (s, p) => s + (historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0), 0
+  );
+  const sandwichesAyer = snapshot.sandwiches.reduce(
+    (s, p) => s + (historico.get(p.id)?.stockAlInicio ?? 0), 0
+  );
 
   const payload = {
     _meta: { app: "Miga POS", version: "v2", exportadoEn: new Date().toISOString() },
@@ -451,13 +460,13 @@ export async function exportDailySummaryJSON(fecha) {
         productoId: p.id,
         nombre: p.nombre,
         cantidadProducida: Number(p.cantidadProducida) || 0,
-        stockRestante: Number(p.stockActual) || 0
+        stockRestante: historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0
       })),
       bolleria: snapshot.bolleria.map(p => ({
         productoId: p.id,
         nombre: p.nombre,
         cantidadProducida: Number(p.cantidadProducida) || 0,
-        stockRestante: Number(p.stockActual) || 0
+        stockRestante: historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0
       })),
       comentarios: snapshot.comentarios || []
     },

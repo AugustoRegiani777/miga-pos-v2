@@ -225,7 +225,7 @@ export async function ajustarStockInsumo(insumoId, cantidad, tipo) {
   // Escribir sincrónico — sin await adentro
   return withStores(["insumos", "movimientos_insumos"], "readwrite", (stores) => {
     stores.insumos.put({ ...insumo, stockActual: stockNuevo, ultimaCalibracion, actualizadoEn: now });
-    stores.movimientos_insumos.add({ insumoId, tipo, cantidad, stockAnterior, stockNuevo, fecha, creadoEn: now });
+    stores.movimientos_insumos.add({ uuid: crypto.randomUUID(), insumoId, tipo, cantidad, stockAnterior, stockNuevo, fecha, creadoEn: now });
   });
 }
 
@@ -279,6 +279,7 @@ export async function calibrarInsumo(insumoId, stockRealRaw, alphaRecetaOverride
       const todasFijas = recetasDelInsumo.every(r => r.recetaFija);
 
       eventoCalib = {
+        uuid: crypto.randomUUID(),
         insumoId, fecha,
         stockAntes: cal.stockEnCalibracion, stockReal,
         sandwiches: totalSandwiches,
@@ -318,6 +319,7 @@ export async function calibrarInsumo(insumoId, stockRealRaw, alphaRecetaOverride
   };
 
   const movimiento = {
+    uuid: crypto.randomUUID(),
     insumoId, tipo: "calibracion",
     cantidad: stockReal - insumo.stockActual,
     stockAnterior: insumo.stockActual, stockNuevo: stockReal,
@@ -622,7 +624,7 @@ export async function deductInsumosForProductionInTx(stores, productId, cantidad
       necesitaCalibracion: insumo.necesitaCalibracion || cruzaMinimo,
       ultimaCalibracion: cal, actualizadoEn: now
     });
-    const mov = { insumoId: receta.insumoId, tipo: "produccion", cantidad: -total, stockAnterior, stockNuevo, productoId: productId, fecha, creadoEn: now };
+    const mov = { uuid: crypto.randomUUID(), insumoId: receta.insumoId, tipo: "produccion", cantidad: -total, stockAnterior, stockNuevo, productoId: productId, fecha, creadoEn: now };
     stores.movimientos_insumos.add(mov);
     movimientosCreados.push(mov);
     if (stockNuevo < 0) {
