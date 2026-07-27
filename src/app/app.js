@@ -993,7 +993,7 @@ async function renderHistoryView() {
       );
       const historico = historicoDesdeMovimientosRemotos(sandwiches, movimientosDesde, fecha);
       const totalSandwichesDisponibles = sandwiches.reduce(
-        (total, p) => total + (historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0),
+        (total, p) => total + (historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)),
         0
       );
       const totalStockAyer = sandwiches.reduce(
@@ -1029,7 +1029,7 @@ async function renderHistoryView() {
   );
   const historico = await stockHistoricoPorFecha(fecha);
   const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
-    (total, product) => total + (historico.get(product.id)?.stockAlFinal ?? Number(product.stockActual) || 0),
+    (total, product) => total + (historico.get(product.id)?.stockAlFinal ?? (Number(product.stockActual) || 0)),
     0
   );
   const totalStockAyer = snapshot.sandwiches.reduce(

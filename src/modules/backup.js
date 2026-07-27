@@ -161,7 +161,7 @@ export async function exportSalesSummary(fecha) {
     .reduce((sum, [, row]) => sum + row.cantidad, 0);
 
   const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
-    (sum, p) => sum + (historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0), 0
+    (sum, p) => sum + (historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)), 0
   );
   const totalStockAyer = snapshot.sandwiches.reduce(
     (sum, p) => sum + (historico.get(p.id)?.stockAlInicio ?? 0), 0
@@ -293,7 +293,7 @@ export async function exportSalesSummary(fecha) {
   lines.push(`  ${SEP_THIN.slice(0, 56)}`);
   for (const p of snapshot.sandwiches) {
     const vendido = salesSummary.get(p.id)?.cantidad || 0;
-    const stockFinal = historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0;
+    const stockFinal = historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0);
     const ayer = historico.get(p.id)?.stockAlInicio ?? 0;
     lines.push(`  ${padR(p.nombre, 28)}  ${padL(ayer, 5)}  ${padL(p.cantidadProducida, 5)}  ${padL(vendido, 5)}  ${padL(stockFinal, 6)}`);
   }
@@ -431,7 +431,7 @@ export async function exportDailySummaryJSON(fecha) {
     .filter(r => productsById.get(r.productoId)?.categoriaId === "sandwiches" && productsById.get(r.productoId)?.controlaStock)
     .reduce((s, r) => s + r.cantidad, 0);
   const totalSandwichesRestantes = snapshot.sandwiches.reduce(
-    (s, p) => s + (historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0), 0
+    (s, p) => s + (historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)), 0
   );
   const sandwichesAyer = snapshot.sandwiches.reduce(
     (s, p) => s + (historico.get(p.id)?.stockAlInicio ?? 0), 0
@@ -460,13 +460,13 @@ export async function exportDailySummaryJSON(fecha) {
         productoId: p.id,
         nombre: p.nombre,
         cantidadProducida: Number(p.cantidadProducida) || 0,
-        stockRestante: historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0
+        stockRestante: historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)
       })),
       bolleria: snapshot.bolleria.map(p => ({
         productoId: p.id,
         nombre: p.nombre,
         cantidadProducida: Number(p.cantidadProducida) || 0,
-        stockRestante: historico.get(p.id)?.stockAlFinal ?? Number(p.stockActual) || 0
+        stockRestante: historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)
       })),
       comentarios: snapshot.comentarios || []
     },
