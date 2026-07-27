@@ -365,6 +365,7 @@ export function renderListaComprasSmart(container, { items, byProveedor }) {
     ? `<p class="empty-state">Todo el stock está OK.</p>`
     : needsOrder.map(i => rowHtml(i)).join("");
 
+
   const provView = byProveedor.length === 0
     ? `<p class="empty-state">No hay productos para pedir.</p>`
     : byProveedor.map(group => {
@@ -399,6 +400,74 @@ export function renderListaComprasSmart(container, { items, byProveedor }) {
       container.querySelectorAll(".ldc-panel").forEach(p => p.classList.add("ldc-panel--hidden"));
       tab.classList.add("active");
       container.querySelector(`.ldc-panel[data-panel="${tab.dataset.tab}"]`).classList.remove("ldc-panel--hidden");
+    });
+  });
+}
+
+// Pantalla de revision de "Cargar por factura": una tarjeta editable por
+// linea detectada. El selector de insumo trae "+ Crear insumo nuevo" como
+// primera opcion; si se elige, se revela el mini-formulario para dar de
+// alta el insumo (con lo que la IA ya detecto, prellenado).
+export function renderFacturaLineas(container, lineas, insumos) {
+  const insumosOrdenados = [...insumos].sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  const opcionesInsumos = (seleccionado) => insumosOrdenados
+    .map(i => `<option value="${i.id}" ${i.id === seleccionado ? "selected" : ""}>${i.nombre}</option>`)
+    .join("");
+
+  const CONFIANZA_LABEL = { alta: "Alta", media: "Revisar", sin_match: "Sin match" };
+
+  container.innerHTML = lineas.map((linea, index) => {
+    const confianza = linea.confianza === "alta" || linea.confianza === "media" ? linea.confianza : "sin_match";
+    const insumoSeleccionado = linea.insumoId && insumosOrdenados.some(i => i.id === linea.insumoId)
+      ? linea.insumoId
+      : "__nuevo__";
+    return `
+      <article class="factura-linea" data-index="${index}" data-confianza="${confianza}">
+        <div class="factura-linea-head">
+          <strong>${linea.nombreDetectado || "Producto sin nombre"}</strong>
+          <span class="factura-badge ${confianza}">${CONFIANZA_LABEL[confianza]}</span>
+        </div>
+        <div class="factura-linea-campos">
+          <label class="quantity-field">Cantidad
+            <input type="number" step="any" class="factura-cantidad" value="${Number(linea.cantidad) || 0}">
+          </label>
+          <label class="quantity-field">Unidad
+            <input type="text" class="factura-unidad" value="${linea.unidad || ""}">
+          </label>
+          <label class="quantity-field">Precio total (€)
+            <input type="number" step="any" class="factura-precio" value="${Number(linea.precio) || 0}">
+          </label>
+        </div>
+        <label class="quantity-field">
+          Insumo
+          <select class="factura-insumo-select">
+            <option value="__nuevo__" ${insumoSeleccionado === "__nuevo__" ? "selected" : ""}>+ Crear insumo nuevo</option>
+            ${opcionesInsumos(insumoSeleccionado)}
+          </select>
+        </label>
+        <div class="factura-linea-nuevo" ${insumoSeleccionado === "__nuevo__" ? "" : "hidden"}>
+          <label class="quantity-field">Nombre del insumo nuevo
+            <input type="text" class="factura-nuevo-nombre" value="${linea.nombreDetectado || ""}">
+          </label>
+          <label class="quantity-field">Unidad base
+            <input type="text" class="factura-nueva-unidad" value="${linea.unidad || ""}">
+          </label>
+          <label class="quantity-field">Stock mínimo
+            <input type="number" step="any" class="factura-nuevo-min" value="0">
+          </label>
+          <label class="quantity-field">Stock crítico
+            <input type="number" step="any" class="factura-nuevo-crit" value="0">
+          </label>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  container.querySelectorAll(".factura-insumo-select").forEach(select => {
+    select.addEventListener("change", () => {
+      const nuevoBox = select.closest(".factura-linea").querySelector(".factura-linea-nuevo");
+      nuevoBox.hidden = select.value !== "__nuevo__";
     });
   });
 }

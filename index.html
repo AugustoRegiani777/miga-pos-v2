@@ -423,8 +423,52 @@
         </form>
       </section>
 
+      <section class="production-sheet-backdrop" id="factura-backdrop" hidden></section>
+
+      <section class="form-section stock-adjust-sheet" id="factura-sheet" aria-hidden="true">
+        <div class="production-sheet-header">
+          <div>
+            <h2>Cargar por factura</h2>
+            <p>Elegi el proveedor y subi la foto. La IA arma el detalle, vos confirmas antes de que se cargue el stock.</p>
+          </div>
+          <button type="button" class="ghost-button compact" id="close-factura" aria-label="Cerrar">Cerrar</button>
+        </div>
+        <div class="sheet-scroll-body">
+          <div id="factura-paso-upload">
+            <label class="quantity-field">
+              Proveedor
+              <select id="factura-proveedor"></select>
+            </label>
+            <div class="factura-upload-row">
+              <button type="button" class="file-button" id="factura-sacar-foto">Sacar foto</button>
+              <button type="button" class="file-button" id="factura-adjuntar">Adjuntar archivo</button>
+            </div>
+            <input type="file" accept="image/*" capture="environment" id="factura-input-foto" hidden>
+            <input type="file" accept="image/*,application/pdf" id="factura-input-adjunto" hidden>
+            <p class="factura-archivo-nombre" id="factura-archivo-nombre"></p>
+          </div>
+
+          <div id="factura-paso-cargando" hidden>
+            <div class="factura-loading-card">
+              <strong>Leyendo la factura…</strong>
+              <small>Esto tarda unos segundos.</small>
+            </div>
+          </div>
+
+          <div id="factura-paso-revision" hidden>
+            <p class="factura-resumen" id="factura-resumen"></p>
+            <div id="factura-lineas"></div>
+          </div>
+        </div>
+        <div class="sheet-footer">
+          <button type="button" class="primary-button" id="factura-continuar" disabled>Leer factura</button>
+          <button type="button" class="primary-button" id="factura-confirmar" hidden>Confirmar y cargar stock</button>
+        </div>
+      </section>
+
       <section class="stock-toolbar">
         <button class="ghost-button compact" type="button" id="ver-lista-compras">Lista de compras</button>
+        <button class="ghost-button compact" type="button" id="abrir-factura">Cargar por factura</button>
       </section>
 
       <section id="lista-compras-section" hidden>

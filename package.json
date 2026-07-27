@@ -4,5 +4,8 @@
   "private": true,
   "scripts": {
     "start": "node -e \"console.log('\\n  App:     http://localhost:3000\\n  Dev:     http://localhost:3000/dev\\n')\" && npx serve . --no-clipboard"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0"
   }
 }

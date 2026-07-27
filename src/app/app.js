@@ -16,7 +16,8 @@ import {
   trySyncVentaAnulada,
   setupAutoSync
 } from "../modules/sync.js";
-import { renderInsumosList, renderInsumoAjusteSelected, renderCalibracionAlert, renderListaComprasSmart, renderCalibracionDashboard, renderCalibracionRecetaSettings, renderRecetasEditor } from "../ui/render-aprovisionamiento.js";
+import { renderInsumosList, renderInsumoAjusteSelected, renderCalibracionAlert, renderListaComprasSmart, renderCalibracionDashboard, renderCalibracionRecetaSettings, renderRecetasEditor, renderFacturaLineas } from "../ui/render-aprovisionamiento.js";
+import { archivoABase64, leerFactura, confirmarFactura } from "../modules/facturas.js";
 import { fetchPedidosDelDia, crearPedido, editarPedido, eliminarPedido, marcarPedidoListo, marcarPedidoEntregado } from "../modules/pedidos.js";
 import { renderPedidosGrid, renderPedidoProductPicker, formatPedidoTicket } from "../ui/render-pedidos.js";
 import { shareOrDownloadText, shareText, printTicket } from "../utils/format.js";
@@ -72,6 +73,10 @@ let insumosAjusteSheetOpen = false;
 let insumosCalibracionSheetOpen = false;
 let insumosAjusteTipo = "compra";
 let insumosListaComprasVisible = false;
+let facturaSheetOpen = false;
+let facturaArchivoBase64 = null;
+let facturaLineasActuales = [];
+let facturaInProgress = false;
 let recetaEditInProgress = false;
 let selectedRecetaId = "";
 let recetaEditSheetOpen = false;
@@ -237,6 +242,23 @@ const dom = {
   listaComprasSection: document.querySelector("#lista-compras-section"),
   listaComprasList: document.querySelector("#lista-compras-list"),
   exportListaCompras: document.querySelector("#export-lista-compras"),
+  abrirFactura: document.querySelector("#abrir-factura"),
+  facturaBackdrop: document.querySelector("#factura-backdrop"),
+  facturaSheet: document.querySelector("#factura-sheet"),
+  closeFactura: document.querySelector("#close-factura"),
+  facturaProveedor: document.querySelector("#factura-proveedor"),
+  facturaSacarFoto: document.querySelector("#factura-sacar-foto"),
+  facturaAdjuntar: document.querySelector("#factura-adjuntar"),
+  facturaInputFoto: document.querySelector("#factura-input-foto"),
+  facturaInputAdjunto: document.querySelector("#factura-input-adjunto"),
+  facturaArchivoNombre: document.querySelector("#factura-archivo-nombre"),
+  facturaPasoUpload: document.querySelector("#factura-paso-upload"),
+  facturaPasoCargando: document.querySelector("#factura-paso-cargando"),
+  facturaPasoRevision: document.querySelector("#factura-paso-revision"),
+  facturaResumen: document.querySelector("#factura-resumen"),
+  facturaLineas: document.querySelector("#factura-lineas"),
+  facturaContinuar: document.querySelector("#factura-continuar"),
+  facturaConfirmar: document.querySelector("#factura-confirmar"),
   proveedoresList: document.querySelector("#proveedores-list"),
   provEditSheet: document.querySelector("#prov-edit-sheet"),
   provEditBackdrop: document.querySelector("#prov-edit-backdrop"),
@@ -421,6 +443,125 @@ function closeAllGestionSheets() {
   setRecetaEditSheetOpen(false);
   setProvEditSheetOpen(false);
   setProvProdSheetOpen(false);
+  setFacturaSheetOpen(false);
+}
+
+function setFacturaSheetOpen(isOpen) {
+  facturaSheetOpen = isOpen;
+  dom.facturaSheet.classList.toggle("open", isOpen);
+  dom.facturaSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  dom.facturaBackdrop.hidden = !isOpen;
+  dom.facturaBackdrop.classList.toggle("open", isOpen);
+}
+
+function mostrarPasoFactura(paso) {
+  dom.facturaPasoUpload.hidden = paso !== "upload";
+  dom.facturaPasoCargando.hidden = paso !== "cargando";
+  dom.facturaPasoRevision.hidden = paso !== "revision";
+  dom.facturaContinuar.hidden = paso !== "upload";
+  dom.facturaConfirmar.hidden = paso !== "revision";
+}
+
+async function openFacturaSheet() {
+  const proveedores = (await getAll("proveedores"))
+    .filter((p) => p.activo)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  dom.facturaProveedor.innerHTML = proveedores.map((p) => `<option value="${p.id}">${p.nombre}</option>`).join("");
+  facturaArchivoBase64 = null;
+  facturaLineasActuales = [];
+  dom.facturaArchivoNombre.textContent = "";
+  dom.facturaContinuar.disabled = true;
+  mostrarPasoFactura("upload");
+  setFacturaSheetOpen(true);
+}
+
+function closeFacturaSheet() {
+  setFacturaSheetOpen(false);
+  facturaArchivoBase64 = null;
+  facturaLineasActuales = [];
+  dom.facturaInputFoto.value = "";
+  dom.facturaInputAdjunto.value = "";
+}
+
+async function handleFacturaArchivoSeleccionado(file) {
+  if (!file) return;
+  try {
+    facturaArchivoBase64 = await archivoABase64(file);
+    dom.facturaArchivoNombre.textContent = `Archivo: ${file.name}`;
+    dom.facturaContinuar.disabled = false;
+  } catch (error) {
+    setFlash(error.message || "No se pudo leer el archivo.", "error");
+  }
+}
+
+async function handleFacturaLeer() {
+  if (facturaInProgress || !facturaArchivoBase64) return;
+  facturaInProgress = true;
+  mostrarPasoFactura("cargando");
+  try {
+    const proveedorId = dom.facturaProveedor.value;
+    const items = await leerFactura(proveedorId, facturaArchivoBase64);
+    if (items.length === 0) {
+      throw new Error("No se detecto ninguna linea en la factura. Proba con otra foto.");
+    }
+    facturaLineasActuales = items;
+    const insumos = await listInsumos();
+    const proveedorNombre = dom.facturaProveedor.selectedOptions[0]?.textContent || proveedorId;
+    dom.facturaResumen.textContent =
+      `${proveedorNombre} · ${items.length} línea${items.length === 1 ? "" : "s"} detectada${items.length === 1 ? "" : "s"}`;
+    renderFacturaLineas(dom.facturaLineas, facturaLineasActuales, insumos);
+    mostrarPasoFactura("revision");
+  } catch (error) {
+    setFlash(error.message || "No se pudo leer la factura.", "error");
+    mostrarPasoFactura("upload");
+  } finally {
+    facturaInProgress = false;
+  }
+}
+
+function leerLineasDelFormulario() {
+  return Array.from(dom.facturaLineas.querySelectorAll(".factura-linea")).map((card) => {
+    const insumoSelect = card.querySelector(".factura-insumo-select");
+    const esNuevo = insumoSelect.value === "__nuevo__";
+    return {
+      insumoId: esNuevo ? null : insumoSelect.value,
+      nombreDetectado: card.querySelector("strong").textContent,
+      cantidad: Number(card.querySelector(".factura-cantidad").value) || 0,
+      unidad: card.querySelector(".factura-unidad").value.trim(),
+      precio: Number(card.querySelector(".factura-precio").value) || 0,
+      esNuevo,
+      nuevoNombre: esNuevo ? card.querySelector(".factura-nuevo-nombre").value.trim() : undefined,
+      nuevaUnidad: esNuevo ? card.querySelector(".factura-nueva-unidad").value.trim() : undefined,
+      nuevoStockMinimo: esNuevo ? card.querySelector(".factura-nuevo-min").value : undefined,
+      nuevoStockCritico: esNuevo ? card.querySelector(".factura-nuevo-crit").value : undefined
+    };
+  });
+}
+
+async function handleFacturaConfirmar() {
+  if (facturaInProgress) return;
+  facturaInProgress = true;
+  try {
+    const proveedorId = dom.facturaProveedor.value;
+    const lineas = leerLineasDelFormulario();
+    if (lineas.some((l) => l.cantidad <= 0)) {
+      throw new Error("Todas las líneas necesitan una cantidad mayor a 0.");
+    }
+    if (lineas.some((l) => l.esNuevo && !l.nuevoNombre)) {
+      throw new Error("Completa el nombre de cada insumo nuevo.");
+    }
+    const { insumosActualizados } = await confirmarFactura(proveedorId, lineas);
+    setFlash(
+      `Factura cargada: ${insumosActualizados} insumo${insumosActualizados === 1 ? "" : "s"} actualizado${insumosActualizados === 1 ? "" : "s"}.`,
+      "success"
+    );
+    closeFacturaSheet();
+    await refreshGestionSubView("insumos");
+  } catch (error) {
+    setFlash(error.message || "No se pudo confirmar la factura.", "error");
+  } finally {
+    facturaInProgress = false;
+  }
 }
 
 async function refreshGestionSubView(subViewName) {
@@ -1694,6 +1835,16 @@ function bindEvents() {
     await shareOrDownloadText(`lista-compras-${todayISO()}.txt`, txt, "text/plain");
     setFlash("Lista de compras exportada.", "success");
   });
+
+  dom.abrirFactura.addEventListener("click", () => { openFacturaSheet().catch(() => {}); });
+  dom.closeFactura.addEventListener("click", closeFacturaSheet);
+  dom.facturaBackdrop.addEventListener("click", closeFacturaSheet);
+  dom.facturaSacarFoto.addEventListener("click", () => dom.facturaInputFoto.click());
+  dom.facturaAdjuntar.addEventListener("click", () => dom.facturaInputAdjunto.click());
+  dom.facturaInputFoto.addEventListener("change", () => handleFacturaArchivoSeleccionado(dom.facturaInputFoto.files[0]));
+  dom.facturaInputAdjunto.addEventListener("change", () => handleFacturaArchivoSeleccionado(dom.facturaInputAdjunto.files[0]));
+  dom.facturaContinuar.addEventListener("click", handleFacturaLeer);
+  dom.facturaConfirmar.addEventListener("click", handleFacturaConfirmar);
 
   dom.closeRecetaEdit.addEventListener("click", closeRecetaEditSheet);
   dom.recetaEditBackdrop.addEventListener("click", closeRecetaEditSheet);
