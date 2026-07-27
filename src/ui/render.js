@@ -35,7 +35,7 @@ function formatProductionTime(isoString) {
   });
 }
 
-function productionSummaryLines(product) {
+export function productionSummaryLines(product) {
   if (!product.movimientosProduccion?.length) {
     return [`Produccion cargada hoy: ${product.cantidadProducida}`];
   }
@@ -282,12 +282,15 @@ export function renderProduccionConsulta(container, products) {
     row.innerHTML = `
       <div>
         <h2></h2>
-        <div class="stock-row-total"></div>
+        <p class="production-ayer"></p>
+        <p></p>
       </div>
       <strong></strong>
     `;
     row.querySelector("h2").textContent = product.nombre;
-    row.querySelector(".stock-row-total").textContent = `Producido hoy: ${product.cantidadProducida}`;
+    row.querySelector(".production-ayer").textContent = `Ayer quedaron: ${product.cantidadAyer ?? 0}`;
+    const subtitleNode = row.querySelector("p:last-of-type");
+    subtitleNode.innerHTML = productionSummaryLines(product).map((line) => `<span>${line}</span>`).join("");
     row.querySelector("strong").textContent = product.stockActual;
     container.appendChild(row);
   }

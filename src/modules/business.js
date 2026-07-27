@@ -228,7 +228,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
     }
 
     stores.productos.put({ ...product, stockActual: nuevoStock, actualizadoEn: now });
-    stores.movimientos_stock.add({
+    const movimiento = {
       productoId: productId,
       tipo: "ajuste_stock",
       cantidad,
@@ -238,9 +238,10 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
       motivo,
       fecha,
       creadoEn: now
-    });
+    };
+    stores.movimientos_stock.add(movimiento);
 
-    return { warnings };
+    return { warnings, movimiento };
   });
 }
 
@@ -274,7 +275,7 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
 
     stores.produccion_diaria.put(productionRow);
     stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
-    stores.movimientos_stock.add({
+    const movimiento = {
       productoId: productId,
       tipo: "produccion",
       cantidad,
@@ -283,9 +284,10 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
       referencia: `Produccion ${fecha}`,
       fecha,
       creadoEn: now
-    });
+    };
+    stores.movimientos_stock.add(movimiento);
     const { warnings } = await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
-    return { warnings };
+    return { warnings, movimiento };
   });
 }
 

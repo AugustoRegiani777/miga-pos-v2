@@ -1212,6 +1212,12 @@ button {
   padding: 14px;
 }
 
+.history-summary {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .toggle-switch {
   display: flex;
   align-items: center;

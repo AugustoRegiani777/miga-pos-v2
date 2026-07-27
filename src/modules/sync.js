@@ -6,6 +6,7 @@ import {
   pushMovimientosInsumos,
   pushStockProductos,
   pushProduccionDiaria,
+  pushMovimientoStock,
   updateVentaAnulada
 } from "../db/supabase.js";
 
@@ -47,6 +48,8 @@ async function executeOp(op) {
       return pushStockProductos(op.payload);
     case "produccion_diaria":
       return pushProduccionDiaria(op.payload);
+    case "movimiento_stock":
+      return pushMovimientoStock(op.payload);
     case "venta_anulada":
       return updateVentaAnulada(op.payload.fecha, op.payload.creadoEn);
     default:
@@ -114,6 +117,12 @@ export function trySyncStockProductos(productos) {
 
 export function trySyncProduccionDiaria(rows) {
   return tryNow({ type: "produccion_diaria", payload: rows });
+}
+
+// Movimiento individual (con hora) para que "modo consulta" pueda mostrar
+// "a que hora" se cargo cada produccion, igual que en la tablet.
+export function trySyncMovimientoStock(movimiento) {
+  return tryNow({ type: "movimiento_stock", payload: movimiento });
 }
 
 export function trySyncVentaAnulada({ fecha, creadoEn }) {

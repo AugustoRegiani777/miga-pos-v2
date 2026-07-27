@@ -1,5 +1,5 @@
 import { exportSalesSummary, exportDailySummaryJSON } from "../modules/backup.js";
-import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia } from "../db/supabase.js";
+import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
@@ -10,6 +10,7 @@ import {
   trySyncRecetasSnapshot,
   trySyncStockProductos,
   trySyncProduccionDiaria,
+  trySyncMovimientoStock,
   trySyncVentaAnulada,
   setupAutoSync
 } from "../modules/sync.js";
@@ -408,7 +409,7 @@ function stopConsultaPolling() {
 
 function startConsultaPolling() {
   stopConsultaPolling();
-  consultaPollTimer = window.setInterval(() => { refreshView(); }, 9000);
+  consultaPollTimer = window.setInterval(() => { refreshView(); }, 60000);
 }
 
 function closeAllGestionSheets() {
@@ -579,15 +580,38 @@ async function catalogoConStockRemoto() {
   }));
 }
 
+// En modo consulta, cada poll (cada 60s) vuelve a llamar a estas funciones.
+// Si tapamos el contenido con "Cargando..." en cada refresh, el contenedor se
+// achica un instante y la pagina "salta" al encabezado. Por eso el placeholder
+// solo se muestra la primera vez; despues el contenido viejo queda a la vista
+// hasta que el nuevo esta listo.
+function showConsultaPlaceholder(container, text) {
+  if (container.dataset.loaded === "1") return;
+  container.textContent = text;
+}
+
+function markConsultaLoaded(container) {
+  container.dataset.loaded = "1";
+}
+
+// tipo "produccion"/"ajuste_manual" siempre cuenta; "ajuste_stock" solo cuando
+// es una correccion de error de produccion — igual filtro que productionSnapshot()
+// en business.js, aplicado aca sobre los movimientos traidos de Supabase.
+function esMovimientoDeProduccion(row) {
+  if (row.tipo === "produccion" || row.tipo === "ajuste_manual") return true;
+  return row.tipo === "ajuste_stock" && (row.motivo === "Error de produccion" || row.motivo === "Error");
+}
+
 async function renderCashier() {
   if (isModoConsulta()) {
     dom.salesLayout.style.display = "none";
     dom.cajaConsulta.hidden = false;
     dom.cajaConsulta.style.display = "";
-    dom.cajaConsulta.textContent = "Cargando...";
+    showConsultaPlaceholder(dom.cajaConsulta, "Cargando...");
     try {
       const catalogo = await catalogoConStockRemoto();
       renderStockConsulta(dom.cajaConsulta, catalogo.filter((p) => p.activo && p.controlaStock));
+      markConsultaLoaded(dom.cajaConsulta);
     } catch (error) {
       dom.cajaConsulta.textContent = `No se pudo traer el stock: ${error.message || error}`;
     }
@@ -606,14 +630,45 @@ async function renderProductionView() {
     dom.productionGroups.style.display = "none";
     dom.produccionConsulta.hidden = false;
     dom.produccionConsulta.style.display = "";
-    dom.produccionConsulta.textContent = "Cargando...";
+    showConsultaPlaceholder(dom.produccionConsulta, "Cargando...");
     try {
-      const [catalogo, produccionRows] = await Promise.all([catalogoConStockRemoto(), fetchProduccionDiaria(todayISO())]);
+      const fecha = todayISO();
+      const [catalogo, produccionRows, movimientosRemotos, ventasRemotas] = await Promise.all([
+        catalogoConStockRemoto(),
+        fetchProduccionDiaria(fecha),
+        fetchMovimientosStock(fecha),
+        fetchVentasDelDia(fecha)
+      ]);
       const producidoPorProducto = new Map(produccionRows.map((row) => [row.producto_id, row.cantidad]));
+      const movimientosPorProducto = new Map();
+      for (const row of movimientosRemotos.filter(esMovimientoDeProduccion)) {
+        const lista = movimientosPorProducto.get(row.producto_id) || [];
+        lista.push({ tipo: row.tipo, motivo: row.motivo, cantidad: row.cantidad, creadoEn: row.creado_en });
+        movimientosPorProducto.set(row.producto_id, lista);
+      }
+      const vendidoPorProducto = new Map();
+      for (const venta of ventasRemotas) {
+        for (const detalle of venta.detalle_venta || []) {
+          vendidoPorProducto.set(
+            detalle.producto_id,
+            (vendidoPorProducto.get(detalle.producto_id) || 0) + (Number(detalle.cantidad) || 0)
+          );
+        }
+      }
       const productosProduccion = catalogo
         .filter((p) => p.activo && p.controlaStock && (p.categoriaId === "sandwiches" || p.categoriaId === "bolleria"))
-        .map((p) => ({ ...p, cantidadProducida: producidoPorProducto.get(p.id) || 0 }));
+        .map((p) => {
+          const cantidadProducida = producidoPorProducto.get(p.id) || 0;
+          const vendido = vendidoPorProducto.get(p.id) || 0;
+          return {
+            ...p,
+            cantidadProducida,
+            movimientosProduccion: movimientosPorProducto.get(p.id) || [],
+            cantidadAyer: (Number(p.stockActual) || 0) - cantidadProducida + vendido
+          };
+        });
       renderProduccionConsulta(dom.produccionConsulta, productosProduccion);
+      markConsultaLoaded(dom.produccionConsulta);
     } catch (error) {
       dom.produccionConsulta.textContent = `No se pudo traer la produccion: ${error.message || error}`;
     }
@@ -749,7 +804,7 @@ async function renderHistoryView() {
 
   if (isModoConsulta()) {
     dom.historialBackupPanel.style.display = "none";
-    dom.historyList.textContent = "Cargando...";
+    showConsultaPlaceholder(dom.historyList, "Cargando...");
     try {
       const [catalogo, produccionRows, ventasRemotas] = await Promise.all([
         catalogoConStockRemoto(),
@@ -775,6 +830,7 @@ async function renderHistoryView() {
         onShareSale: handleShareSale,
         onPrintSale: handlePrintSale
       });
+      markConsultaLoaded(dom.historyList);
     } catch (error) {
       dom.historyList.textContent = `No se pudo traer el historial: ${error.message || error}`;
     }
@@ -1333,7 +1389,7 @@ async function handleConfirmSale() {
 }
 
 async function commitProduction(productId, quantityRaw) {
-  const { warnings } = await saveDailyProduction(productId, quantityRaw);
+  const { warnings, movimiento } = await saveDailyProduction(productId, quantityRaw);
   dom.productionQuantity.value = "";
   if (warnings.length > 0) {
     setFlash(`Produccion guardada. ${warnings.join(" ")}`, "warning");
@@ -1342,6 +1398,7 @@ async function commitProduction(productId, quantityRaw) {
   }
   closeProductionSheet();
   syncStockYProduccion();
+  trySyncMovimientoStock(movimiento).catch(() => {});
   await renderCashier();
 }
 
@@ -1468,7 +1525,7 @@ function bindEvents() {
       if (!Number.isSafeInteger(newStock) || newStock < 0) {
         throw new Error("El nuevo stock debe ser un entero mayor o igual a 0.");
       }
-      const { warnings } = await adjustStockLevel(product.id, newStock, dom.stockAdjustReason.value);
+      const { warnings, movimiento } = await adjustStockLevel(product.id, newStock, dom.stockAdjustReason.value);
       if (warnings.length > 0) {
         setFlash(`Stock de ${product.nombre} ajustado a ${newStock}. ${warnings.join(" ")}`, "warning");
       } else {
@@ -1476,6 +1533,7 @@ function bindEvents() {
       }
       closeStockAdjustSheet();
       syncStockYProduccion();
+      trySyncMovimientoStock(movimiento).catch(() => {});
       await renderProductionView();
       await renderCashier();
     } catch (error) {

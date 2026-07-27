@@ -294,6 +294,27 @@ export async function fetchProduccionDiaria(fecha) {
   return sbFetch(`/produccion_diaria?fecha=eq.${fecha}`);
 }
 
+export async function pushMovimientoStock(m) {
+  return insert("movimientos_stock", {
+    producto_id: m.productoId,
+    tipo: m.tipo,
+    cantidad: m.cantidad,
+    stock_anterior: m.stockAnterior,
+    stock_nuevo: m.stockNuevo,
+    motivo: m.motivo || null,
+    referencia: m.referencia || null,
+    fecha: m.fecha,
+    creado_en: m.creadoEn
+  });
+}
+
+// Trae todos los movimientos del dia; el filtro de cuales son "de produccion"
+// (tipo produccion/ajuste_manual, o ajuste_stock por error) se hace en el cliente,
+// igual que productionSnapshot() en business.js.
+export async function fetchMovimientosStock(fecha) {
+  return sbFetch(`/movimientos_stock?fecha=eq.${fecha}&order=creado_en.asc`);
+}
+
 export async function fetchVentasDelDia(fecha) {
   return sbFetch(`/ventas?fecha=eq.${fecha}&anulada=not.is.true&select=*,detalle_venta(*)&order=id.desc`);
 }
