@@ -4,6 +4,13 @@ import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
 
 const SEED_VERSION_KEY = "insumos_seed_version";
+const RECETAS_LECHE_ACTUALIZADAS_V8 = [
+  "cafe-con-leche:leche-normal",
+  "promo-cafe-con-leche:leche-normal",
+  "capuccino:leche-normal",
+  "ice-latte:leche-normal",
+  "ice-caramel:leche-normal"
+];
 export async function saveInsumoCalibrationSettings(insumoId, { alphaReceta, alphaPrediccion }) {
   const insumos = await getAll("insumos");
   const insumo  = insumos.find(i => i.id === insumoId);
@@ -59,6 +66,18 @@ export async function seedInsumos() {
         if (seedReceta.recetaFija && existingRecetaIds.has(seedReceta.id)) {
           const existing = existingRecetas.find(r => r.id === seedReceta.id);
           stores.recetas.put({ ...existing, recetaFija: true, actualizadoEn: now });
+        }
+      }
+      // Recalibracion de cantidades de leche por vaso (v8) — solo estas
+      // recetas puntuales, no todas: no queremos pisar ajustes que haya
+      // hecho la calibracion en otras recetas.
+      for (const id of RECETAS_LECHE_ACTUALIZADAS_V8) {
+        if (existingRecetaIds.has(id)) {
+          const seedReceta = initialRecetas.find(r => r.id === id);
+          const existing = existingRecetas.find(r => r.id === id);
+          if (seedReceta && existing) {
+            stores.recetas.put({ ...existing, cantidadPorUnidad: seedReceta.cantidadPorUnidad, actualizadoEn: now });
+          }
         }
       }
       stores.configuracion.put({ id: SEED_VERSION_KEY, valor: INSUMOS_SEED_VERSION, actualizadoEn: now });

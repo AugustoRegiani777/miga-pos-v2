@@ -49,8 +49,9 @@ function groupCartItems(items) {
     const quantity = asNonNegativeInteger(item.quantity, "La cantidad");
     if (!item.productId || quantity <= 0) throw new Error("El carrito tiene cantidades invalidas.");
     const saleMode = item.saleMode === "togoo" || item.saleMode === "baja" ? item.saleMode : "normal";
-    const lineKey = `${item.productId}:${saleMode}`;
-    const currentLine = lines.get(lineKey) || { productId: item.productId, quantity: 0, saleMode, unitOrders: [] };
+    const lecheNombre = item.lecheNombre || null;
+    const lineKey = `${item.productId}:${saleMode}:${lecheNombre || ""}`;
+    const currentLine = lines.get(lineKey) || { productId: item.productId, quantity: 0, saleMode, lecheNombre, unitOrders: [] };
     currentLine.quantity += quantity;
     currentLine.unitOrders.push(...(Array.isArray(item.unitOrders) ? item.unitOrders.slice(0, quantity) : []));
     lines.set(lineKey, currentLine);
@@ -361,11 +362,12 @@ export async function confirmSale(items) {
         : product.precioCentavos;
       const subtotalCentavos = unitPrice * item.quantity;
       totalCentavos += subtotalCentavos;
+      const nombreConModo = lineSaleMode === "togoo" ? `${product.nombre} ToGoo` : lineSaleMode === "baja" ? `${product.nombre} BAJA` : product.nombre;
       lines.push({
         product,
         quantity: item.quantity,
         saleMode: lineSaleMode,
-        productName: lineSaleMode === "togoo" ? `${product.nombre} ToGoo` : lineSaleMode === "baja" ? `${product.nombre} BAJA` : product.nombre,
+        productName: item.lecheNombre ? `${nombreConModo} (${item.lecheNombre})` : nombreConModo,
         unitPrice,
         subtotalCentavos,
         unitOrders: item.unitOrders

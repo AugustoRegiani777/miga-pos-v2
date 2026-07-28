@@ -24,7 +24,7 @@ export const STORE_NAMES = [
 // Basado en análisis de 18 días de ventas reales (mayo-junio 2026): ~113 sándwiches/día promedio.
 // stockMinimo = 3 días de consumo | stockCritico = 1.5 días de consumo
 // v7: borra el insumo obsoleto "Mezcla" (reemplazado por Mayonesa, nunca debio quedar activo)
-export const INSUMOS_SEED_VERSION = 7;
+export const INSUMOS_SEED_VERSION = 8;
 
 // Nombres de insumos obsoletos que hay que borrar de instalaciones viejas (no deberian existir)
 export const INSUMOS_OBSOLETOS_NOMBRES = new Set(["Mezcla"]);
@@ -133,18 +133,18 @@ export const initialRecetas = [
   { id: "latte:cafe",                  productoId: "latte",             insumoId: "cafe",         cantidadPorUnidad: 10,  esEstimado: false },
   { id: "latte:leche-normal",          productoId: "latte",             insumoId: "leche-normal", cantidadPorUnidad: 200, esEstimado: true  },
   { id: "cafe-con-leche:cafe",         productoId: "cafe-con-leche",    insumoId: "cafe",         cantidadPorUnidad: 10,  esEstimado: false },
-  { id: "cafe-con-leche:leche-normal", productoId: "cafe-con-leche",    insumoId: "leche-normal", cantidadPorUnidad: 200, esEstimado: true  },
+  { id: "cafe-con-leche:leche-normal", productoId: "cafe-con-leche",    insumoId: "leche-normal", cantidadPorUnidad: 210, esEstimado: true  },
   { id: "promo-cafe-con-leche:cafe",   productoId: "promo-cafe-con-leche", insumoId: "cafe",      cantidadPorUnidad: 10,  esEstimado: false },
-  { id: "promo-cafe-con-leche:leche-normal", productoId: "promo-cafe-con-leche", insumoId: "leche-normal", cantidadPorUnidad: 200, esEstimado: true },
+  { id: "promo-cafe-con-leche:leche-normal", productoId: "promo-cafe-con-leche", insumoId: "leche-normal", cantidadPorUnidad: 210, esEstimado: true },
   { id: "capuccino:cafe",              productoId: "capuccino",         insumoId: "cafe",         cantidadPorUnidad: 10,  esEstimado: false },
-  { id: "capuccino:leche-normal",      productoId: "capuccino",         insumoId: "leche-normal", cantidadPorUnidad: 150, esEstimado: true  },
+  { id: "capuccino:leche-normal",      productoId: "capuccino",         insumoId: "leche-normal", cantidadPorUnidad: 210, esEstimado: true  },
   { id: "americano:cafe",              productoId: "americano",         insumoId: "cafe",         cantidadPorUnidad: 10,  esEstimado: false },
   { id: "flat-white:cafe",             productoId: "flat-white",        insumoId: "cafe",         cantidadPorUnidad: 10,  esEstimado: false },
   { id: "flat-white:leche-normal",     productoId: "flat-white",        insumoId: "leche-normal", cantidadPorUnidad: 150, esEstimado: true  },
   { id: "ice-latte:cafe",              productoId: "ice-latte",         insumoId: "cafe",         cantidadPorUnidad: 10,  esEstimado: false },
-  { id: "ice-latte:leche-normal",      productoId: "ice-latte",         insumoId: "leche-normal", cantidadPorUnidad: 200, esEstimado: true  },
+  { id: "ice-latte:leche-normal",      productoId: "ice-latte",         insumoId: "leche-normal", cantidadPorUnidad: 320, esEstimado: true  },
   { id: "ice-caramel:cafe",            productoId: "ice-caramel",       insumoId: "cafe",         cantidadPorUnidad: 10,  esEstimado: false },
-  { id: "ice-caramel:leche-normal",    productoId: "ice-caramel",       insumoId: "leche-normal", cantidadPorUnidad: 200, esEstimado: true  }
+  { id: "ice-caramel:leche-normal",    productoId: "ice-caramel",       insumoId: "leche-normal", cantidadPorUnidad: 320, esEstimado: true  }
 ];
 
 export const initialCategories = [

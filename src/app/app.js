@@ -77,6 +77,19 @@ let facturaSheetOpen = false;
 let facturaArchivoBase64 = null;
 let facturaLineasActuales = [];
 let facturaInProgress = false;
+let lecheSheetOpen = false;
+let productoPendienteLeche = null;
+
+// Productos cuya receta lleva leche — al tocarlos en Caja, antes de sumarlos
+// al carrito, se pregunta con que leche (para que el ticket lo refleje).
+// Todavia no descuenta insumos por venta (eso queda para mas adelante,
+// ver la conversacion sobre "conectar el cable" de venta de bebidas).
+const PRODUCTOS_CON_LECHE = new Set(["latte", "cafe-con-leche", "promo-cafe-con-leche", "capuccino", "cortado", "flat-white", "ice-latte", "ice-caramel"]);
+const OPCIONES_LECHE = [
+  { id: "leche-normal", nombre: "Entera" },
+  { id: "leche-avena", nombre: "Avena" },
+  { id: "leche-sin-lactosa", nombre: "Sin lactosa" }
+];
 let recetaEditInProgress = false;
 let selectedRecetaId = "";
 let recetaEditSheetOpen = false;
@@ -148,6 +161,11 @@ const dom = {
   productCategories: document.querySelector("#product-categories"),
   salesLayout: document.querySelector("#sales-layout"),
   cajaConsulta: document.querySelector("#caja-consulta"),
+  lecheBackdrop: document.querySelector("#leche-backdrop"),
+  lecheSheet: document.querySelector("#leche-sheet"),
+  closeLeche: document.querySelector("#close-leche"),
+  lecheProductoNombre: document.querySelector("#leche-producto-nombre"),
+  lecheOpciones: document.querySelector("#leche-opciones"),
   salesSearch: document.querySelector("#sales-search"),
   clearSalesSearch: document.querySelector("#clear-sales-search"),
   salesSearchEmpty: document.querySelector("#sales-search-empty"),
@@ -581,6 +599,9 @@ function showGestionSubView(subViewName) {
 
 function showView(viewName) {
   currentView = viewName;
+  if (viewName !== "caja") {
+    setLecheSheetOpen(false);
+  }
   if (viewName !== "produccion") {
     setProductionSheetOpen(false);
     setStockAdjustSheetOpen(false);
@@ -624,7 +645,7 @@ function productsWithReservedStock() {
 
 function renderReservedStock() {
   const displayProducts = productsWithReservedStock();
-  renderProductGrid(dom.productCategories, categories, displayProducts, addToCart);
+  renderProductGrid(dom.productCategories, categories, displayProducts, handleProductTap);
   filterProductButtons(dom.salesSearch, dom.salesSearchEmpty);
 }
 
@@ -640,9 +661,9 @@ function setCartMode(mode) {
   renderCurrentCart();
 }
 
-function addToCart(product) {
+function addToCart(product, lecheNombre = null) {
   const mode = cartMode;
-  const cartKey = `${product.id}:${mode}`;
+  const cartKey = lecheNombre ? `${product.id}:${mode}:${lecheNombre}` : `${product.id}:${mode}`;
   const current = cart.get(cartKey);
   const nextQuantity = (current?.quantity || 0) + 1;
   if (product.controlaStock && quantityInCartForProduct(product.id) + 1 > product.stockActual) {
@@ -654,13 +675,50 @@ function addToCart(product) {
     ...product,
     cartKey,
     saleMode: mode,
-    displayName: product.nombre,
+    lecheNombre,
+    displayName: lecheNombre ? `${product.nombre} (${lecheNombre})` : product.nombre,
     quantity: nextQuantity,
     unitOrders: [...(current?.unitOrders || []), cartOrder += 1]
   });
   setSaleMessage("");
   renderReservedStock();
   renderCurrentCart();
+}
+
+function handleProductTap(product) {
+  if (PRODUCTOS_CON_LECHE.has(product.id)) {
+    abrirSelectorLeche(product);
+    return;
+  }
+  addToCart(product);
+}
+
+function setLecheSheetOpen(isOpen) {
+  lecheSheetOpen = isOpen;
+  dom.lecheSheet.classList.toggle("open", isOpen);
+  dom.lecheSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  dom.lecheBackdrop.hidden = !isOpen;
+  dom.lecheBackdrop.classList.toggle("open", isOpen);
+}
+
+function abrirSelectorLeche(product) {
+  productoPendienteLeche = product;
+  dom.lecheProductoNombre.textContent = product.nombre;
+  dom.lecheOpciones.innerHTML = OPCIONES_LECHE
+    .map((op) => `<button type="button" class="leche-opcion" data-leche="${op.nombre}">${op.nombre}</button>`)
+    .join("");
+  setLecheSheetOpen(true);
+}
+
+function closeLecheSheet() {
+  setLecheSheetOpen(false);
+  productoPendienteLeche = null;
+}
+
+function seleccionarLeche(lecheNombre) {
+  if (!productoPendienteLeche) return;
+  addToCart(productoPendienteLeche, lecheNombre);
+  closeLecheSheet();
 }
 
 function changeQuantity(cartKey, delta) {
@@ -1544,7 +1602,8 @@ async function handleConfirmSale() {
       productId: item.id,
       quantity: item.quantity,
       saleMode: item.saleMode,
-      unitOrders: item.unitOrders
+      unitOrders: item.unitOrders,
+      lecheNombre: item.lecheNombre || null
     }));
     const sale = await confirmSale(items);
     cart.clear();
@@ -1601,6 +1660,12 @@ function bindEvents() {
   dom.confirmSale.addEventListener("click", handleConfirmSale);
   dom.cartModeTogooToggle.addEventListener("change", () => {
     setCartMode(dom.cartModeTogooToggle.checked ? "togoo" : "normal");
+  });
+  dom.closeLeche.addEventListener("click", closeLecheSheet);
+  dom.lecheBackdrop.addEventListener("click", closeLecheSheet);
+  dom.lecheOpciones.addEventListener("click", (event) => {
+    const boton = event.target.closest(".leche-opcion");
+    if (boton) seleccionarLeche(boton.dataset.leche);
   });
   dom.closeProductionSheet.addEventListener("click", closeProductionSheet);
   dom.productionSheetBackdrop.addEventListener("click", closeProductionSheet);

@@ -2023,6 +2023,29 @@ button {
   }
 }
 
+/* ===== Seleccion de leche (Caja) ===== */
+
+.leche-opciones {
+  display: grid;
+  gap: 10px;
+}
+
+.leche-opcion {
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #eef3f3;
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.leche-opcion:active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
 .receta-estimado {
   color: #f59e0b;
   font-weight: 700;
