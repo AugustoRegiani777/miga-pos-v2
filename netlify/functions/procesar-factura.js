@@ -205,7 +205,7 @@ ${lineasMaestro}
 Para cada linea de producto real que encuentres en la factura (ignora envases, portes, IVA, totales y devoluciones):
 - Capturá el nombre exactamente como aparece impreso en la factura, sin corregir ni normalizar — se usa despues para comparar contra texto de facturas anteriores.
 - Si un campo (precio, unidad) no es legible con claridad, omitilo en la respuesta en vez de inventar un valor.
-- Si el producto ES semanticamente el mismo insumo que algo del catalogo maestro de arriba (aunque el nombre este escrito distinto), asigna ese insumoId con confianza "media". Si no reconoces ningun insumo equivalente, deja insumoId en null y confianza "sin_match".`;
+- Si el producto ES semanticamente el mismo insumo que algo del catalogo maestro de arriba (aunque el nombre este escrito distinto), asigna ese insumoId con confianza "media". Si no reconoces ningun insumo equivalente, deja insumoId en null y confianza "sin_match". No asumas una equivalencia si no estas razonablemente seguro — es preferible "sin_match" a un match forzado.`;
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return anthropic.messages.create({
