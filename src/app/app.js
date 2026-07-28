@@ -78,18 +78,18 @@ let facturaArchivoBase64 = null;
 let facturaLineasActuales = [];
 let facturaInProgress = false;
 let lecheSheetOpen = false;
-let productoPendienteLeche = null;
+let productoPendienteSeleccion = null;
 
 // Productos cuya receta lleva leche — al tocarlos en Caja, antes de sumarlos
 // al carrito, se pregunta con que leche (para que el ticket lo refleje).
 // Todavia no descuenta insumos por venta (eso queda para mas adelante,
 // ver la conversacion sobre "conectar el cable" de venta de bebidas).
 const PRODUCTOS_CON_LECHE = new Set(["latte", "cafe-con-leche", "promo-cafe-con-leche", "capuccino", "cortado", "flat-white", "ice-latte", "ice-caramel"]);
-const OPCIONES_LECHE = [
-  { id: "leche-normal", nombre: "Entera" },
-  { id: "leche-avena", nombre: "Avena" },
-  { id: "leche-sin-lactosa", nombre: "Sin lactosa" }
-];
+const OPCIONES_LECHE = ["Entera", "Avena", "Sin lactosa"];
+
+// "Promo bebida" no dice que bebida es — se pregunta antes de sumarla al
+// carrito, con las opciones reales de la categoria Bebidas.
+const PRODUCTOS_CON_BEBIDA_A_ELEGIR = new Set(["promo-bebida"]);
 let recetaEditInProgress = false;
 let selectedRecetaId = "";
 let recetaEditSheetOpen = false;
@@ -164,6 +164,7 @@ const dom = {
   lecheBackdrop: document.querySelector("#leche-backdrop"),
   lecheSheet: document.querySelector("#leche-sheet"),
   closeLeche: document.querySelector("#close-leche"),
+  lecheSheetTitulo: document.querySelector("#leche-sheet-titulo"),
   lecheProductoNombre: document.querySelector("#leche-producto-nombre"),
   lecheOpciones: document.querySelector("#leche-opciones"),
   salesSearch: document.querySelector("#sales-search"),
@@ -661,9 +662,9 @@ function setCartMode(mode) {
   renderCurrentCart();
 }
 
-function addToCart(product, lecheNombre = null) {
+function addToCart(product, opcionNombre = null) {
   const mode = cartMode;
-  const cartKey = lecheNombre ? `${product.id}:${mode}:${lecheNombre}` : `${product.id}:${mode}`;
+  const cartKey = opcionNombre ? `${product.id}:${mode}:${opcionNombre}` : `${product.id}:${mode}`;
   const current = cart.get(cartKey);
   const nextQuantity = (current?.quantity || 0) + 1;
   if (product.controlaStock && quantityInCartForProduct(product.id) + 1 > product.stockActual) {
@@ -675,8 +676,8 @@ function addToCart(product, lecheNombre = null) {
     ...product,
     cartKey,
     saleMode: mode,
-    lecheNombre,
-    displayName: lecheNombre ? `${product.nombre} (${lecheNombre})` : product.nombre,
+    opcionNombre,
+    displayName: opcionNombre ? `${product.nombre} (${opcionNombre})` : product.nombre,
     quantity: nextQuantity,
     unitOrders: [...(current?.unitOrders || []), cartOrder += 1]
   });
@@ -687,7 +688,15 @@ function addToCart(product, lecheNombre = null) {
 
 function handleProductTap(product) {
   if (PRODUCTOS_CON_LECHE.has(product.id)) {
-    abrirSelectorLeche(product);
+    abrirSelectorOpciones(product, "¿Con qué leche?", OPCIONES_LECHE);
+    return;
+  }
+  if (PRODUCTOS_CON_BEBIDA_A_ELEGIR.has(product.id)) {
+    const opcionesBebida = products
+      .filter((p) => p.categoriaId === "bebidas")
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0))
+      .map((p) => p.nombre);
+    abrirSelectorOpciones(product, "¿Qué bebida?", opcionesBebida);
     return;
   }
   addToCart(product);
@@ -701,23 +710,26 @@ function setLecheSheetOpen(isOpen) {
   dom.lecheBackdrop.classList.toggle("open", isOpen);
 }
 
-function abrirSelectorLeche(product) {
-  productoPendienteLeche = product;
+// Modal generico de "elegi una opcion antes de sumar al carrito" — lo usan
+// tanto la seleccion de leche como la seleccion de bebida en Promo bebida.
+function abrirSelectorOpciones(product, titulo, opciones) {
+  productoPendienteSeleccion = product;
+  dom.lecheSheetTitulo.textContent = titulo;
   dom.lecheProductoNombre.textContent = product.nombre;
-  dom.lecheOpciones.innerHTML = OPCIONES_LECHE
-    .map((op) => `<button type="button" class="leche-opcion" data-leche="${op.nombre}">${op.nombre}</button>`)
+  dom.lecheOpciones.innerHTML = opciones
+    .map((op) => `<button type="button" class="leche-opcion" data-opcion="${op}">${op}</button>`)
     .join("");
   setLecheSheetOpen(true);
 }
 
 function closeLecheSheet() {
   setLecheSheetOpen(false);
-  productoPendienteLeche = null;
+  productoPendienteSeleccion = null;
 }
 
-function seleccionarLeche(lecheNombre) {
-  if (!productoPendienteLeche) return;
-  addToCart(productoPendienteLeche, lecheNombre);
+function seleccionarOpcion(nombreElegido) {
+  if (!productoPendienteSeleccion) return;
+  addToCart(productoPendienteSeleccion, nombreElegido);
   closeLecheSheet();
 }
 
@@ -1603,7 +1615,7 @@ async function handleConfirmSale() {
       quantity: item.quantity,
       saleMode: item.saleMode,
       unitOrders: item.unitOrders,
-      lecheNombre: item.lecheNombre || null
+      opcionNombre: item.opcionNombre || null
     }));
     const sale = await confirmSale(items);
     cart.clear();
@@ -1665,7 +1677,7 @@ function bindEvents() {
   dom.lecheBackdrop.addEventListener("click", closeLecheSheet);
   dom.lecheOpciones.addEventListener("click", (event) => {
     const boton = event.target.closest(".leche-opcion");
-    if (boton) seleccionarLeche(boton.dataset.leche);
+    if (boton) seleccionarOpcion(boton.dataset.opcion);
   });
   dom.closeProductionSheet.addEventListener("click", closeProductionSheet);
   dom.productionSheetBackdrop.addEventListener("click", closeProductionSheet);
