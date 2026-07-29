@@ -124,6 +124,12 @@
               <span>Total</span>
               <strong id="cart-total">0,00 EUR</strong>
             </div>
+            <div class="cart-vuelto">
+              <label for="pago-con">Pago con
+                <input type="number" step="any" inputmode="decimal" id="pago-con" placeholder="0,00">
+              </label>
+              <p class="cart-vuelto-resultado" id="vuelto-resultado" hidden>Vuelto = <strong id="vuelto-valor"></strong></p>
+            </div>
             <p class="message" id="sale-message" role="status"></p>
             <button class="confirm-button" type="button" id="confirm-sale" disabled>Confirmar venta</button>
           </div>

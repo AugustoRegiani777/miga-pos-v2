@@ -467,6 +467,46 @@ button {
   font-size: 2rem;
 }
 
+.cart-vuelto {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-top: 1px dashed var(--line);
+}
+
+.cart-vuelto label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.cart-vuelto input {
+  flex: 1;
+  max-width: 140px;
+  min-height: 48px;
+  text-align: right;
+  font-size: 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.cart-vuelto-resultado {
+  margin: 0;
+  text-align: right;
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+.cart-vuelto-resultado strong {
+  font-size: 1.4rem;
+  color: var(--ok);
+}
+
 .confirm-button,
 .primary-button {
   width: 100%;
@@ -830,11 +870,20 @@ button {
 }
 
 .pedido-retiro,
-.pedido-pago,
-.pedido-aclaraciones {
+.pedido-pago {
   margin: 0;
   color: var(--muted);
   font-weight: 700;
+}
+
+.pedido-aclaraciones {
+  margin: 0;
+  padding: 8px 10px;
+  border: 2px solid var(--low);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--low) 12%, #ffffff);
+  color: var(--ink);
+  font-weight: 800;
 }
 
 .pedido-precio {

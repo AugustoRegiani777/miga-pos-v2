@@ -36,7 +36,7 @@ import {
   TOGOO_FLAT_TOTAL_CENTAVOS
 } from "../modules/business.js";
 import { seedDatabase, getAll } from "../db/idb.js";
-import { todayISO } from "../utils/format.js";
+import { todayISO, centsToMoney } from "../utils/format.js";
 import {
   filterProductButtons,
   renderCart,
@@ -51,6 +51,7 @@ import {
 const cart = new Map();
 let products = [];
 let categories = [];
+let cartTotalCentavosActual = 0;
 let currentView = "caja";
 let saleInProgress = false;
 let cartMode = "normal";
@@ -173,6 +174,9 @@ const dom = {
   cartItems: document.querySelector("#cart-items"),
   cartSandwichCount: document.querySelector("#cart-sandwich-count"),
   cartTotal: document.querySelector("#cart-total"),
+  pagoCon: document.querySelector("#pago-con"),
+  vueltoResultado: document.querySelector("#vuelto-resultado"),
+  vueltoValor: document.querySelector("#vuelto-valor"),
   confirmSale: document.querySelector("#confirm-sale"),
   clearCart: document.querySelector("#clear-cart"),
   saleMessage: document.querySelector("#sale-message"),
@@ -768,6 +772,7 @@ function renderCurrentCart() {
   const items = Array.from(cart.values());
   const pricing = calculateCartPricing(items.filter((item) => effectiveSaleMode(item) === "normal"));
   const hasTogoo = items.some((item) => effectiveSaleMode(item) === "togoo");
+  cartTotalCentavosActual = pricing.totalCentavos + (hasTogoo ? TOGOO_FLAT_TOTAL_CENTAVOS : 0);
   renderCart(
     dom.cartItems,
     dom.cartSandwichCount,
@@ -775,8 +780,31 @@ function renderCurrentCart() {
     dom.confirmSale,
     cart,
     changeQuantity,
-    { ...pricing, totalCentavos: pricing.totalCentavos + (hasTogoo ? TOGOO_FLAT_TOTAL_CENTAVOS : 0) }
+    { ...pricing, totalCentavos: cartTotalCentavosActual }
   );
+  recalcularVuelto();
+}
+
+// Calculadora de vuelto: puramente un ayuda-memoria visual para el empleado,
+// no se guarda en ningun lado ni afecta la venta — el monto que realmente se
+// cobra sigue siendo el total del carrito.
+function recalcularVuelto() {
+  const pago = Number(dom.pagoCon.value);
+  if (!dom.pagoCon.value || !(pago > 0)) {
+    dom.vueltoResultado.hidden = true;
+    return;
+  }
+  const pagoCentavos = Math.round(pago * 100);
+  const diferencia = pagoCentavos - cartTotalCentavosActual;
+  dom.vueltoResultado.hidden = false;
+  dom.vueltoValor.textContent = diferencia >= 0
+    ? centsToMoney(diferencia)
+    : `Falta ${centsToMoney(-diferencia)}`;
+}
+
+function resetVuelto() {
+  dom.pagoCon.value = "";
+  dom.vueltoResultado.hidden = true;
 }
 
 async function loadProducts() {
@@ -1412,10 +1440,17 @@ async function renderPedidosView() {
   }
 }
 
+// Productos que se pueden cargar en un pedido: los sandwiches (categoriaId
+// "sandwiches" tambien incluye promos de combo como "Promo bebida" que no
+// son sabores reales — esas no controlan stock, asi que se excluyen con
+// controlaStock) mas un par de productos puntuales de bolleria que tambien
+// se piden por encargo.
+const PEDIDO_PRODUCT_IDS_EXTRA = new Set(["chipa", "medialunas"]);
+
 function sandwichProductsForPedido() {
-  // categoriaId "sandwiches" tambien incluye promos de combo (ej. "Promo bebida") que no son
-  // sabores reales — esas no controlan stock, asi que se excluyen con controlaStock.
-  return products.filter((p) => p.activo && p.categoriaId === "sandwiches" && p.controlaStock);
+  return products.filter((p) =>
+    p.activo && p.controlaStock && (p.categoriaId === "sandwiches" || PEDIDO_PRODUCT_IDS_EXTRA.has(p.id))
+  );
 }
 
 function pedidoCartTotalCentavos() {
@@ -1620,6 +1655,7 @@ async function handleConfirmSale() {
     }));
     const sale = await confirmSale(items);
     cart.clear();
+    resetVuelto();
     setSaleMessage(
       sale.saleMode === "togoo" ? `Venta ToGoo #${sale.saleId} confirmada.` : `Venta #${sale.saleId} confirmada.`,
       true
@@ -1668,9 +1704,11 @@ function bindEvents() {
     cart.clear();
     setSaleMessage("");
     renderReservedStock();
+    resetVuelto();
     renderCurrentCart();
   });
   dom.confirmSale.addEventListener("click", handleConfirmSale);
+  dom.pagoCon.addEventListener("input", recalcularVuelto);
   dom.cartModeTogooToggle.addEventListener("change", () => {
     setCartMode(dom.cartModeTogooToggle.checked ? "togoo" : "normal");
   });

@@ -65,9 +65,9 @@ export function renderPedidosGrid(container, pedidos, { onMarcarListo, onMarcarE
       <p class="pedido-precio"></p>
       <p class="pedido-pago"></p>
       <p class="pedido-cortado" hidden>Cortado a la mitad</p>
-      <p class="pedido-aclaraciones"></p>
       <button type="button" class="ghost-button compact pedido-toggle-items">Ver pedido</button>
       <ul class="pedido-items" hidden></ul>
+      <p class="pedido-aclaraciones"></p>
     `;
     card.querySelector("strong").textContent = pedido.clienteNombre;
     card.querySelector(".pedido-share").addEventListener("click", () => onCompartirPedido(pedido));
