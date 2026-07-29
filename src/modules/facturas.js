@@ -88,7 +88,14 @@ export async function confirmarFactura(proveedorId, lineas) {
 
   await withStores(["insumos", "movimientos_insumos", "proveedor_insumos"], "readwrite", (stores) => {
     for (const op of operaciones) {
-      const factor = op.insumo.factorConversion || 1;
+      // cantidadPorUnidad viene de la IA (o de una factura anterior de este
+      // mismo proveedor, ver procesar-factura.js) y ya representa cuanto
+      // insumo hay, en su unidad base, en UNA de las unidades contadas en
+      // "cantidad" — tiene en cuenta el contenido real del paquete (ej. una
+      // caja de 6 botellas de 1.5L = 9000ml), a diferencia del factorConversion
+      // generico del insumo que asume un tamano de paquete estandar.
+      const cantidadPorUnidadLinea = Number(op.linea.cantidadPorUnidad);
+      const factor = cantidadPorUnidadLinea > 0 ? cantidadPorUnidadLinea : (op.insumo.factorConversion || 1);
       const delta = op.cantidad * factor;
       const stockAnterior = Number(op.insumo.stockActual) || 0;
       const stockNuevo = stockAnterior + delta;

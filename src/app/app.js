@@ -548,6 +548,7 @@ function leerLineasDelFormulario() {
       cantidad: Number(card.querySelector(".factura-cantidad").value) || 0,
       unidad: card.querySelector(".factura-unidad").value.trim(),
       precio: Number(card.querySelector(".factura-precio").value) || 0,
+      cantidadPorUnidad: Number(card.querySelector(".factura-contenido").value) || 0,
       esNuevo,
       nuevoNombre: esNuevo ? card.querySelector(".factura-nuevo-nombre").value.trim() : undefined,
       nuevaUnidad: esNuevo ? card.querySelector(".factura-nueva-unidad").value.trim() : undefined,

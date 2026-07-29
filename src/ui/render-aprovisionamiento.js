@@ -422,6 +422,10 @@ export function renderFacturaLineas(container, lineas, insumos) {
     const insumoSeleccionado = linea.insumoId && insumosOrdenados.some(i => i.id === linea.insumoId)
       ? linea.insumoId
       : "__nuevo__";
+    const insumoDetectado = insumosOrdenados.find(i => i.id === insumoSeleccionado);
+    const contenidoDefault = Number(linea.cantidadPorUnidad) > 0
+      ? Number(linea.cantidadPorUnidad)
+      : (insumoDetectado ? insumoDetectado.factorConversion : 1);
     return `
       <article class="factura-linea" data-index="${index}" data-confianza="${confianza}">
         <div class="factura-linea-head">
@@ -460,14 +464,39 @@ export function renderFacturaLineas(container, lineas, insumos) {
             <input type="number" step="any" class="factura-nuevo-crit" value="0">
           </label>
         </div>
+        <label class="quantity-field">
+          Contenido por unidad (en unidad base del insumo)
+          <input type="number" step="any" class="factura-contenido" value="${contenidoDefault}">
+        </label>
+        ${linea.calculoExplicado ? `<p class="factura-calculo-hint"><em>IA: ${linea.calculoExplicado}</em></p>` : ""}
+        <p class="factura-total-real">Total a cargar: <strong class="factura-total-valor">—</strong></p>
       </article>
     `;
   }).join("");
 
-  container.querySelectorAll(".factura-insumo-select").forEach(select => {
+  function recalcularTotal(card) {
+    const cantidad = Number(card.querySelector(".factura-cantidad").value) || 0;
+    const contenido = Number(card.querySelector(".factura-contenido").value) || 0;
+    const insumoSelect = card.querySelector(".factura-insumo-select");
+    const esNuevo = insumoSelect.value === "__nuevo__";
+    const unidadBase = esNuevo
+      ? (card.querySelector(".factura-nueva-unidad").value.trim() || "unidad")
+      : (insumosOrdenados.find(i => i.id === insumoSelect.value)?.unidad || "unidad");
+    const total = cantidad * contenido;
+    const valorEl = card.querySelector(".factura-total-valor");
+    valorEl.textContent = total > 0 ? `${Number(total.toFixed(2))} ${unidadBase}` : "—";
+  }
+
+  container.querySelectorAll(".factura-linea").forEach(card => {
+    const select = card.querySelector(".factura-insumo-select");
     select.addEventListener("change", () => {
-      const nuevoBox = select.closest(".factura-linea").querySelector(".factura-linea-nuevo");
+      const nuevoBox = card.querySelector(".factura-linea-nuevo");
       nuevoBox.hidden = select.value !== "__nuevo__";
+      recalcularTotal(card);
     });
+    card.querySelector(".factura-cantidad").addEventListener("input", () => recalcularTotal(card));
+    card.querySelector(".factura-contenido").addEventListener("input", () => recalcularTotal(card));
+    card.querySelector(".factura-nueva-unidad").addEventListener("input", () => recalcularTotal(card));
+    recalcularTotal(card);
   });
 }

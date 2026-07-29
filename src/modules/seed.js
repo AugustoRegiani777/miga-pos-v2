@@ -365,6 +365,17 @@ export const initialProducts = [
     activo: true
   },
   {
+    id: "medialunas",
+    categoriaId: "bolleria",
+    nombre: "Medialunas",
+    precioCentavos: 230,
+    stockActual: 0,
+    umbralBajo: 4,
+    controlaStock: true,
+    orden: 8,
+    activo: true
+  },
+  {
     id: "expresso-30ml",
     categoriaId: "cafe",
     nombre: "Expresso 30ml",

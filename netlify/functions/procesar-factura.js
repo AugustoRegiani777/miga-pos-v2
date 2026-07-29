@@ -69,18 +69,21 @@ function similitudJaccard(a, b) {
 
 // Si el nombre detectado matchea (exacto o por similitud alta) contra algo
 // que este proveedor ya vendio, esa coincidencia pisa lo que haya dicho
-// Claude — es mas confiable que una inferencia semantica.
+// Claude — es mas confiable que una inferencia semantica. Ademas de insumoId,
+// esto tambien recupera cantidadPorUnidad si esa linea de proveedor ya tiene
+// aprendido cuanto rinde en unidad base (ver comentario en confirmarFactura
+// de src/modules/facturas.js sobre como se "aprende" ese valor).
 function matchearContraProveedor(nombreDetectado, catalogoProveedor) {
   const nombreNorm = normalizar(nombreDetectado);
 
   const exacto = catalogoProveedor.find((pi) => normalizar(pi.nombre_producto) === nombreNorm);
-  if (exacto) return { insumoId: exacto.insumo_id, confianza: "alta" };
+  if (exacto) return { insumoId: exacto.insumo_id, confianza: "alta", cantidadPorUnidad: exacto.cantidad_por_unidad ?? null };
 
   const mejorFuzzy = catalogoProveedor
     .map((pi) => ({ pi, sim: similitudJaccard(nombreDetectado, pi.nombre_producto) }))
     .filter((x) => x.sim >= 0.6)
     .sort((a, b) => b.sim - a.sim)[0];
-  if (mejorFuzzy) return { insumoId: mejorFuzzy.pi.insumo_id, confianza: "alta" };
+  if (mejorFuzzy) return { insumoId: mejorFuzzy.pi.insumo_id, confianza: "alta", cantidadPorUnidad: mejorFuzzy.pi.cantidad_por_unidad ?? null };
 
   return null;
 }
@@ -112,6 +115,14 @@ const FACTURA_TOOL = {
             insumoId: {
               type: ["string", "null"],
               description: "id del catalogo maestro si ES SEMANTICAMENTE el mismo insumo (aunque el nombre sea distinto). null si no hay ninguno claro."
+            },
+            cantidadPorUnidad: {
+              type: "number",
+              description: "SOLO si insumoId no es null: cuanto insumo hay, EN SU UNIDAD BASE (la que aparece en el catalogo maestro, ej. 'ml' o 'g'), en UNA de las unidades contadas en 'cantidad'. Hay que RAZONAR el contenido real del paquete, no copiar el numero de 'cantidad' de nuevo. Si 'unidad' indica un paquete multiple (ej. '6 CAJA', '12 UDS') y el nombre del producto o la factura menciona el tamano de cada pieza (ej. '1.5L', '250g'), multiplicalos y convertilos a la unidad base: nombreDetectado 'LECHE BT 1.5L', unidad '6 CAJA', insumo en 'ml' -> cantidadPorUnidad = 6 x 1.5 x 1000 = 9000. Si 'unidad' ya es una sola pieza suelta (ej. '1 BRIK' de 1L), cantidadPorUnidad es el tamano de esa pieza en unidad base (1000). Omitir si no se puede inferir con confianza razonable."
+            },
+            calculoExplicado: {
+              type: "string",
+              description: "SOLO junto con cantidadPorUnidad: texto breve y humano mostrando la cuenta para llegar a ese numero, para que se pueda auditar de un vistazo. Ejemplo: '6 botellas x 1.5 L = 9 L por caja'. Omitir si no aplica."
             },
             confianza: { type: "string", enum: ["alta", "media", "sin_match"] }
           },
@@ -146,6 +157,14 @@ exports.handler = async (event) => {
   }
   const [, mediaType, base64Data] = match;
 
+  const TIPOS_IMAGEN = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+  if (mediaType !== "application/pdf" && !TIPOS_IMAGEN.includes(mediaType)) {
+    return {
+      statusCode: 400,
+      body: `Formato no soportado (${mediaType}). Usa una foto JPG/PNG o un PDF — por ejemplo, una foto tomada en iPhone (HEIC) no funciona, hay que convertirla o usar la camara del Android.`
+    };
+  }
+
   // El catalogo maestro hace falta ANTES de poder armar el pedido a Claude
   // (va en el prompt), asi que esta consulta va primero, sola.
   let catalogoMaestro;
@@ -163,7 +182,7 @@ exports.handler = async (event) => {
   try {
     [catalogoProveedor, claudeResponse] = await Promise.all([
       supabaseQuery(
-        `/proveedor_insumos?proveedor_id=eq.${encodeURIComponent(proveedorId)}&activo=eq.true&select=insumo_id,nombre_producto`
+        `/proveedor_insumos?proveedor_id=eq.${encodeURIComponent(proveedorId)}&activo=eq.true&select=insumo_id,nombre_producto,cantidad_por_unidad`
       ),
       leerConClaude(mediaType, base64Data, buildCatalogoMaestroTexto(catalogoMaestro))
     ]);
@@ -180,7 +199,18 @@ exports.handler = async (event) => {
   const items = (toolUse.input.items || []).map((item) => {
     const matchProveedor = matchearContraProveedor(item.nombreDetectado, catalogoProveedorConNombre);
     if (matchProveedor) {
-      return { ...item, insumoId: matchProveedor.insumoId, confianza: matchProveedor.confianza };
+      const base = { ...item, insumoId: matchProveedor.insumoId, confianza: matchProveedor.confianza };
+      // Si ya sabemos, de una factura anterior de este mismo proveedor, cuanto
+      // rinde una unidad de este producto puntual, esa cifra pisa la
+      // estimacion fresca de Claude — es dato confirmado, no una inferencia.
+      if (matchProveedor.cantidadPorUnidad != null) {
+        return {
+          ...base,
+          cantidadPorUnidad: matchProveedor.cantidadPorUnidad,
+          calculoExplicado: `Ya confirmado en una factura anterior de este proveedor: 1 ${item.unidad || "unidad"} = ${matchProveedor.cantidadPorUnidad} ${unidadBaseDe(matchProveedor.insumoId, catalogoMaestro)}.`
+        };
+      }
+      return base;
     }
     return item;
   });
@@ -196,6 +226,10 @@ function buildCatalogoMaestroTexto(catalogoMaestro) {
   return catalogoMaestro.map((i) => `- ${i.id}: ${i.nombre} (unidad: ${i.unidad})`).join("\n") || "(sin insumos cargados)";
 }
 
+function unidadBaseDe(insumoId, catalogoMaestro) {
+  return catalogoMaestro.find((i) => i.id === insumoId)?.unidad || "unidad";
+}
+
 async function leerConClaude(mediaType, base64Data, lineasMaestro) {
   const systemPrompt = `Sos un asistente que lee facturas y albaranes de proveedores para una sandwicheria y extrae cada linea de producto en formato estructurado.
 
@@ -204,8 +238,17 @@ ${lineasMaestro}
 
 Para cada linea de producto real que encuentres en la factura (ignora envases, portes, IVA, totales y devoluciones):
 - Capturá el nombre exactamente como aparece impreso en la factura, sin corregir ni normalizar — se usa despues para comparar contra texto de facturas anteriores.
+- "cantidad" es el numero de unidades de compra tal como figura en la factura (ej. la columna "Unidades": 1, 6, 3). "unidad" es el formato/envase tal como aparece (ej. "6 CAJA", "1 BRIK", "1 BOLSA"). No los combines ni los conviertas entre si.
 - Si un campo (precio, unidad) no es legible con claridad, omitilo en la respuesta en vez de inventar un valor.
-- Si el producto ES semanticamente el mismo insumo que algo del catalogo maestro de arriba (aunque el nombre este escrito distinto), asigna ese insumoId con confianza "media". Si no reconoces ningun insumo equivalente, deja insumoId en null y confianza "sin_match". No asumas una equivalencia si no estas razonablemente seguro — es preferible "sin_match" a un match forzado.`;
+- Si el producto ES semanticamente el mismo insumo que algo del catalogo maestro de arriba (aunque el nombre este escrito distinto), asigna ese insumoId con confianza "media". Si no reconoces ningun insumo equivalente, deja insumoId en null y confianza "sin_match". No asumas una equivalencia si no estas razonablemente seguro — es preferible "sin_match" a un match forzado.
+- Cuando asignes insumoId, ademas RAZONA cuanto rinde UNA unidad de compra de esa linea, en la unidad base del insumo (campo cantidadPorUnidad) — las facturas de proveedores mayoristas suelen empaquetar varias piezas juntas (ej. una "caja" que en realidad son 6 botellas de 1.5L cada una = 9L por caja) y ese multiplicador casi nunca es 1. Fijate en el nombre del producto y en "Formato"/"unidad" para el tamano de cada pieza y el multiplicador del paquete, y mostra la cuenta en calculoExplicado para que un humano la pueda revisar de un vistazo. Si el envase ya es una sola pieza suelta (ej. "1 BRIK" de 1L), cantidadPorUnidad es simplemente el tamano de esa pieza convertido a unidad base.`;
+
+  // Los PDF se mandan como bloque "document" (Claude los lee pagina por
+  // pagina); las fotos como bloque "image". Mismo formato de "source" en
+  // ambos casos, solo cambia el "type" del bloque.
+  const archivoBlock = mediaType === "application/pdf"
+    ? { type: "document", source: { type: "base64", media_type: mediaType, data: base64Data } }
+    : { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } };
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return anthropic.messages.create({
@@ -216,7 +259,7 @@ Para cada linea de producto real que encuentres en la factura (ignora envases, p
       {
         role: "user",
         content: [
-          { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
+          archivoBlock,
           { type: "text", text: "Extrae cada linea de producto de esta factura." }
         ]
       }

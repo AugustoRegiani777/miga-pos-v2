@@ -2016,6 +2016,26 @@ button {
   padding-top: 10px;
 }
 
+.factura-calculo-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.factura-total-real {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--page);
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.factura-total-valor {
+  color: var(--primary);
+  font-size: 1.05rem;
+}
+
 @media (max-width: 520px) {
   .factura-linea-campos,
   .factura-linea-nuevo {

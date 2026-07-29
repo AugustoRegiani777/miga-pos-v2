@@ -3,9 +3,13 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
-    "start": "node -e \"console.log('\\n  App:     http://localhost:3000\\n  Dev:     http://localhost:3000/dev\\n')\" && npx serve . --no-clipboard"
+    "start": "node -e \"console.log('\\n  App:     http://localhost:3000\\n  Dev:     http://localhost:3000/dev\\n')\" && npx serve . --no-clipboard",
+    "dev": "netlify dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
   }
 }
