@@ -657,9 +657,17 @@ function renderReservedStock() {
 
 function setCartMode(mode) {
   if (mode === cartMode) return;
+  // ToGoo es una condicion del carrito, no un modo que lo reinicia: si ya
+  // habia productos cargados, se re-etiquetan con el nuevo modo en vez de
+  // perderse (antes esto vaciaba el carrito entero al tocar el switch).
   if (cart.size > 0) {
+    const itemsPrevios = Array.from(cart.values());
     cart.clear();
-    setFlash("Carrito vaciado al cambiar de modo.", "success");
+    for (const item of itemsPrevios) {
+      const cartKey = item.opcionNombre ? `${item.id}:${mode}:${item.opcionNombre}` : `${item.id}:${mode}`;
+      cart.set(cartKey, { ...item, cartKey, saleMode: mode });
+    }
+    setSaleMessage(mode === "togoo" ? "Carrito marcado como ToGoo." : "Carrito marcado como venta normal.", true);
   }
   cartMode = mode;
   dom.cartModeTogooToggle.checked = mode === "togoo";

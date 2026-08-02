@@ -341,8 +341,11 @@ export function renderHistory(container, sales, { onUndoSale, onShareSale, onPri
 }
 
 function renderStockRow(product, subtitle, options = {}) {
-  const tagName = options.clickable ? "button" : "article";
-  const row = el(tagName, `stock-row${options.clickable ? " production-row" : ""}${options.selected ? " selected" : ""}`);
+  // La tarjeta en si ya no es el boton (antes toda la tarjeta era clickeable
+  // y "Cargar produccion" era solo una etiqueta) — ahora "Cargar produccion"
+  // es un boton real, con el mismo estilo que "Modificar stock", en el area
+  // de acciones de la tarjeta.
+  const row = el("article", `stock-row${options.clickable ? " production-row" : ""}${options.selected ? " selected" : ""}`);
   const palette = options.clickable ? productionPaletteForProduct(product) : "";
   if (options.clickable) {
     row.dataset.categoryId = product.categoriaId || "";
@@ -350,14 +353,9 @@ function renderStockRow(product, subtitle, options = {}) {
   if (palette) {
     row.dataset.palette = palette;
   }
-  if (options.clickable) {
-    row.type = "button";
-    row.addEventListener("click", options.onClick);
-  }
   row.innerHTML = `
     <div>
       <h2></h2>
-      <span class="production-cta"></span>
       <div class="stock-row-total"></div>
       <p></p>
     </div>
@@ -365,12 +363,6 @@ function renderStockRow(product, subtitle, options = {}) {
     <strong></strong>
   `;
   row.querySelector("h2").textContent = product.nombre;
-  const ctaNode = row.querySelector(".production-cta");
-  if (options.clickable) {
-    ctaNode.textContent = "Cargar producción";
-  } else {
-    ctaNode.remove();
-  }
   const totalNode = row.querySelector(".stock-row-total");
   if (options.clickable) {
     totalNode.textContent = `Total hoy: ${product.cantidadProducida}`;
@@ -384,6 +376,12 @@ function renderStockRow(product, subtitle, options = {}) {
     subtitleNode.textContent = subtitle;
   }
   const actionsNode = row.querySelector(".stock-row-actions");
+  if (options.clickable && typeof options.onClick === "function") {
+    const cargarButton = el("button", "ghost-button compact production-cta", "Cargar producción");
+    cargarButton.type = "button";
+    cargarButton.addEventListener("click", options.onClick);
+    actionsNode.appendChild(cargarButton);
+  }
   if (options.actionLabel && typeof options.onAction === "function") {
     const actionButton = el("button", "ghost-button stock-adjust-button", options.actionLabel);
     actionButton.type = "button";

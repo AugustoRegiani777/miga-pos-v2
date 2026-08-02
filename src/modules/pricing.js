@@ -1,5 +1,6 @@
 export const SANDWICH_COMBOS = [
-  { cantidad: 12, precioCentavos: 3800, nombre: "Combo 12 sandwiches", premiumExtraCentavos: 30 }
+  { cantidad: 12, precioCentavos: 3400, nombre: "Combo 12 sandwiches", premiumExtraCentavos: 30 },
+  { cantidad: 6, precioCentavos: 1900, nombre: "Combo 6 sandwiches", premiumExtraCentavos: 30 }
 ];
 
 const PREMIUM_SANDWICH_IDS = new Set(["atun-palta-queso", "huevo-jamon", "especial-semanal"]);
@@ -34,21 +35,35 @@ function premiumExtraCharge(comboUnits, combo) {
   return premiumUnits * combo.premiumExtraCentavos;
 }
 
-function comboSelection(units, combo) {
-  const comboUnits = units.slice(0, combo.cantidad);
-  const comboPremiumQuantity = comboUnits.filter((item) => item.isPremium).length;
-  if (comboUnits.length < combo.cantidad) return null;
-  if (!combo.premiumExtraCentavos && comboPremiumQuantity > combo.maxPremium) return null;
+// Aplica los combos de mayor a menor cantidad (docena antes que el de 6),
+// tantas veces como entren, y recien cuando ya no entra otro del mismo
+// tamano pasa al combo mas chico con lo que sobro. Ej: 18 sandwiches -> 1
+// docena (12) + 1 combo de 6 (6) + 0 sueltos. 17 sandwiches -> 1 docena (12)
+// + 5 sueltos a precio normal (no alcanza para un segundo combo de 6). Los
+// sandwiches se toman en el orden en que se agregaron al carrito
+// (unitOrders), no por precio.
+function aplicarCombosEnCascada(sandwichUnits, sandwichQuantity) {
+  const combosOrdenados = [...SANDWICH_COMBOS].sort((a, b) => b.cantidad - a.cantidad);
+  const aplicados = [];
+  let cursor = 0;
+  let restante = sandwichQuantity;
 
-  const comboNormalCentavos = comboUnits.reduce((total, item) => total + item.precioCentavos, 0);
-  const totalSandwichCentavos = units.reduce((total, item) => total + item.precioCentavos, 0);
-  const premiumExtraCentavos = premiumExtraCharge(comboUnits, combo);
-  return {
-    comboNormalCentavos,
-    extraSandwichCentavos: totalSandwichCentavos - comboNormalCentavos,
-    comboPremiumQuantity,
-    premiumExtraCentavos
-  };
+  for (const combo of combosOrdenados) {
+    const veces = Math.floor(restante / combo.cantidad);
+    if (veces <= 0) continue;
+    let chargedCentavos = 0;
+    let normalCentavos = 0;
+    for (let i = 0; i < veces; i++) {
+      const groupUnits = sandwichUnits.slice(cursor, cursor + combo.cantidad);
+      cursor += combo.cantidad;
+      normalCentavos += groupUnits.reduce((sum, u) => sum + u.precioCentavos, 0);
+      chargedCentavos += combo.precioCentavos + premiumExtraCharge(groupUnits, combo);
+    }
+    aplicados.push({ combo, veces, chargedCentavos, normalCentavos });
+    restante -= veces * combo.cantidad;
+  }
+
+  return { aplicados, cursor, remainingUnits: sandwichUnits.slice(cursor) };
 }
 
 export function calculateCartPricing(items) {
@@ -59,51 +74,39 @@ export function calculateCartPricing(items) {
   const sandwichNormalCentavos = sandwichLines.reduce((total, item) => total + item.precioCentavos * item.quantity, 0);
   const nonSandwichCentavos = normalTotalCentavos - sandwichNormalCentavos;
   const sandwichUnits = expandedSandwichUnits(lines);
-  const combo = SANDWICH_COMBOS.find((rule) => {
-    if (sandwichQuantity < rule.cantidad) return false;
-    return comboSelection(sandwichUnits, rule) !== null;
-  });
 
-  if (!combo) {
-    const blockedCombo = SANDWICH_COMBOS.find((rule) => sandwichQuantity >= rule.cantidad);
-    const blockedPremiumQuantity = blockedCombo ? sandwichUnits.filter((item) => item.isPremium).length : 0;
+  const { aplicados, cursor, remainingUnits } = aplicarCombosEnCascada(sandwichUnits, sandwichQuantity);
+
+  if (aplicados.length === 0) {
     return {
       normalTotalCentavos,
       totalCentavos: normalTotalCentavos,
       discountCentavos: 0,
       combo: null,
       sandwichQuantity,
-      premiumQuantity: blockedPremiumQuantity,
-      warning: blockedCombo
-        ? blockedCombo.premiumExtraCentavos
-          ? ""
-          : `${blockedCombo.nombre} admite maximo ${blockedCombo.maxPremium} premium.`
-        : ""
+      premiumQuantity: 0,
+      warning: ""
     };
   }
 
-  const numCombos = Math.floor(sandwichQuantity / combo.cantidad);
-  let totalComboNormalCentavos = 0;
-  let totalPremiumExtraCentavos = 0;
-  for (let i = 0; i < numCombos; i++) {
-    const groupUnits = sandwichUnits.slice(i * combo.cantidad, (i + 1) * combo.cantidad);
-    totalComboNormalCentavos += groupUnits.reduce((sum, u) => sum + u.precioCentavos, 0);
-    totalPremiumExtraCentavos += premiumExtraCharge(groupUnits, combo);
-  }
-  const remainingUnits = sandwichUnits.slice(numCombos * combo.cantidad);
   const remainingCentavos = remainingUnits.reduce((sum, u) => sum + u.precioCentavos, 0);
-  const comboChargedCentavos = numCombos * combo.precioCentavos + totalPremiumExtraCentavos;
-  const totalCentavos = nonSandwichCentavos + comboChargedCentavos + remainingCentavos;
-  const comboNombre = numCombos > 1 ? `${numCombos}x ${combo.nombre}` : combo.nombre;
+  const comboChargedTotal = aplicados.reduce((sum, a) => sum + a.chargedCentavos, 0);
+  const comboNormalTotal = aplicados.reduce((sum, a) => sum + a.normalCentavos, 0);
+  const totalCentavos = nonSandwichCentavos + comboChargedTotal + remainingCentavos;
+  // Enuncia todas las promos aplicadas juntas, ej: "Combo 12 sandwiches + Combo 6 sandwiches".
+  const nombre = aplicados
+    .map((a) => (a.veces > 1 ? `${a.veces}x ${a.combo.nombre}` : a.combo.nombre))
+    .join(" + ");
+
   return {
     normalTotalCentavos,
     totalCentavos,
     discountCentavos: Math.max(0, normalTotalCentavos - totalCentavos),
-    combo: { ...combo, nombre: comboNombre, precioCentavos: comboChargedCentavos },
-    comboNormalCentavos: totalComboNormalCentavos,
+    combo: { nombre, precioCentavos: comboChargedTotal, cantidad: cursor },
+    comboNormalCentavos: comboNormalTotal,
     extraSandwichCentavos: remainingCentavos,
     sandwichQuantity,
-    premiumQuantity: sandwichUnits.slice(0, numCombos * combo.cantidad).filter((u) => u.isPremium).length,
+    premiumQuantity: sandwichUnits.slice(0, cursor).filter((u) => u.isPremium).length,
     warning: ""
   };
 }
