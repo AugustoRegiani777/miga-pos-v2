@@ -279,7 +279,7 @@ export const initialProducts = [
     id: "promo-bebida",
     categoriaId: "sandwiches",
     nombre: "Promo bebiba",
-    precioCentavos: 80,
+    precioCentavos: 100,
     sandwichTipo: "basico",
     stockActual: 0,
     umbralBajo: 0,
