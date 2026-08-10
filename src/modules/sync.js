@@ -1,6 +1,7 @@
 import {
   pushVenta,
   pushCalibracion,
+  pushCatalogoSnapshot,
   pushInsumosSnapshot,
   pushRecetasSnapshot,
   pushProveedoresSnapshot,
@@ -40,6 +41,8 @@ async function executeOp(op) {
       return pushVenta(op.payload);
     case "calibracion":
       return pushCalibracion(op.payload);
+    case "catalogo_snapshot":
+      return pushCatalogoSnapshot(op.payload.categorias, op.payload.productos);
     case "insumos_snapshot":
       return pushInsumosSnapshot(op.payload);
     case "recetas_snapshot":
@@ -101,6 +104,10 @@ export function trySyncVenta(payload) {
 
 export function trySyncCalibracion(payload) {
   return tryNow({ type: "calibracion", payload });
+}
+
+export function trySyncCatalogoSnapshot(categorias, productos) {
+  return tryNow({ type: "catalogo_snapshot", payload: { categorias, productos } });
 }
 
 export function trySyncInsumosSnapshot(insumos) {

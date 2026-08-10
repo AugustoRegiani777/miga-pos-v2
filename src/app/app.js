@@ -6,6 +6,7 @@ import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-
 import {
   trySyncVenta,
   trySyncMovimientosInsumos,
+  trySyncCatalogoSnapshot,
   trySyncInsumosSnapshot,
   trySyncRecetasSnapshot,
   trySyncStockProductos,
@@ -1684,7 +1685,7 @@ async function handleConfirmSale() {
 }
 
 async function commitProduction(productId, quantityRaw) {
-  const { warnings, movimiento } = await saveDailyProduction(productId, quantityRaw);
+  const { warnings, movimiento, movimientosInsumos } = await saveDailyProduction(productId, quantityRaw);
   dom.productionQuantity.value = "";
   if (warnings.length > 0) {
     setFlash(`Produccion guardada. ${warnings.join(" ")}`, "warning");
@@ -1694,6 +1695,7 @@ async function commitProduction(productId, quantityRaw) {
   closeProductionSheet();
   syncStockYProduccion();
   trySyncMovimientoStock(movimiento).catch(() => {});
+  if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
   await renderCashier();
 }
 
@@ -1828,7 +1830,7 @@ function bindEvents() {
       if (!Number.isSafeInteger(newStock) || newStock < 0) {
         throw new Error("El nuevo stock debe ser un entero mayor o igual a 0.");
       }
-      const { warnings, movimiento } = await adjustStockLevel(product.id, newStock, dom.stockAdjustReason.value);
+      const { warnings, movimiento, movimientosInsumos } = await adjustStockLevel(product.id, newStock, dom.stockAdjustReason.value);
       if (warnings.length > 0) {
         setFlash(`Stock de ${product.nombre} ajustado a ${newStock}. ${warnings.join(" ")}`, "warning");
       } else {
@@ -1837,6 +1839,7 @@ function bindEvents() {
       closeStockAdjustSheet();
       syncStockYProduccion();
       trySyncMovimientoStock(movimiento).catch(() => {});
+      if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
       await renderProductionView();
       await renderCashier();
     } catch (error) {
@@ -2146,6 +2149,13 @@ async function bootApp() {
       trySyncRecetasSnapshot(recetas).catch(() => {});
       trySyncProveedoresSnapshot(proveedores).catch(() => {});
       trySyncProveedorInsumosSnapshot(proveedorInsumos).catch(() => {});
+    }).catch(() => {});
+  // El catalogo (categorias/productos) vive en el codigo, no en la app — se
+  // espeja igual a Supabase al arrancar para que el dashboard pueda leerlo
+  // real en vez de mantener su propia copia a mano.
+  Promise.all([getAll("categorias"), getAll("productos")])
+    .then(([categorias, productos]) => {
+      trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
     }).catch(() => {});
   // Solo el dispositivo que opera de verdad empuja su stock al arrancar — un
   // celular en modo consulta nunca debe pisar el stock real con sus ceros locales.

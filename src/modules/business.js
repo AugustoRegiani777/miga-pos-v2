@@ -241,6 +241,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
     }
 
     let warnings = [];
+    let movimientosInsumos = [];
     if ((motivo === "Error de produccion" || motivo === "Error") && PRODUCTION_CATEGORIES.has(product.categoriaId)) {
       const productionId = `${fecha}:${productId}`;
       const currentProduction = await requestToPromise(stores.produccion_diaria.get(productionId));
@@ -257,7 +258,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
         creadoEn: currentProduction?.creadoEn || now,
         actualizadoEn: now
       });
-      ({ warnings } = await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now));
+      ({ warnings, movimientos: movimientosInsumos } = await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now));
     }
 
     stores.productos.put({ ...product, stockActual: nuevoStock, actualizadoEn: now });
@@ -275,7 +276,7 @@ export async function adjustStockLevel(productId, newStockValue, reason, fecha =
     };
     stores.movimientos_stock.add(movimiento);
 
-    return { warnings, movimiento };
+    return { warnings, movimiento, movimientosInsumos };
   });
 }
 
@@ -321,8 +322,8 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
       creadoEn: now
     };
     stores.movimientos_stock.add(movimiento);
-    const { warnings } = await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
-    return { warnings, movimiento };
+    const { warnings, movimientos: movimientosInsumos } = await deductInsumosForProductionInTx(stores, productId, cantidad, fecha, now);
+    return { warnings, movimiento, movimientosInsumos };
   });
 }
 

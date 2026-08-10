@@ -230,6 +230,29 @@ export async function pushCalibracion(evento) {
   }, "uuid");
 }
 
+// El catalogo (categorias/productos) vive en el codigo (seed.js), no se edita
+// desde la app — esto solo espeja lo que ya dice seed.js hacia Supabase para
+// que el dashboard (y cualquier otro consumidor) pueda hacer JOIN contra un
+// catalogo real en vez de mantener su propia copia a mano.
+export async function pushCatalogoSnapshot(categorias, productos) {
+  await upsert("categorias", categorias.map(c => ({
+    id: c.id,
+    nombre: c.nombre,
+    orden: c.orden
+  })));
+  return upsert("productos", productos.map(p => ({
+    id: p.id,
+    categoria_id: p.categoriaId,
+    nombre: p.nombre,
+    precio_centavos: p.precioCentavos,
+    sandwich_tipo: p.sandwichTipo || null,
+    umbral_bajo: p.umbralBajo,
+    controla_stock: p.controlaStock !== false,
+    orden: p.orden,
+    activo: p.activo !== false
+  })));
+}
+
 export async function pushInsumosSnapshot(insumos) {
   return upsert("insumos", insumos.map(i => ({
     id: i.id,
@@ -296,6 +319,7 @@ export async function pushMovimientosInsumos(movimientos) {
     cantidad: m.cantidad,
     stock_anterior: m.stockAnterior,
     stock_nuevo: m.stockNuevo,
+    producto_id: m.productoId || null,
     venta_id_local: m.ventaId || null,
     fecha: m.fecha,
     creado_en: m.creadoEn
