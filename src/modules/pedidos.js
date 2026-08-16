@@ -147,6 +147,7 @@ export async function marcarPedidoListo(pedido) {
 
     for (const line of lines) {
       const detalle = {
+        uuid: crypto.randomUUID(),
         ventaId: saleId,
         productoId: line.product.id,
         productoNombre: line.product.nombre,
@@ -166,6 +167,7 @@ export async function marcarPedidoListo(pedido) {
         const stockNuevo = Math.max(0, stockAnterior - line.quantity);
         stores.productos.put({ ...line.product, stockActual: stockNuevo, actualizadoEn: now });
         const mov = {
+          uuid: crypto.randomUUID(),
           productoId: line.product.id,
           tipo: "venta",
           cantidad: -line.quantity,
