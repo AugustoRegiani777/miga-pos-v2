@@ -150,7 +150,15 @@ export function trySyncVentaAnulada({ uuid, fecha, creadoEn }) {
   return tryNow({ type: "venta_anulada", payload: { uuid, fecha, creadoEn } });
 }
 
-// Retry automático al recuperar conexión
+// Retry automático al recuperar conexión, más un reintento periódico.
+// El evento "online" solo dispara si el navegador llega a considerarse
+// offline — un push que falla por otro motivo (timeout, error puntual de
+// wifi débil que nunca tira la conexión del todo) queda encolado y ese
+// evento nunca vuelve a saltar, dejando la cola estancada sin aviso. El
+// intervalo cubre ese caso: cada 90s, si hay algo pendiente y hay conexión,
+// reintenta igual.
+let autoSyncIntervalId = null;
+
 export function setupAutoSync() {
   window.addEventListener("online", () => {
     console.log("[sync] Conexión recuperada — procesando cola...");
@@ -158,4 +166,10 @@ export function setupAutoSync() {
       if (synced > 0) console.log(`[sync] ${synced} operaciones sincronizadas. Pendientes: ${pending}`);
     }).catch(console.error);
   });
+
+  if (autoSyncIntervalId != null) window.clearInterval(autoSyncIntervalId);
+  autoSyncIntervalId = window.setInterval(() => {
+    if (!navigator.onLine || getPendingSyncCount() === 0) return;
+    processSyncQueue().catch(() => {});
+  }, 90000);
 }

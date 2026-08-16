@@ -76,9 +76,28 @@ button {
   display: none;
 }
 
-#logout-button {
+.topbar-actions {
   margin-left: auto;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-status-badge {
+  min-height: 46px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--low);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.sync-status-badge:active {
+  opacity: 0.85;
 }
 
 .login-screen {

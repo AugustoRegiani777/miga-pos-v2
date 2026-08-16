@@ -15,7 +15,9 @@ import {
   trySyncProveedoresSnapshot,
   trySyncProveedorInsumosSnapshot,
   trySyncVentaAnulada,
-  setupAutoSync
+  setupAutoSync,
+  getPendingSyncCount,
+  processSyncQueue
 } from "../modules/sync.js";
 import { renderInsumosList, renderInsumoAjusteSelected, renderCalibracionAlert, renderListaComprasSmart, renderCalibracionDashboard, renderCalibracionRecetaSettings, renderRecetasEditor, renderFacturaLineas } from "../ui/render-aprovisionamiento.js";
 import { archivoABase64, leerFactura, confirmarFactura } from "../modules/facturas.js";
@@ -158,6 +160,7 @@ const dom = {
   loginError: document.querySelector("#login-error"),
   logoutButton: document.querySelector("#logout-button"),
   appMessage: document.querySelector("#app-message"),
+  syncStatusBadge: document.querySelector("#sync-status-badge"),
   navLinks: document.querySelectorAll(".nav:not(.sub-nav) > .nav-link"),
   views: document.querySelectorAll(".view"),
   productCategories: document.querySelector("#product-categories"),
@@ -333,6 +336,36 @@ function setFlash(text, type = "success") {
   setFlash.timeout = window.setTimeout(() => {
     dom.appMessage.hidden = true;
   }, 4200);
+}
+
+// Antes esto era invisible: si un push a Supabase fallaba por un motivo que
+// no fuera "sin conexion" (timeout, error puntual de wifi debil), la
+// operacion quedaba encolada para siempre sin que nadie se enterara — asi se
+// perdio produccion real que nunca llego a la nube. El badge muestra cuanto
+// hay pendiente y permite forzar un reintento con un tap.
+function updateSyncBadge() {
+  if (!dom.syncStatusBadge) return;
+  const pending = getPendingSyncCount();
+  if (pending === 0) {
+    dom.syncStatusBadge.hidden = true;
+    return;
+  }
+  dom.syncStatusBadge.hidden = false;
+  dom.syncStatusBadge.textContent = `⚠ ${pending} sin sincronizar`;
+}
+
+function setupSyncBadge() {
+  updateSyncBadge();
+  window.setInterval(updateSyncBadge, 20000);
+  dom.syncStatusBadge?.addEventListener("click", async () => {
+    dom.syncStatusBadge.disabled = true;
+    const { synced, pending } = await processSyncQueue().catch(() => ({ synced: 0, pending: getPendingSyncCount() }));
+    dom.syncStatusBadge.disabled = false;
+    updateSyncBadge();
+    if (synced > 0 && pending === 0) setFlash(`${synced} sincronizados. Todo al dia.`);
+    else if (synced > 0) setFlash(`${synced} sincronizados, ${pending} pendientes todavia.`, "warning");
+    else setFlash("Sin conexion o sin cambios pendientes.", "warning");
+  });
 }
 
 // Reemplaza window.confirm con un modal propio (mismo estilo que el resto de
@@ -2140,6 +2173,7 @@ async function bootApp() {
   await seedProveedores();
   await initModoConsultaDefault();
   setupAutoSync();
+  setupSyncBadge();
   // Subir insumos, recetas, proveedores y proveedor_insumos a Supabase al
   // arrancar (upsert idempotente) — la lectura de facturas necesita esto del
   // lado del servidor, no solo la tablet lo usa mas.
