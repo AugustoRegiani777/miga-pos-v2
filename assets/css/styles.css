@@ -447,6 +447,17 @@ button {
   margin: 0;
 }
 
+.pedido-combo-hint {
+  margin: -4px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #f0c6b8;
+  border-radius: 8px;
+  background: #fff7f4;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
 .qty-controls {
   display: grid;
   grid-template-columns: var(--tap) var(--tap) var(--tap);

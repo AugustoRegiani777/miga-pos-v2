@@ -322,6 +322,7 @@ const dom = {
   pedidoFechaRetiro: document.querySelector("#pedido-fecha-retiro"),
   pedidoHoraRetiro: document.querySelector("#pedido-hora-retiro"),
   pedidoPrecioTotal: document.querySelector("#pedido-precio-total"),
+  pedidoComboHint: document.querySelector("#pedido-combo-hint"),
   pedidoPagado: document.querySelector("#pedido-pagado"),
   pedidoCortadoMitad: document.querySelector("#pedido-cortado-mitad"),
   pedidoAclaraciones: document.querySelector("#pedido-aclaraciones"),
@@ -1495,17 +1496,43 @@ function sandwichProductsForPedido() {
   );
 }
 
-function pedidoCartTotalCentavos() {
-  let total = 0;
-  for (const item of pedidoCart.values()) total += item.precioUnitarioCentavos * item.cantidad;
-  return total;
+// Mismo shape que espera calculateCartPricing (ver pricing.js): id,
+// categoriaId, controlaStock, sandwichTipo, precioCentavos, quantity. El
+// pedidoCart guarda un shape mas chico (productId/cantidad/precioUnitario)
+// porque es lo que persiste pedidos.js — este mapeo es solo para calcular
+// el precio en pantalla, no cambia lo que se guarda.
+function pedidoCartPricingItems() {
+  return Array.from(pedidoCart.values()).map((item) => {
+    const product = products.find((p) => p.id === item.productId);
+    return {
+      id: item.productId,
+      categoriaId: product?.categoriaId,
+      controlaStock: product?.controlaStock,
+      sandwichTipo: product?.sandwichTipo,
+      precioCentavos: item.precioUnitarioCentavos,
+      quantity: item.cantidad
+    };
+  });
 }
 
 function renderPedidoSheetContents() {
   renderPedidoProductPicker(dom.pedidoProductPicker, sandwichProductsForPedido(), pedidoCart, addToPedidoCart, decrementPedidoCartItem);
   dom.confirmPedido.disabled = pedidoCart.size === 0;
+  // Docena/media docena se aplican automatico, igual que en Caja
+  // (calculateCartPricing) — antes esto sumaba precio de catalogo sin combo,
+  // asi que un pedido de 12 no bajaba a $34 solo hasta que alguien lo
+  // corregia a mano.
+  const pricing = calculateCartPricing(pedidoCartPricingItems());
+  if (dom.pedidoComboHint) {
+    if (pricing.combo) {
+      dom.pedidoComboHint.textContent = `${pricing.combo.nombre} aplicado — ${(pricing.combo.precioCentavos / 100).toFixed(2)}€ en vez de ${(pricing.comboNormalCentavos / 100).toFixed(2)}€.`;
+      dom.pedidoComboHint.hidden = false;
+    } else {
+      dom.pedidoComboHint.hidden = true;
+    }
+  }
   if (!pedidoPrecioEditadoManualmente) {
-    dom.pedidoPrecioTotal.value = (pedidoCartTotalCentavos() / 100).toFixed(2);
+    dom.pedidoPrecioTotal.value = (pricing.totalCentavos / 100).toFixed(2);
   }
 }
 
