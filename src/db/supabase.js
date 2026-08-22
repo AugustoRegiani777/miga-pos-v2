@@ -119,7 +119,10 @@ async function sbFetch(path, method = "GET", body = null, extra = {}) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Supabase ${method} ${path} → ${res.status}: ${text}`);
+    const error = new Error(`Supabase ${method} ${path} → ${res.status}: ${text}`);
+    error.status = res.status;
+    try { error.body = JSON.parse(text); } catch { error.body = null; }
+    throw error;
   }
   const text = await res.text();
   return text ? JSON.parse(text) : null;
@@ -184,18 +187,33 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
     if (existente != null) return existente;
   }
 
-  const [ventaRow] = await upsertOnConflict("ventas", {
-    uuid: venta.uuid,
-    fecha: venta.fecha,
-    hora: venta.hora,
-    total_centavos: venta.totalCentavos,
-    sale_mode: venta.saleMode || "normal",
-    origen: venta.origen || null,
-    pedido_id: venta.pedidoId || null,
-    cliente_nombre: venta.clienteNombre || null,
-    creado_en: venta.creadoEn
-  }, "uuid");
-  const ventaId = ventaRow.id;
+  let ventaId;
+  try {
+    const [ventaRow] = await upsertOnConflict("ventas", {
+      uuid: venta.uuid,
+      fecha: venta.fecha,
+      hora: venta.hora,
+      total_centavos: venta.totalCentavos,
+      sale_mode: venta.saleMode || "normal",
+      origen: venta.origen || null,
+      pedido_id: venta.pedidoId || null,
+      cliente_nombre: venta.clienteNombre || null,
+      creado_en: venta.creadoEn
+    }, "uuid");
+    ventaId = ventaRow.id;
+  } catch (error) {
+    // Red de seguridad contra la carrera del chequeo de arriba (dos
+    // reintentos casi simultaneos podrian leer "no existe" antes de que
+    // ninguno termine de insertar): si la base rechaza por el indice unico
+    // de pedido_id (ver migracion 003), no es un fallo real — el pedido ya
+    // tiene su venta, solo hay que devolver ese id en vez de reintentar.
+    const esConflictoPedidoDuplicado = error?.body?.code === "23505" && venta.pedidoId
+      && JSON.stringify(error.body).includes("ventas_pedido_id_unique");
+    if (!esConflictoPedidoDuplicado) throw error;
+    const existente = await ventaExistentePorPedido(venta.pedidoId);
+    if (existente == null) throw error;
+    ventaId = existente;
+  }
 
   if (detalles.length > 0) {
     await upsertOnConflict("detalle_venta", detalles.map(d => ({
