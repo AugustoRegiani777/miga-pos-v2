@@ -133,8 +133,15 @@ export async function marcarPedidoListo(pedido) {
     const totalCentavos = Number.isFinite(pedido.totalCentavos) ? pedido.totalCentavos : computedTotalCentavos;
     const ajusteCentavos = totalCentavos - computedTotalCentavos;
 
+    // Sin uuid, un reintento de sync que falla despues de crear la venta (pero
+    // antes de terminar detalle/movimientos) no puede reconocerse como "la
+    // misma operacion" — cada reintento inserta una fila nueva en vez de
+    // actualizar la existente. Confirmado en produccion: un dia con wifi
+    // inestable genero 259 ventas duplicadas de 2 pedidos por este motivo.
+    const ventaUuid = crypto.randomUUID();
     const saleId = await requestToPromise(
       stores.ventas.add({
+        uuid: ventaUuid,
         fecha, hora, totalCentavos, saleMode: "normal", creadoEn: now,
         origen: "pedido",
         pedidoId: pedido.id,
@@ -202,6 +209,7 @@ export async function marcarPedidoListo(pedido) {
     return {
       _syncPayload: {
         venta: {
+          uuid: ventaUuid,
           fecha, hora, totalCentavos, saleMode: "normal", creadoEn: now,
           origen: "pedido",
           pedidoId: pedido.id,
