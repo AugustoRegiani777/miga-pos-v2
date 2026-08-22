@@ -165,7 +165,25 @@ export async function testConnection() {
 // respuesta pero la escritura llego) actualice la misma fila en vez de
 // duplicarla — y de paso, el uuid es el identificador que sirve para
 // referenciar esta venta puntual desde otro dispositivo (ver updateVentaAnulada).
+// Los pedidos solo se marcan "listo" una vez (patchEstadoPedido exige el
+// estado anterior "pendiente"), asi que un pedido_id nunca deberia tener mas
+// de una venta real. Si ya existe una, el reintento se descarta aca en vez
+// de insertar de nuevo — cierra la puerta a la duplicacion sin depender de
+// que el uuid este bien puesto en el payload que quedo encolado (localStorage
+// guarda el payload congelado del momento en que se armo, asi que un fix de
+// codigo no alcanza para lo que ya estaba en cola antes del fix).
+async function ventaExistentePorPedido(pedidoId) {
+  if (!pedidoId) return null;
+  const rows = await sbFetch(`/ventas?pedido_id=eq.${pedidoId}&select=id&limit=1`);
+  return rows?.[0]?.id ?? null;
+}
+
 export async function pushVenta({ venta, detalles, movimientosStock }) {
+  if (venta.origen === "pedido" && venta.pedidoId) {
+    const existente = await ventaExistentePorPedido(venta.pedidoId);
+    if (existente != null) return existente;
+  }
+
   const [ventaRow] = await upsertOnConflict("ventas", {
     uuid: venta.uuid,
     fecha: venta.fecha,
