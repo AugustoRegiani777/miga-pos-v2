@@ -9,7 +9,6 @@ import {
   trySyncCatalogoSnapshot,
   trySyncInsumosSnapshot,
   trySyncRecetasSnapshot,
-  trySyncStockProductos,
   trySyncProduccionDiaria,
   trySyncMovimientoStock,
   trySyncProveedoresSnapshot,
@@ -199,6 +198,7 @@ const dom = {
   productionBolleriaList: document.querySelector("#production-bolleria-list"),
   productionGroups: document.querySelector("#production-groups"),
   produccionConsulta: document.querySelector("#produccion-consulta"),
+  closePeriodButton: document.querySelector("#close-period-button"),
   insumoWarningSheet: document.querySelector("#insumo-warning-sheet"),
   insumoWarningBackdrop: document.querySelector("#insumo-warning-backdrop"),
   closeInsumoWarning: document.querySelector("#close-insumo-warning"),
@@ -939,6 +939,10 @@ async function renderProductionView() {
     dom.productionGroups.style.display = "none";
     dom.produccionConsulta.hidden = false;
     dom.produccionConsulta.style.display = "";
+    // El cierre de periodo escribe en el IndexedDB local de ESTE dispositivo,
+    // asi que solo tiene sentido en el que realmente opera — nunca en un
+    // celular de consulta, que tiene su propia copia local vacia/vieja.
+    dom.closePeriodButton.hidden = true;
     showConsultaPlaceholder(dom.produccionConsulta, "Cargando...");
     try {
       const fecha = todayISO();
@@ -986,6 +990,7 @@ async function renderProductionView() {
   dom.productionGroups.style.display = "";
   dom.produccionConsulta.hidden = true;
   dom.produccionConsulta.style.display = "none";
+  dom.closePeriodButton.hidden = false;
   await loadProducts();
   const snapshot = await productionSnapshot();
   if (selectedProductionProductId && !snapshot.productionProducts.some((product) => product.id === selectedProductionProductId)) {
@@ -1214,10 +1219,10 @@ async function handleUndoSale(sale) {
   if (!confirmado) return;
   try {
     undoSaleInProgress = true;
-    const { uuid, fecha, creadoEn } = await undoSale(sale.id);
+    const { uuid, fecha, creadoEn, movimientos } = await undoSale(sale.id);
     setFlash("Venta deshecha, stock reintegrado.", "success");
     trySyncVentaAnulada({ uuid, fecha, creadoEn }).catch(() => {});
-    syncStockYProduccion();
+    movimientos.forEach((m) => trySyncMovimientoStock(m).catch(() => {}));
     await renderHistoryView();
     await renderCashier();
   } catch (error) {
@@ -1686,7 +1691,6 @@ async function handleMarcarListo(pedido) {
     // Sync fire-and-forget — nunca bloquea el flujo de pedidos
     const { venta, detalles, movimientosStock } = result._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
-    syncStockYProduccion();
   } catch (error) {
     setFlash(error.message || "No se pudo marcar el pedido como listo.", "error");
   } finally {
@@ -1734,7 +1738,6 @@ async function handleConfirmSale() {
     const { venta, detalles, movimientosStock, movimientosInsumos } = sale._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
     if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
-    syncStockYProduccion();
     await renderCashier();
   } catch (error) {
     setSaleMessage(error.message || "No se pudo registrar la venta.");
@@ -1753,15 +1756,55 @@ async function commitProduction(productId, quantityRaw) {
     setFlash("Produccion guardada.", "success");
   }
   closeProductionSheet();
-  syncStockYProduccion();
+  syncProduccionDiaria();
   trySyncMovimientoStock(movimiento).catch(() => {});
   if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
   await renderCashier();
 }
 
+// Uso puntual, una vez: pone en 0 el stock de todos los productos activos
+// con control de stock, para arrancar un registro limpio desde una fecha de
+// corte. Cada ajuste sale de este mismo dispositivo (el que realmente opera)
+// con motivo "Cierre de periodo", asi que sincroniza igual que cualquier
+// ajuste manual — no rompe nada de lo que ya esta congelado en el historial.
+let closePeriodInProgress = false;
+
+async function handleClosePeriod() {
+  if (closePeriodInProgress) return;
+  const confirmado = await confirmDialog({
+    title: "Cerrar periodo",
+    message: "Pone el stock de TODOS los productos en 0, motivo \"Cierre de periodo\". Es para arrancar un registro limpio desde hoy. El historial de ventas no se toca. ¿Continuar?",
+    acceptText: "Poner todo en 0"
+  });
+  if (!confirmado) return;
+  try {
+    closePeriodInProgress = true;
+    const productos = (await getAll("productos")).filter((p) => p.activo && p.controlaStock);
+    let ajustados = 0;
+    let yaEnCero = 0;
+    for (const producto of productos) {
+      if (Number(producto.stockActual) === 0) {
+        yaEnCero++;
+        continue;
+      }
+      const { movimiento } = await adjustStockLevel(producto.id, 0, "Cierre de periodo");
+      trySyncMovimientoStock(movimiento).catch(() => {});
+      ajustados++;
+    }
+    setFlash(`Cierre de periodo: ${ajustados} productos puestos en 0${yaEnCero > 0 ? `, ${yaEnCero} ya estaban en 0` : ""}.`, "success");
+    await renderProductionView();
+    await renderCashier();
+  } catch (error) {
+    setFlash(error.message || "No se pudo cerrar el periodo.", "error");
+  } finally {
+    closePeriodInProgress = false;
+  }
+}
+
 function bindEvents() {
   dom.navLinks.forEach((link) => link.addEventListener("click", () => showView(link.dataset.view)));
   document.querySelectorAll(".sub-nav-link").forEach((link) => link.addEventListener("click", () => showGestionSubView(link.dataset.subview)));
+  dom.closePeriodButton.addEventListener("click", handleClosePeriod);
 
   dom.salesSearch.addEventListener("input", () => filterProductButtons(dom.salesSearch, dom.salesSearchEmpty));
   dom.clearSalesSearch.addEventListener("click", () => {
@@ -1897,7 +1940,7 @@ function bindEvents() {
         setFlash(`Stock de ${product.nombre} ajustado a ${newStock}.`, "success");
       }
       closeStockAdjustSheet();
-      syncStockYProduccion();
+      syncProduccionDiaria();
       trySyncMovimientoStock(movimiento).catch(() => {});
       if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
       await renderProductionView();
@@ -2183,12 +2226,14 @@ function bindAuthEvents() {
   });
 }
 
-// Empuja stock actual + produccion de hoy a Supabase, fire-and-forget.
-// Alimenta "modo consulta" en otros dispositivos (nunca bloquea la UI de este).
-function syncStockYProduccion() {
+// Empuja la produccion de hoy a Supabase, fire-and-forget. El stock ya no se
+// empuja por separado: stock_productos se calcula solo, dentro de Supabase,
+// a partir de cada fila que llega a movimientos_stock (ver migracion 004) —
+// un solo camino para ese numero, no puede desincronizarse de su propio
+// historial.
+function syncProduccionDiaria() {
   const fecha = todayISO();
-  Promise.all([getAll("productos"), getAll("produccion_diaria")]).then(([productos, produccion]) => {
-    trySyncStockProductos(productos).catch(() => {});
+  getAll("produccion_diaria").then((produccion) => {
     const produccionHoy = produccion.filter((row) => row.fecha === fecha);
     if (produccionHoy.length > 0) trySyncProduccionDiaria(produccionHoy).catch(() => {});
   }).catch(() => {});
@@ -2218,9 +2263,9 @@ async function bootApp() {
     .then(([categorias, productos]) => {
       trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
     }).catch(() => {});
-  // Solo el dispositivo que opera de verdad empuja su stock al arrancar — un
-  // celular en modo consulta nunca debe pisar el stock real con sus ceros locales.
-  if (!isModoConsulta()) syncStockYProduccion();
+  // Solo el dispositivo que opera de verdad empuja produccion al arrancar —
+  // un celular en modo consulta no tiene nada propio que empujar.
+  if (!isModoConsulta()) syncProduccionDiaria();
   dom.historyDate.value = todayISO();
   bindEvents();
   const initialView = window.location.hash.replace("#", "") || "caja";

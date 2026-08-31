@@ -49,6 +49,10 @@ async function executeOp(op) {
       return pushRecetasSnapshot(op.payload);
     case "movimientos_insumos":
       return pushMovimientosInsumos(op.payload);
+    // Nada nuevo encola este tipo (ver migracion 004 en el repo: stock_productos
+    // ahora se calcula solo en Supabase a partir de movimientos_stock). Se deja
+    // el caso para drenar en paz lo que ya estuviera en la cola local de algun
+    // dispositivo al momento del deploy.
     case "stock_productos":
       return pushStockProductos(op.payload);
     case "produccion_diaria":
@@ -128,12 +132,6 @@ export function trySyncProveedorInsumosSnapshot(proveedorInsumos) {
 
 export function trySyncMovimientosInsumos(movimientos) {
   return tryNow({ type: "movimientos_insumos", payload: movimientos });
-}
-
-// Para "modo consulta" en otros dispositivos: mantiene stock_productos y
-// produccion_diaria al dia en Supabase despues de cada venta/produccion/ajuste.
-export function trySyncStockProductos(productos) {
-  return tryNow({ type: "stock_productos", payload: productos });
 }
 
 export function trySyncProduccionDiaria(rows) {

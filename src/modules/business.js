@@ -514,13 +514,14 @@ export async function undoSale(ventaId) {
 
     const detalles = await requestToPromise(stores.detalle_venta.index("ventaId").getAll(ventaId));
 
+    const movimientos = [];
     for (const detalle of detalles) {
       const product = await requestToPromise(stores.productos.get(detalle.productoId));
       if (product && product.controlaStock) {
         const stockAnterior = product.stockActual;
         const stockNuevo = stockAnterior + detalle.cantidad;
         stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
-        stores.movimientos_stock.add({
+        const movimiento = {
           uuid: crypto.randomUUID(),
           productoId: product.id,
           tipo: "devolucion",
@@ -530,7 +531,9 @@ export async function undoSale(ventaId) {
           referencia: `Venta #${ventaId} anulada`,
           fecha,
           creadoEn: now
-        });
+        };
+        stores.movimientos_stock.add(movimiento);
+        movimientos.push(movimiento);
       }
     }
 
@@ -541,6 +544,6 @@ export async function undoSale(ventaId) {
     // le asigna Supabase a la venta son secuencias distintas, no sirven para
     // matchear. fecha/creadoEn quedan de respaldo por si la venta es de antes
     // de este cambio y todavia no tiene uuid.
-    return { uuid: venta.uuid || null, fecha: venta.fecha, creadoEn: venta.creadoEn };
+    return { uuid: venta.uuid || null, fecha: venta.fecha, creadoEn: venta.creadoEn, movimientos };
   });
 }
