@@ -376,6 +376,17 @@ export const initialProducts = [
     activo: true
   },
   {
+    id: "cinnamon-roll",
+    categoriaId: "bolleria",
+    nombre: "Cinnamon roll",
+    precioCentavos: 350,
+    stockActual: 0,
+    umbralBajo: 4,
+    controlaStock: true,
+    orden: 9,
+    activo: true
+  },
+  {
     id: "expresso-30ml",
     categoriaId: "cafe",
     nombre: "Expresso 30ml",
