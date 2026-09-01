@@ -554,8 +554,8 @@ export const initialProducts = [
   {
     id: "jugo",
     categoriaId: "bebidas",
-    nombre: "Jugo",
-    precioCentavos: 200,
+    nombre: "Zumo",
+    precioCentavos: 220,
     stockActual: 0,
     umbralBajo: 0,
     controlaStock: false,
