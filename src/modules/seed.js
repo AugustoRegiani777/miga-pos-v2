@@ -204,13 +204,13 @@ export const initialProducts = [
     activo: true
   },
   {
-    id: "berenjena-brie",
+    id: "mortadela-pesto-queso",
     categoriaId: "sandwiches",
-    nombre: "Berenjena y queso brie",
-    precioCentavos: 350,
-    sandwichTipo: "basico",
+    nombre: "Mortadela, Pesto y queso",
+    precioCentavos: 380,
+    sandwichTipo: "premium",
     stockActual: 0,
-    umbralBajo: 15,
+    umbralBajo: 10,
     controlaStock: true,
     orden: 5,
     activo: true
