@@ -92,8 +92,10 @@ ON CONFLICT (id) DO UPDATE SET
 -- 2) Foreign keys que hoy cierran limpio (auditado contra los datos reales
 -- antes de escribir esto — cero filas violarian estas reglas)
 -- -----------------------------------------
-ALTER TABLE ventas ADD CONSTRAINT fk_ventas_pedido
-  FOREIGN KEY (pedido_id) REFERENCES pedidos(id);
+-- ventas.pedido_id NO lleva FK a proposito: los pedidos se borran despues de
+-- cumplirse (ver deletePedido en supabase.js), asi que una venta historica
+-- que vino de un pedido ya borrado es esperable, no un error de datos.
+-- Forzar la FK rompe la migracion apenas hay un solo pedido borrado (ya paso).
 
 ALTER TABLE produccion_diaria ADD CONSTRAINT fk_produccion_producto
   FOREIGN KEY (producto_id) REFERENCES productos(id);
