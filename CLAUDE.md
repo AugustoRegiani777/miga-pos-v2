@@ -26,16 +26,17 @@ Registra: ventas (carrito → confirmación → historial), producción diaria, 
 
 **Limitación crítica de v1:** Los datos solo existen en esa tablet. Si se rompe, se pierde todo.
 
-### v2 (en desarrollo activo, julio 2026)
-Misma app, tres mejoras grandes añadidas por capas:
+### v2 (en desarrollo activo, agosto 2026)
+Misma app, mejoras grandes añadidas por capas:
 
 1. **Aprovisionamiento con recetas** ✅ IMPLEMENTADO
-2. **Sincronización Supabase (nube)** ✅ IMPLEMENTADO (parcial — ventas, insumos, recetas)
-3. **Dashboard del dueño** 🔲 PENDIENTE
+2. **Sincronización Supabase (nube)** ✅ IMPLEMENTADO (ventas, producción, insumos, recetas, proveedores, movimientos de stock, catálogo)
+3. **Auth Supabase** ✅ IMPLEMENTADO (email + contraseña, no magic link — se descartó esa idea en la práctica)
+4. **Dashboard del dueño** ✅ IMPLEMENTADO — proyecto separado, ver sección 15
 
 ---
 
-## 3. Estado actual del código (julio 2026)
+## 3. Estado actual del código (agosto 2026)
 
 ### ✅ Módulos implementados y funcionando
 
@@ -45,26 +46,25 @@ Misma app, tres mejoras grandes añadidas por capas:
 | Producción diaria | `business.js`, `render.js` | ✅ Prod, no tocar |
 | Stock productos | `business.js`, `render.js` | ✅ Prod, no tocar |
 | Historial ventas | `business.js`, `render.js` | ✅ Prod, no tocar |
+| Pedidos (encargos) | `pedidos.js`, `render-pedidos.js` | ✅ Completo |
 | Insumos (stock) | `aprovisionamiento.js`, `render-aprovisionamiento.js` | ✅ Completo |
 | Recetas | `aprovisionamiento.js`, `render-aprovisionamiento.js` | ✅ Completo |
 | Calibración modelo | `aprovisionamiento.js`, `render-aprovisionamiento.js` | ✅ Completo |
 | Lista de compras smart | `aprovisionamiento.js`, `render-aprovisionamiento.js` | ✅ Completo |
 | Proveedores CRUD | `proveedores.js`, `render-proveedores.js` | ✅ Completo |
-| Sync Supabase | `sync.js`, `supabase.js` | ✅ Ventas + insumos |
-| Dashboard dueño | — | 🔲 No empezado |
-| Auth Supabase | — | 🔲 No empezado |
+| Sync Supabase | `sync.js`, `supabase.js` | ✅ Completo, ver sección 8.7 (reintento periódico + badge de pendientes) |
+| Auth Supabase | `supabase.js` | ✅ Email + contraseña |
+| Dashboard dueño | proyecto `miga-dashboard` (repo aparte) | ✅ Ver sección 15 |
 
 ### 🔲 Próximos pasos (en orden de prioridad)
 
-1. **Dashboard del dueño** — Vista mobile de solo lectura. El dueño ve desde su teléfono: ventas del día, caja total, alertas de stock crítico, producción cargada. Sin autenticación por ahora (URL privada es suficiente para v2).
+1. ~~Service Worker inteligente~~ — **Verificado 01/09/2026: no existe ningún Service Worker en el repo actual** (no hay `sw.js` ni registro en `index.html`), y los headers que manda Netlify ya son sanos (`Cache-Control: public, max-age=0, must-revalidate` — obliga a revalidar contra el servidor, no cachea agresivo). Esta entrada describía el v1 viejo (HTTP File Server local en la tablet) o algo que ya se sacó — no aplica al despliegue actual en Netlify. El riesgo real de "pestaña vieja corriendo código viejo" (sección 8.7) sigue existiendo, pero es el comportamiento normal de cualquier SPA (una pestaña ya abierta no vuelve a pedir el JS solo por volver a primer plano) — la mitigación es simplemente cerrar y reabrir del todo después de cada deploy, como ya se indica en 8.7, no hace falta ningún Service Worker nuevo para esto.
 
-2. **Completar sync Supabase** — Faltan proveedores y proveedor_insumos en la nube. Solo existe en IDB local.
+2. **Export mejorado** — La lista de compras smart ya es exportable como TXT. Mejorar formato y agregar opción WhatsApp (Web Share API).
 
-3. **Auth básico** — Para que el dueño acceda al dashboard sin estar en la tablet. Supabase Auth con magic link (sin contraseña).
+3. **Integración con Glovo** — El dueño ya vende por Glovo y quiere sincronizar el stock automáticamente (marcar sin stock en Glovo cuando se agota en la tablet). Investigado: Glovo tiene Partner API real (`api-docs.glovoapp.com/partners`), pero **no es self-service** — requiere que el dueño arranque el proceso de onboarding con Glovo primero (ellos dan store ID + token). El punto de enganche en el código sería `saveDailyProduction`/`adjustStockLevel` en `business.js`, mismo patrón fire-and-forget que ya usa `sync.js`. No arrancar esto sin las credenciales reales del dueño.
 
-4. **Service Worker inteligente** — El actual cachea agresivamente. Necesita estrategia network-first para el HTML/JS y cache-first para assets.
-
-5. **Export mejorado** — La lista de compras smart ya es exportable como TXT. Mejorar formato y agregar opción WhatsApp (Web Share API).
+4. **Datos externos (clima, calendario de Valencia)** — para enriquecer el dashboard, no esta app. Ver CLAUDE.md de `miga-dashboard`.
 
 ---
 
@@ -76,9 +76,9 @@ Misma app, tres mejoras grandes añadidas por capas:
 | UI | HTML + CSS puro | Sin Tailwind, sin CSS-in-JS |
 | Base de datos local | IndexedDB via wrapper `idb.js` | Offline-first |
 | Base de datos nube | Supabase (PostgreSQL) | Free tier, sync asíncrono |
-| Hosting | Vercel | Deploy automático desde GitHub |
-| Auth | Supabase Auth | Magic link, pendiente |
-| Service Worker | Custom | Necesita reescritura |
+| Hosting | Netlify (`unodemigapos.netlify.app`) | Deploy automático desde GitHub, push a `main` |
+| Auth | Supabase Auth | Email + contraseña (`grant_type=password`), implementado |
+| Service Worker | No existe | Ver sección 3, punto 1 — verificado 01/09/2026, no hace falta |
 
 **Principio fundamental:** Sin dependencias externas en runtime. Todo lo que corre en la tablet tiene que funcionar offline.
 
@@ -287,6 +287,17 @@ container.addEventListener("click", (e) => {
 
 Todo botón que no sea submit dentro de un `<form>` DEBE tener `type="button"`. Sin él, el browser lo trata como submit y ejecuta el formulario al hacer click.
 
+### 8.7 Sync: uuid obligatorio en TODA fila que se sincroniza — sin excepción
+
+**Incidente real (agosto 2026):** `marcarPedidoListo` (en `pedidos.js`) creaba la venta de un pedido SIN uuid, a diferencia de `confirmSale` (caja normal) que sí lo genera. Un día de wifi inestable, el push a Supabase falló repetidas veces entre crear la venta y crear sus líneas de detalle. Como no había uuid, `upsertOnConflict("ventas", ..., "uuid")` no podía reconocer que ya existía esa venta — cada reintento insertó una fila NUEVA. Resultado: 259 ventas duplicadas de 2 pedidos, facturación de un día inflada 30x en el dashboard. El problema se agravó porque **una pestaña del navegador vieja siguió reintentando con el código de ANTES del fix durante días** (una SPA no vuelve a descargar el código solo por seguir navegando — hace falta un reload completo).
+
+**Reglas que salen de esto, para cualquier código nuevo que escriba filas para sincronizar a Supabase:**
+
+1. **Toda fila que se sincronice necesita `uuid: crypto.randomUUID()` generado en el momento de crearla, sin excepción.** No hay atajos — ni "totales que no importan", ni "esto no se va a reintentar nunca". `upsertOnConflict` (en `supabase.js`) depende 100% del uuid para no duplicar.
+2. **Cuando una relación tiene una clave natural que NUNCA debería repetirse** (ej: un `pedido_id` solo puede tener una venta, porque `marcarPedidoListo` exige que el pedido esté en estado "pendiente"), agregar además una restricción única a nivel de base de datos (ver `supabase-migration-003-unique-pedido-venta.sql` en `miga-pos-v2` — el chequeo "leer si existe, después insertar" en el código de la app **tiene una carrera** entre dos reintentos casi simultáneos; el índice único a nivel de Postgres es lo único que lo hace imposible de verdad, no solo improbable). `pushVenta` en `supabase.js` ya sabe recuperarse de ese conflicto (código `23505`) devolviendo el id existente en vez de fallar.
+3. **`sync.js` reintenta la cola cada 90 segundos** (además del evento `online`) — el badge visible en la topbar (`#sync-status-badge`) muestra cuánto queda pendiente, tocarlo fuerza un reintento inmediato. Si algo queda pendiente por mucho tiempo, es una señal real de que algo se está rompiendo repetidamente, no ruido.
+4. **Después de cualquier fix de sync, avisar que hay que cerrar y reabrir la pestaña/app del todo en la tablet** — un simple cambio de vista no alcanza para que la SPA cargue el código nuevo.
+
 ---
 
 ## 9. Módulo de calibración del modelo (importante entender)
@@ -392,9 +403,9 @@ La función `listaDeComprasSmart()` en `aprovisionamiento.js`:
 ## 12. Criterios de diseño que no negociar
 
 1. **Sin fricción en caja:** cada acción tiene que ser 1-2 taps. La persona que cobra no puede cometer errores de UI.
-2. **Offline primero:** la app funciona sin WiFi. Sync es bonus, no requisito.
+2. **Offline primero:** la app funciona sin WiFi. Sync es bonus, no requisito. *** ACA QUIERO REMARCAR ALGO, SYNC ES BONUS, PERO LOS DISPOSITIVOS DEBEN FUNCIONAR, NO ES NECESARIO QUE SEA REAL TIME COMO SI FUERA UN SEGUIMIENTO MILIMETRICO, PERO SI QUE SE VEAN REFLEJADAS LAS ACCIONES DE CADA DISPOSITIVO, EXEPTO PARA EL MOVIMIENTO DE CAJA.
 3. **Sin dependencias en runtime:** Vanilla JS, sin CDN, sin frameworks. Menos cosas que romper.
-4. **Sin costo:** free tiers de Supabase + Vercel son suficientes para años de crecimiento del negocio.
+4. **Sin costo:** free tiers de Supabase + Netlify son suficientes para años de crecimiento del negocio.
 5. **Datos del usuario son sagrados:** el seed nunca sobreescribe lo que el usuario editó.
 6. **Feedback inmediato:** toda acción devuelve un flash message. Nunca silencio tras un tap.
 
@@ -429,4 +440,12 @@ La función `listaDeComprasSmart()` en `aprovisionamiento.js`:
 - Panel de analytics para el dueño (ventas semanales, top productos, margen bruto)
 - Integración con TPV físico o código QR para pedidos online
 
-**Principio de escalado:** La arquitectura aguanta todo esto sin reescribir. Se agregan módulos, stores y vistas. El core (caja, producción, stock) no cambia.
+**Principio de escalado:** La arquitectura aguanta todo esto sin reescribir. Se agregan módulos, stores y vistas. El core (caja, producción, stock) no cambia. Pero si es insostenible, hay que cambiar cosas para poder escalar se advierte.
+
+---
+
+## 15. Proyecto hermano: `miga-dashboard`
+
+El panel de análisis del dueño (KPIs, comparación de facturación, tendencias por sabor, etc.) **vive en un repositorio separado**, `miga-dashboard`, no acá adentro. Comparte el mismo Supabase (mismas tablas), pero es de solo lectura — nunca escribe en `ventas`, `productos`, `stock_productos`, etc. Tiene su propio `CLAUDE.md` con el detalle de su arquitectura, y hay que leerlo antes de tocar ese proyecto.
+
+Si algo cambia en el schema de Supabase desde acá (nueva tabla, columna, tipo de dato), o si cambia el significado de algo que el dashboard ya lee (ej: `movimientos_stock.motivo`, `origen`/`pedido_id` en `ventas`), avisar — el dashboard reconstruye varias cosas (producción vs. ventas, stock arrastrado) a partir de ese ledger, y un cambio silencioso ahí rompe esos cálculos sin que se note hasta mucho después.
