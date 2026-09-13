@@ -1,8 +1,10 @@
 import { exportSalesSummary, exportDailySummaryJSON } from "../modules/backup.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos } from "../modules/aprovisionamiento.js";
-import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo } from "../modules/proveedores.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube } from "../modules/aprovisionamiento.js";
+import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
+import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, pullCatalogoDesdeNube } from "../modules/menu.js";
+import { renderMenuList, renderMenuRecetaRows } from "../ui/render-menu.js";
 import {
   trySyncVenta,
   trySyncMovimientosInsumos,
@@ -104,6 +106,13 @@ let selectedProvProdId = "";
 let provProdMode = "add";
 let provEditSheetOpen = false;
 let provProdSheetOpen = false;
+let menuEditInProgress = false;
+let refrescarCatalogoInProgress = false;
+let selectedMenuProductoId = "";
+let menuProductoMode = "add";
+let menuEditSheetOpen = false;
+let menuRecetaLineas = [];
+let menuInsumosDisponibles = [];
 const pedidoCart = new Map();
 const expandedPedidoIds = new Set();
 let pedidoSheetOpen = false;
@@ -196,9 +205,11 @@ const dom = {
   productionQuantity: document.querySelector("#production-quantity"),
   productionSandwichesList: document.querySelector("#production-sandwiches-list"),
   productionBolleriaList: document.querySelector("#production-bolleria-list"),
+  productionBebidasList: document.querySelector("#production-bebidas-list"),
   productionGroups: document.querySelector("#production-groups"),
   produccionConsulta: document.querySelector("#produccion-consulta"),
   closePeriodButton: document.querySelector("#close-period-button"),
+  refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   insumoWarningSheet: document.querySelector("#insumo-warning-sheet"),
   insumoWarningBackdrop: document.querySelector("#insumo-warning-backdrop"),
   closeInsumoWarning: document.querySelector("#close-insumo-warning"),
@@ -308,6 +319,22 @@ const dom = {
   provProdCantidadLabel: document.querySelector("#prov-prod-cantidad-label"),
   provProdCantidad: document.querySelector("#prov-prod-cantidad"),
   provProdPrecio: document.querySelector("#prov-prod-precio"),
+  menuList: document.querySelector("#menu-list"),
+  menuEditSheet: document.querySelector("#menu-edit-sheet"),
+  menuEditBackdrop: document.querySelector("#menu-edit-backdrop"),
+  closeMenuEdit: document.querySelector("#close-menu-edit"),
+  menuEditForm: document.querySelector("#menu-edit-form"),
+  menuEditTitle: document.querySelector("#menu-edit-title"),
+  menuEditNombre: document.querySelector("#menu-edit-nombre"),
+  menuEditCategoria: document.querySelector("#menu-edit-categoria"),
+  menuEditPrecio: document.querySelector("#menu-edit-precio"),
+  menuEditTipoWrap: document.querySelector("#menu-edit-tipo-wrap"),
+  menuEditSandwichTipo: document.querySelector("#menu-edit-sandwich-tipo"),
+  menuEditControlaStock: document.querySelector("#menu-edit-controla-stock"),
+  menuEditUmbral: document.querySelector("#menu-edit-umbral"),
+  menuEditActivo: document.querySelector("#menu-edit-activo"),
+  menuRecetaRows: document.querySelector("#menu-receta-rows"),
+  menuAddRecetaRow: document.querySelector("#menu-add-receta-row"),
   pedidosGrid: document.querySelector("#pedidos-grid"),
   openNuevoPedido: document.querySelector("#open-nuevo-pedido"),
   pedidoSheet: document.querySelector("#pedido-sheet"),
@@ -502,6 +529,7 @@ function closeAllGestionSheets() {
   setProvEditSheetOpen(false);
   setProvProdSheetOpen(false);
   setFacturaSheetOpen(false);
+  setMenuEditSheetOpen(false);
 }
 
 function setFacturaSheetOpen(isOpen) {
@@ -628,6 +656,7 @@ async function refreshGestionSubView(subViewName) {
   if (subViewName === "calibrar") await renderCalibracionView();
   if (subViewName === "recetas") await renderRecetasView();
   if (subViewName === "proveedores") await renderProveedoresView();
+  if (subViewName === "menu") await renderMenuView();
 }
 
 function showGestionSubView(subViewName) {
@@ -1000,7 +1029,7 @@ async function renderProductionView() {
     (total, product) => total + (Number(product.cantidadProducida) || 0),
     0
   );
-  dom.productionDateText.textContent = `Fecha: ${snapshot.fecha}. Total cargado en sandwiches: ${totalSandwichesProduced}. Toca un producto en sandwiches o bolleria para sumar o restar stock.`;
+  dom.productionDateText.textContent = `Fecha: ${snapshot.fecha}. Total cargado en sandwiches: ${totalSandwichesProduced}. Toca un producto en sandwiches, bolleria o bebidas para sumar o restar stock.`;
   dom.productionCommentText.hidden = !snapshot.comentarios?.length;
   dom.productionCommentText.innerHTML = snapshot.comentarios?.length
     ? `
@@ -1023,7 +1052,8 @@ async function renderProductionView() {
     selectProductionProduct,
     {
       sandwiches: dom.productionSandwichesList,
-      bolleria: dom.productionBolleriaList
+      bolleria: dom.productionBolleriaList,
+      bebidas: dom.productionBebidasList
     },
     openStockAdjustSheet
   );
@@ -1455,6 +1485,116 @@ async function renderProveedoresView() {
     onEditProv: openProvEdit,
     onAddProd: openProvProdAdd,
     onEditProd: openProvProdEdit
+  });
+}
+
+function setMenuEditSheetOpen(isOpen) {
+  menuEditSheetOpen = isOpen;
+  dom.menuEditSheet.classList.toggle("open", isOpen);
+  dom.menuEditSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  dom.menuEditBackdrop.hidden = !isOpen;
+  dom.menuEditBackdrop.classList.toggle("open", isOpen);
+}
+
+function renderMenuRecetaEditorView() {
+  renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles);
+}
+
+// Los inputs numericos son type="number", pero en la tablet a veces dejan
+// pasar una coma decimal (normal en España) en vez de punto — parseFloat
+// corta ahi y devuelve un numero mas chico o 0 sin avisar, tirando filas de
+// receta enteras en silencio. Mismo parche que ya usa actualizarReceta() en
+// aprovisionamiento.js para este mismo problema.
+function parseDecimal(value) {
+  return parseFloat(String(value ?? "").replace(",", "."));
+}
+
+// El tipo de sandwich (basico/premium) solo importa para la categoria
+// sandwiches — es lo que usa pricing.js para sumar el recargo de +30
+// centimos por unidad "de la casa" dentro de un combo (ver PREMIUM_SANDWICH_IDS
+// e isPremiumSandwich en pricing.js).
+function updateMenuTipoVisibility() {
+  dom.menuEditTipoWrap.hidden = dom.menuEditCategoria.value !== "sandwiches";
+}
+
+async function openMenuProductoAdd(categoriaId) {
+  selectedMenuProductoId = "";
+  menuProductoMode = "add";
+  dom.menuEditTitle.textContent = "Agregar producto";
+  dom.menuEditNombre.value = "";
+  dom.menuEditPrecio.value = "";
+  dom.menuEditControlaStock.checked = true;
+  dom.menuEditUmbral.value = "10";
+  dom.menuEditSandwichTipo.value = "basico";
+  dom.menuEditActivo.checked = true;
+  menuRecetaLineas = [];
+  menuInsumosDisponibles = await listInsumos();
+  const categorias = await listCategories();
+  dom.menuEditCategoria.innerHTML = categorias
+    .map((c) => `<option value="${c.id}" ${c.id === categoriaId ? "selected" : ""}>${c.nombre}</option>`)
+    .join("");
+  updateMenuTipoVisibility();
+  renderMenuRecetaEditorView();
+  setMenuEditSheetOpen(true);
+  dom.menuEditNombre.focus();
+}
+
+async function openMenuProductoEdit(producto) {
+  selectedMenuProductoId = producto.id;
+  menuProductoMode = "edit";
+  dom.menuEditTitle.textContent = "Editar producto";
+  dom.menuEditNombre.value = producto.nombre;
+  dom.menuEditPrecio.value = (producto.precioCentavos / 100).toFixed(2);
+  dom.menuEditControlaStock.checked = !!producto.controlaStock;
+  dom.menuEditUmbral.value = String(producto.umbralBajo ?? 0);
+  dom.menuEditSandwichTipo.value = producto.sandwichTipo === "premium" ? "premium" : "basico";
+  dom.menuEditActivo.checked = !!producto.activo;
+  menuInsumosDisponibles = await listInsumos();
+  const [categorias, recetas] = await Promise.all([listCategories(), getAll("recetas")]);
+  dom.menuEditCategoria.innerHTML = categorias
+    .map((c) => `<option value="${c.id}" ${c.id === producto.categoriaId ? "selected" : ""}>${c.nombre}</option>`)
+    .join("");
+  updateMenuTipoVisibility();
+  menuRecetaLineas = recetas
+    .filter((r) => r.productoId === producto.id)
+    .map((r) => ({ insumoId: r.insumoId, cantidad: String(r.cantidadPorUnidad), nuevoNombre: "", nuevaUnidad: "" }));
+  renderMenuRecetaEditorView();
+  setMenuEditSheetOpen(true);
+  dom.menuEditNombre.focus();
+}
+
+function closeMenuEdit() {
+  setMenuEditSheetOpen(false);
+  selectedMenuProductoId = "";
+  menuRecetaLineas = [];
+}
+
+async function handleToggleProductoActivo(producto) {
+  try {
+    await setProductoActivo(producto.id, !producto.activo);
+    setFlash(producto.activo ? "Producto ocultado de caja." : "Producto visible en caja.", "success");
+    await renderMenuView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo actualizar.", "error");
+  }
+}
+
+async function handleMoverProducto(id, direccion) {
+  try {
+    await moverProductoOrden(id, direccion);
+    await renderMenuView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo reordenar.", "error");
+  }
+}
+
+async function renderMenuView() {
+  const data = await getMenuDashboardData();
+  renderMenuList(dom.menuList, data, {
+    onAdd: openMenuProductoAdd,
+    onEdit: openMenuProductoEdit,
+    onToggleActivo: handleToggleProductoActivo,
+    onMover: handleMoverProducto
   });
 }
 
@@ -2159,6 +2299,102 @@ function bindEvents() {
     }
   });
 
+  dom.closeMenuEdit.addEventListener("click", closeMenuEdit);
+  dom.menuEditBackdrop.addEventListener("click", closeMenuEdit);
+  dom.menuEditCategoria.addEventListener("change", updateMenuTipoVisibility);
+
+  dom.menuAddRecetaRow.addEventListener("click", () => {
+    menuRecetaLineas.push({ insumoId: "", cantidad: "", nuevoNombre: "", nuevaUnidad: "" });
+    renderMenuRecetaEditorView();
+  });
+
+  dom.menuRecetaRows.addEventListener("input", (e) => {
+    const idx = Number(e.target.dataset.idx);
+    if (Number.isNaN(idx) || !menuRecetaLineas[idx]) return;
+    if (e.target.classList.contains("menu-receta-cantidad")) menuRecetaLineas[idx].cantidad = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-nombre")) menuRecetaLineas[idx].nuevoNombre = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-unidad")) menuRecetaLineas[idx].nuevaUnidad = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-min")) menuRecetaLineas[idx].nuevoStockMinimo = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-critico")) menuRecetaLineas[idx].nuevoStockCritico = e.target.value;
+  });
+
+  dom.menuRecetaRows.addEventListener("change", (e) => {
+    const idx = Number(e.target.dataset.idx);
+    if (Number.isNaN(idx) || !menuRecetaLineas[idx]) return;
+    if (e.target.classList.contains("menu-receta-insumo")) {
+      menuRecetaLineas[idx].insumoId = e.target.value;
+      renderMenuRecetaEditorView();
+    }
+  });
+
+  dom.menuRecetaRows.addEventListener("click", (e) => {
+    const btn = e.target.closest('[data-action="quitar-linea"]');
+    if (!btn) return;
+    menuRecetaLineas.splice(Number(btn.dataset.idx), 1);
+    renderMenuRecetaEditorView();
+  });
+
+  dom.menuEditForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (menuEditInProgress) return;
+    try {
+      menuEditInProgress = true;
+      const nombre = dom.menuEditNombre.value.trim();
+      const categoriaId = dom.menuEditCategoria.value;
+      const precio = parseDecimal(dom.menuEditPrecio.value);
+      if (!nombre) throw new Error("El nombre es obligatorio.");
+      if (!categoriaId) throw new Error("Elegi una categoria.");
+      if (isNaN(precio) || precio < 0) throw new Error("Ingresa un precio válido.");
+      const lineasReceta = menuRecetaLineas
+        .filter((l) => (l.insumoId === "__nuevo__" ? l.nuevoNombre?.trim() : l.insumoId) && parseDecimal(l.cantidad) > 0)
+        .map((l) => ({ ...l, cantidad: parseDecimal(l.cantidad) }));
+      await saveProducto({
+        id: menuProductoMode === "edit" ? selectedMenuProductoId : undefined,
+        categoriaId,
+        nombre,
+        precioCentavos: Math.round(precio * 100),
+        controlaStock: dom.menuEditControlaStock.checked,
+        umbralBajo: parseDecimal(dom.menuEditUmbral.value) || 0,
+        sandwichTipo: categoriaId === "sandwiches" ? dom.menuEditSandwichTipo.value : undefined,
+        activo: dom.menuEditActivo.checked,
+        lineasReceta
+      });
+      setFlash(menuProductoMode === "edit" ? "Producto actualizado." : "Producto agregado.", "success");
+      closeMenuEdit();
+      await renderMenuView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo guardar.", "error");
+    } finally {
+      menuEditInProgress = false;
+    }
+  });
+
+  dom.refrescarCatalogo.addEventListener("click", async () => {
+    if (refrescarCatalogoInProgress) return;
+    try {
+      refrescarCatalogoInProgress = true;
+      dom.refrescarCatalogo.disabled = true;
+      dom.refrescarCatalogo.textContent = "Actualizando...";
+      const [catalogo, insumosCount, proveedoresResult] = await Promise.all([
+        pullCatalogoDesdeNube(),
+        pullInsumosDesdeNube(),
+        pullProveedoresDesdeNube()
+      ]);
+      await loadProducts();
+      await refreshGestionSubView(currentGestionSubView);
+      setFlash(
+        `Catalogo actualizado: ${catalogo.productos} productos, ${insumosCount} insumos, ${proveedoresResult.proveedores} proveedores.`,
+        "success"
+      );
+    } catch (error) {
+      setFlash(error.message || "No se pudo actualizar el catalogo (revisa la conexion).", "error");
+    } finally {
+      refrescarCatalogoInProgress = false;
+      dom.refrescarCatalogo.disabled = false;
+      dom.refrescarCatalogo.textContent = "Actualizar catalogo";
+    }
+  });
+
   window.addEventListener("hashchange", () => {
     const viewName = window.location.hash.replace("#", "") || "caja";
     if (["caja", "pedidos", "produccion", "historial", "gestion"].includes(viewName)) showView(viewName);
@@ -2256,9 +2492,9 @@ async function bootApp() {
       trySyncProveedoresSnapshot(proveedores).catch(() => {});
       trySyncProveedorInsumosSnapshot(proveedorInsumos).catch(() => {});
     }).catch(() => {});
-  // El catalogo (categorias/productos) vive en el codigo, no en la app — se
-  // espeja igual a Supabase al arrancar para que el dashboard pueda leerlo
-  // real en vez de mantener su propia copia a mano.
+  // Catalogo (categorias/productos): ademas de lo que trae el seed, se edita
+  // desde Gestion > Menu (ver menu.js) y se espeja a Supabase al arrancar
+  // para que el dashboard lea el real en vez de mantener su propia copia.
   Promise.all([getAll("categorias"), getAll("productos")])
     .then(([categorias, productos]) => {
       trySyncCatalogoSnapshot(categorias, productos).catch(() => {});

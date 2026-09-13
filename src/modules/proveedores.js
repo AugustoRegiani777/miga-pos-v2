@@ -1,5 +1,44 @@
 import { getAll, getOne, putOne, withStores } from "../db/idb.js";
 import { PROVEEDORES_SEED_VERSION, initialProveedores, initialProveedorInsumos } from "./seed.js";
+import { fetchProveedoresCatalogo, fetchProveedorInsumosCatalogo } from "../db/supabase.js";
+
+// Trae proveedores y proveedor_insumos desde Supabase (ver "Actualizar
+// catalogo" en Gestion) — sin campos en vivo que proteger aca, es un
+// reemplazo directo de lo local por lo que haya en la nube.
+export async function pullProveedoresDesdeNube() {
+  const [proveedoresRemotos, proveedorInsumosRemotos] = await Promise.all([
+    fetchProveedoresCatalogo(),
+    fetchProveedorInsumosCatalogo()
+  ]);
+
+  await withStores(["proveedores", "proveedor_insumos"], "readwrite", (stores) => {
+    for (const p of proveedoresRemotos) {
+      stores.proveedores.put({
+        id: p.id,
+        nombre: p.nombre,
+        tel: p.tel || "",
+        email: p.email || "",
+        notas: p.notas || "",
+        diasCiclo: p.dias_ciclo,
+        activo: p.activo
+      });
+    }
+    for (const pi of proveedorInsumosRemotos) {
+      stores.proveedor_insumos.put({
+        id: pi.id,
+        proveedorId: pi.proveedor_id,
+        insumoId: pi.insumo_id || null,
+        nombreProducto: pi.nombre_producto || "",
+        unidadCompra: pi.unidad_compra || "",
+        cantidadPorUnidad: pi.cantidad_por_unidad,
+        precioUnitarioCentavos: pi.precio_unitario_centavos,
+        activo: pi.activo
+      });
+    }
+  });
+
+  return { proveedores: proveedoresRemotos.length, proveedorInsumos: proveedorInsumosRemotos.length };
+}
 
 export async function seedProveedores() {
   const [config, existingProv, existingPI] = await Promise.all([

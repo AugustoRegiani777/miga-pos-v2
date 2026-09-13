@@ -328,6 +328,10 @@
           <h2 class="category-title">Bolleria</h2>
           <div class="stock-list" id="production-bolleria-list"></div>
         </section>
+        <section>
+          <h2 class="category-title">Bebidas</h2>
+          <div class="stock-list" id="production-bebidas-list"></div>
+        </section>
       </section>
     </section>
 
@@ -364,12 +368,14 @@
     <section class="view" id="view-gestion" aria-labelledby="gestion-title">
       <section class="section-heading">
         <h1 id="gestion-title">Gestión</h1>
+        <button type="button" class="ghost-button compact" id="refrescar-catalogo">Actualizar catalogo</button>
       </section>
       <nav class="nav sub-nav" aria-label="Gestión">
         <button class="nav-link sub-nav-link active" type="button" data-subview="insumos">Insumos</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="calibrar">Calibrar</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="recetas">Recetas</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="proveedores">Proveedores</button>
+        <button class="nav-link sub-nav-link" type="button" data-subview="menu">Menu</button>
       </nav>
 
       <section class="subview active" id="subview-insumos" aria-labelledby="insumos-title">
@@ -635,6 +641,71 @@
       </section>
 
       <div id="proveedores-list"></div>
+      </section>
+
+      <section class="subview" id="subview-menu" aria-labelledby="menu-title">
+        <section class="section-heading">
+          <h1 id="menu-title">Menu</h1>
+          <p>Productos que aparecen en caja y produccion, agrupados por categoria.</p>
+        </section>
+
+        <!-- Sheet: alta / edicion de producto -->
+        <section class="production-sheet-backdrop" id="menu-edit-backdrop" hidden></section>
+        <section class="form-section stock-adjust-sheet" id="menu-edit-sheet" aria-hidden="true">
+          <form id="menu-edit-form" class="stock-form" novalidate>
+            <div class="production-sheet-header">
+              <div>
+                <h2 id="menu-edit-title">Agregar producto</h2>
+              </div>
+              <button type="button" class="ghost-button compact" id="close-menu-edit">Cerrar</button>
+            </div>
+            <div class="sheet-scroll-body">
+              <label class="quantity-field">
+                <span>Nombre</span>
+                <input id="menu-edit-nombre" type="text" required>
+              </label>
+              <label class="quantity-field">
+                <span>Categoria</span>
+                <select id="menu-edit-categoria"></select>
+              </label>
+              <label class="quantity-field">
+                <span>Precio (EUR)</span>
+                <input id="menu-edit-precio" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+              </label>
+              <label class="quantity-field" id="menu-edit-tipo-wrap" hidden>
+                <span>Tipo de sandwich</span>
+                <select id="menu-edit-sandwich-tipo">
+                  <option value="basico">Basico</option>
+                  <option value="premium">De la casa (premium, +0,30 en combos)</option>
+                </select>
+              </label>
+              <label class="pedido-check-field">
+                <input id="menu-edit-controla-stock" type="checkbox">
+                <span>Controla stock (se descuenta al producirlo y al venderlo)</span>
+              </label>
+              <label class="quantity-field">
+                <span>Umbral de stock bajo (unidades)</span>
+                <input id="menu-edit-umbral" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
+              </label>
+              <label class="pedido-check-field">
+                <input id="menu-edit-activo" type="checkbox" checked>
+                <span>Mostrar en caja</span>
+              </label>
+
+              <div class="section-heading" style="margin-top: 1rem;">
+                <h2 style="font-size: 1rem;">Receta</h2>
+                <p class="cal-muted">Insumos que consume una unidad de este producto.</p>
+              </div>
+              <div id="menu-receta-rows"></div>
+              <button type="button" class="ghost-button compact" id="menu-add-receta-row">+ Agregar insumo</button>
+            </div>
+            <div class="sheet-footer">
+              <button class="primary-button" type="submit">Guardar</button>
+            </div>
+          </form>
+        </section>
+
+        <div id="menu-list"></div>
       </section>
     </section>
   </main>

@@ -2,6 +2,37 @@ import { getAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
+import { fetchInsumosCatalogo } from "../db/supabase.js";
+
+// Trae insumos desde Supabase y los fusiona con lo local (ver "Actualizar
+// catalogo" en Gestion) — para que un insumo nuevo creado desde otro
+// dispositivo (ej. al agregar la receta de un producto desde el celu)
+// aparezca aca. stockActual NUNCA se pisa: es en vivo, se descuenta con cada
+// produccion/venta de ESTE dispositivo.
+export async function pullInsumosDesdeNube() {
+  const [remotos, locales] = await Promise.all([fetchInsumosCatalogo(), getAll("insumos")]);
+  const localesById = new Map(locales.map(i => [i.id, i]));
+
+  await withStores(["insumos"], "readwrite", (stores) => {
+    for (const r of remotos) {
+      stores.insumos.put({
+        ...(localesById.get(r.id) || { stockActual: 0 }),
+        id: r.id,
+        nombre: r.nombre,
+        unidad: r.unidad,
+        unidadCompra: r.unidad_compra || undefined,
+        factorConversion: r.factor_conversion,
+        stockMinimo: r.stock_minimo,
+        stockCritico: r.stock_critico,
+        activo: r.activo,
+        actualizadoEn: new Date().toISOString()
+        // stockActual deliberadamente ausente — sobrevive el spread de arriba.
+      });
+    }
+  });
+
+  return remotos.length;
+}
 
 const SEED_VERSION_KEY = "insumos_seed_version";
 const RECETAS_LECHE_ACTUALIZADAS_V8 = [

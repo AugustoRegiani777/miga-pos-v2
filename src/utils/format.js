@@ -30,6 +30,11 @@ export function normalizeText(value) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+export function slugify(texto) {
+  const base = normalizeText(texto).replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return base || `id-${Date.now()}`;
+}
+
 export function stockStatus(product) {
   const stock = Number(product.stockActual) || 0;
   if (stock <= 0) return { label: "Sin stock", className: "out" };

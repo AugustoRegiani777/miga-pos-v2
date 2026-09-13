@@ -270,6 +270,35 @@ export async function pushCalibracion(evento) {
 // desde la app — esto solo espeja lo que ya dice seed.js hacia Supabase para
 // que el dashboard (y cualquier otro consumidor) pueda hacer JOIN contra un
 // catalogo real en vez de mantener su propia copia a mano.
+// Traen el catalogo/insumos/proveedores tal como quedaron en Supabase — para
+// que un cambio hecho desde otro dispositivo (ej. el celu) se pueda bajar a
+// la tablet. Es un boton manual (ver "Actualizar catalogo" en Gestion), no
+// automatico: el que lo llama decide como fusionarlo con lo local (nunca
+// pisando stockActual, que es en vivo y solo vive en cada dispositivo).
+export async function fetchCategoriasCatalogo() {
+  return sbFetch("/categorias?select=*");
+}
+
+export async function fetchProductosCatalogo() {
+  return sbFetch("/productos?select=*");
+}
+
+export async function fetchRecetasCatalogo() {
+  return sbFetch("/recetas?select=*");
+}
+
+export async function fetchInsumosCatalogo() {
+  return sbFetch("/insumos?select=*");
+}
+
+export async function fetchProveedoresCatalogo() {
+  return sbFetch("/proveedores?select=*");
+}
+
+export async function fetchProveedorInsumosCatalogo() {
+  return sbFetch("/proveedor_insumos?select=*");
+}
+
 export async function pushCatalogoSnapshot(categorias, productos) {
   await upsert("categorias", categorias.map(c => ({
     id: c.id,

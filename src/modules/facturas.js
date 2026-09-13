@@ -1,11 +1,6 @@
 import { getAll, withStores } from "../db/idb.js";
-import { todayISO, normalizeText } from "../utils/format.js";
+import { todayISO, slugify } from "../utils/format.js";
 import { trySyncInsumosSnapshot, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot } from "./sync.js";
-
-function slugify(texto) {
-  const base = normalizeText(texto).replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-  return base || `insumo-${Date.now()}`;
-}
 
 // Convierte un archivo (foto o adjunto) a data URL base64, formato que
 // espera la funcion serverless.

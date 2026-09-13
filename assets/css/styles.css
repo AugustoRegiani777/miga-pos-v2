@@ -2315,6 +2315,68 @@ details[open] > .prov-summary::before {
   margin-left: 0.35rem;
 }
 
+.prov-badge-muted {
+  color: var(--muted, #607080);
+  background: color-mix(in srgb, var(--muted, #607080) 14%, transparent);
+  border-color: color-mix(in srgb, var(--muted, #607080) 30%, transparent);
+}
+
+.menu-receta-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.menu-receta-row-main {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.menu-receta-row-main select,
+.menu-receta-row-main input {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.menu-receta-row-main select {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-receta-row-main input.menu-receta-cantidad {
+  width: 6rem;
+  flex-shrink: 0;
+}
+
+.menu-receta-row-main [data-action="quitar-linea"] {
+  flex-shrink: 0;
+}
+
+.menu-receta-nuevo-fields {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.menu-receta-nuevo-fields input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+}
+
 /* ── Lista de compras smart ──────────────────────────── */
 
 .ldc-tabs {

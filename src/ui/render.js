@@ -245,6 +245,15 @@ export function renderProduction(snapshot, selectedBox, selectedProductId, onPro
       );
     }
   }
+
+  if (productionLists.bebidas) {
+    productionLists.bebidas.innerHTML = "";
+    for (const product of snapshot.bebidas) {
+      productionLists.bebidas.appendChild(
+        renderProductionRow(product, selectedProductId, onProductionProductSelect, onAdjustStock)
+      );
+    }
+  }
 }
 
 // "Modo consulta": listas de solo lectura, sin formularios ni carrito, para

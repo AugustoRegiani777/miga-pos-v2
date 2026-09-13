@@ -3,7 +3,7 @@ import { currentTime, todayISO } from "../utils/format.js";
 import { calculateCartPricing } from "./pricing.js";
 import { deductInsumosForProductionInTx } from "./aprovisionamiento.js";
 
-const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria"]);
+const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria", "bebidas"]);
 export const TOGOO_FLAT_TOTAL_CENTAVOS = 300;
 const DECREASE_ONLY_MOTIVOS = new Set(["Consumo", "Pedidos offline"]);
 const productionCommentKey = (fecha) => `production-comment:${fecha}`;
@@ -122,6 +122,13 @@ export async function productionSnapshot(fecha = todayISO()) {
       })),
     bolleria: products
       .filter((product) => product.categoriaId === "bolleria")
+      .map((product) => ({
+        ...product,
+        cantidadProducida: producedByProduct.get(product.id) || 0,
+        movimientosProduccion: movementsByProduct.get(product.id) || []
+      })),
+    bebidas: products
+      .filter((product) => product.categoriaId === "bebidas")
       .map((product) => ({
         ...product,
         cantidadProducida: producedByProduct.get(product.id) || 0,
