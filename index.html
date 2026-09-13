@@ -362,6 +362,24 @@
         </div>
       </section>
 
+      <section class="backup-panel" id="historial-rango-panel">
+        <div>
+          <h2>Exportar por periodo</h2>
+          <p>Descarga un TXT de cierre por cada dia del rango, todos juntos en un ZIP.</p>
+        </div>
+        <form class="date-filter" id="historial-rango-form" novalidate>
+          <label>
+            Desde
+            <input type="date" id="historial-rango-desde" required>
+          </label>
+          <label>
+            Hasta
+            <input type="date" id="historial-rango-hasta" required>
+          </label>
+          <button class="ghost-button compact" type="submit">Descargar ZIP</button>
+        </form>
+      </section>
+
       <section class="history-list" id="history-list"></section>
     </section>
 

@@ -202,7 +202,7 @@ function renderProductionRow(product, selectedProductId, onProductionProductSele
   wrapper.appendChild(
     renderStockRow(
       product,
-      productionSummaryLines(product),
+      [`Ayer quedaron: ${product.cantidadAyer ?? 0}`, ...productionSummaryLines(product)],
       {
         clickable: true,
         selected: product.id === selectedProductId,

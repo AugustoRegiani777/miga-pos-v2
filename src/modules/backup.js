@@ -1,6 +1,7 @@
 import { exportAllData, getAll, importAllData } from "../db/idb.js";
 import { listProducts, productionSnapshot, salesForDay, stockHistoricoPorFecha } from "./business.js";
-import { centsToMoney, downloadText, shareOrDownloadText, normalizeText, todayISO } from "../utils/format.js";
+import { centsToMoney, downloadText, shareOrDownloadText, shareOrDownloadBlob, normalizeText, todayISO } from "../utils/format.js";
+import { createZip } from "../utils/zip.js";
 
 const FALLBACK_CATEGORIES = [
   {
@@ -77,7 +78,7 @@ function padL(str, width) {
   return String(str).padStart(width, " ").slice(-width);
 }
 
-export async function exportSalesSummary(fecha) {
+export async function buildSalesSummaryText(fecha) {
   const sales = await salesForDay(fecha);
   const products = await listProducts();
   const snapshot = await productionSnapshot(fecha);
@@ -357,9 +358,57 @@ export async function exportSalesSummary(fecha) {
     lines.push("");
   }
 
-  const text = `﻿${lines.join("\r\n")}\r\n`;
+  return `﻿${lines.join("\r\n")}\r\n`;
+}
+
+function nombreArchivoCierre(fecha) {
   const [yyyy, mm, dd] = fecha.split("-");
-  await shareOrDownloadText(`${dd}-${mm}-${yyyy}-miga-cierre.txt`, text, "text/plain;charset=utf-8");
+  return `${dd}-${mm}-${yyyy}-miga-cierre.txt`;
+}
+
+export async function exportSalesSummary(fecha) {
+  const text = await buildSalesSummaryText(fecha);
+  await shareOrDownloadText(nombreArchivoCierre(fecha), text, "text/plain;charset=utf-8");
+}
+
+// Aritmetica pura sobre los numeros de la fecha (UTC de punta a punta) — si
+// se mezcla "new Date(unaFechaLocal)" con ".toISOString()" (UTC), el
+// resultado se corre un dia entero segun la zona horaria del dispositivo.
+function* fechasEnRango(fechaDesde, fechaHasta) {
+  const [y1, m1, d1] = fechaDesde.split("-").map(Number);
+  const [y2, m2, d2] = fechaHasta.split("-").map(Number);
+  const unDiaMs = 24 * 60 * 60 * 1000;
+  const fin = Date.UTC(y2, m2 - 1, d2);
+  for (let t = Date.UTC(y1, m1 - 1, d1); t <= fin; t += unDiaMs) {
+    const cursor = new Date(t);
+    const yyyy = cursor.getUTCFullYear();
+    const mm = String(cursor.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(cursor.getUTCDate()).padStart(2, "0");
+    yield `${yyyy}-${mm}-${dd}`;
+  }
+}
+
+// Un TXT de cierre por cada dia del rango (inclusive), empaquetados en un
+// solo ZIP — para bajar de una un periodo entero en vez de dia por dia.
+export async function exportSalesSummaryRange(fechaDesde, fechaHasta) {
+  if (fechaHasta < fechaDesde) {
+    throw new Error("La fecha 'hasta' no puede ser anterior a 'desde'.");
+  }
+  const dias = Array.from(fechasEnRango(fechaDesde, fechaHasta));
+  if (dias.length > 366) {
+    throw new Error("El rango es demasiado largo (máximo 366 días).");
+  }
+
+  const files = [];
+  for (const fecha of dias) {
+    const text = await buildSalesSummaryText(fecha);
+    files.push({ name: nombreArchivoCierre(fecha), content: text });
+  }
+
+  const zipBlob = createZip(files);
+  const nombreZip = `miga-historial-${fechaDesde}-a-${fechaHasta}.zip`;
+  await shareOrDownloadBlob(nombreZip, zipBlob);
+  return dias.length;
 }
 
 export async function exportDailySummaryJSON(fecha) {

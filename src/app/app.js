@@ -1,4 +1,4 @@
-import { exportSalesSummary, exportDailySummaryJSON } from "../modules/backup.js";
+import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange } from "../modules/backup.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
@@ -108,6 +108,7 @@ let provEditSheetOpen = false;
 let provProdSheetOpen = false;
 let menuEditInProgress = false;
 let refrescarCatalogoInProgress = false;
+let historialRangoInProgress = false;
 let selectedMenuProductoId = "";
 let menuProductoMode = "add";
 let menuEditSheetOpen = false;
@@ -232,6 +233,9 @@ const dom = {
   historialBackupPanel: document.querySelector("#historial-backup-panel"),
   exportSalesSummary: document.querySelector("#export-sales-summary"),
   exportSalesJson: document.querySelector("#export-sales-json"),
+  historialRangoForm: document.querySelector("#historial-rango-form"),
+  historialRangoDesde: document.querySelector("#historial-rango-desde"),
+  historialRangoHasta: document.querySelector("#historial-rango-hasta"),
   insumosList: document.querySelector("#insumos-list"),
   calibracionAlert: document.querySelector("#calibracion-alert"),
   insumosAjusteSheet: document.querySelector("#insumos-ajuste-sheet"),
@@ -1022,6 +1026,11 @@ async function renderProductionView() {
   dom.closePeriodButton.hidden = false;
   await loadProducts();
   const snapshot = await productionSnapshot();
+  const historicoProduccion = await stockHistoricoPorFecha(snapshot.fecha);
+  const conAyer = (lista) => lista.map((p) => ({ ...p, cantidadAyer: historicoProduccion.get(p.id)?.stockAlInicio ?? 0 }));
+  snapshot.sandwiches = conAyer(snapshot.sandwiches);
+  snapshot.bolleria = conAyer(snapshot.bolleria);
+  snapshot.bebidas = conAyer(snapshot.bebidas);
   if (selectedProductionProductId && !snapshot.productionProducts.some((product) => product.id === selectedProductionProductId)) {
     selectedProductionProductId = "";
   }
@@ -2104,6 +2113,28 @@ function bindEvents() {
   dom.exportSalesJson.addEventListener("click", async () => {
     await exportDailySummaryJSON(dom.historyDate.value || todayISO());
     setFlash("Resumen JSON exportado.", "success");
+  });
+
+  dom.historialRangoForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (historialRangoInProgress) return;
+    const submitBtn = dom.historialRangoForm.querySelector("button[type='submit']");
+    try {
+      historialRangoInProgress = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Generando ZIP...";
+      const desde = dom.historialRangoDesde.value;
+      const hasta = dom.historialRangoHasta.value;
+      if (!desde || !hasta) throw new Error("Elegi las dos fechas del rango.");
+      const dias = await exportSalesSummaryRange(desde, hasta);
+      setFlash(`ZIP exportado con ${dias} día${dias === 1 ? "" : "s"}.`, "success");
+    } catch (error) {
+      setFlash(error.message || "No se pudo generar el ZIP.", "error");
+    } finally {
+      historialRangoInProgress = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Descargar ZIP";
+    }
   });
 
   dom.closeInsumosAjuste.addEventListener("click", closeInsumoAjusteSheet);

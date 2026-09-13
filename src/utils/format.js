@@ -101,9 +101,8 @@ export function printTicket(title, text) {
   return true;
 }
 
-export async function shareOrDownloadText(filename, text, mimeType) {
-  const blob = new Blob([text], { type: mimeType });
-  const file = new File([blob], filename, { type: mimeType });
+export async function shareOrDownloadBlob(filename, blob) {
+  const file = new File([blob], filename, { type: blob.type });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: filename });
@@ -120,4 +119,8 @@ export async function shareOrDownloadText(filename, text, mimeType) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+export async function shareOrDownloadText(filename, text, mimeType) {
+  return shareOrDownloadBlob(filename, new Blob([text], { type: mimeType }));
 }
