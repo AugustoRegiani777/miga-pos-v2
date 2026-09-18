@@ -221,6 +221,7 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
       venta_id: ventaId,
       producto_id: d.productoId,
       producto_nombre: d.productoNombre,
+      opcion_nombre: d.opcionNombre || null,
       cantidad: d.cantidad,
       precio_unitario_centavos: d.precioUnitarioCentavos,
       subtotal_centavos: d.subtotalCentavos,

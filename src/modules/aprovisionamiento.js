@@ -684,23 +684,51 @@ export async function deductInsumosForProductionInTx(stores, productId, cantidad
   return { movimientos: movimientosCreados, warnings };
 }
 
-// Called within confirmSale's transaction. Returns the movimientos created (for sync).
-export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) {
-  const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
-  if (todasLasRecetas.length === 0) return [];
+// Bebidas con leche a elegir (ver PRODUCTOS_CON_LECHE en app.js): la receta
+// del producto siempre apunta a "leche-normal", pero si el cliente eligio
+// otra variante en caja hay que descontar/devolver ESA leche puntual, no la
+// de la receta por defecto — sino la leche de avena/sin lactosa nunca baja
+// de stock por mas que el selector diga que se vendio.
+const INSUMO_POR_OPCION_LECHE = {
+  "Entera": "leche-normal",
+  "Avena": "leche-avena",
+  "Sin lactosa": "leche-sin-lactosa"
+};
+const INSUMOS_LECHE = new Set(Object.values(INSUMO_POR_OPCION_LECHE));
 
+function insumoEfectivo(insumoId, opcionNombre) {
+  if (INSUMOS_LECHE.has(insumoId) && opcionNombre && INSUMO_POR_OPCION_LECHE[opcionNombre]) {
+    return INSUMO_POR_OPCION_LECHE[opcionNombre];
+  }
+  return insumoId;
+}
+
+// Compartido entre deductInsumosInTx y restoreInsumosInTx — tienen que
+// resolver la variante de leche exactamente igual, sino deshacer una venta
+// devolveria un insumo distinto del que se desconto al venderla.
+function calcularConsumoInsumos(todasLasRecetas, saleItems) {
   const consumo = new Map();
   for (const item of saleItems) {
     const recetasDelProducto = todasLasRecetas.filter(r => r.productoId === item.productId);
     for (const receta of recetasDelProducto) {
-      if (!consumo.has(receta.insumoId)) {
-        consumo.set(receta.insumoId, { total: 0, ventasPorProducto: {} });
+      const insumoId = insumoEfectivo(receta.insumoId, item.opcionNombre);
+      if (!consumo.has(insumoId)) {
+        consumo.set(insumoId, { total: 0, ventasPorProducto: {} });
       }
-      const c = consumo.get(receta.insumoId);
+      const c = consumo.get(insumoId);
       c.total += receta.cantidadPorUnidad * item.quantity;
       c.ventasPorProducto[item.productId] = (c.ventasPorProducto[item.productId] || 0) + item.quantity;
     }
   }
+  return consumo;
+}
+
+// Called within confirmSale's transaction. Returns the movimientos created (for sync).
+// saleItems: [{ productId, quantity, opcionNombre }]
+export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) {
+  const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
+  if (todasLasRecetas.length === 0) return [];
+  const consumo = calcularConsumoInsumos(todasLasRecetas, saleItems);
 
   const movimientosCreados = [];
   for (const [insumoId, { total, ventasPorProducto }] of consumo) {
@@ -722,7 +750,30 @@ export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) 
       ultimaCalibracion: cal,
       actualizadoEn: now
     });
-    const mov = { insumoId, tipo: "venta", cantidad: -total, stockAnterior, stockNuevo, ventaId, fecha, creadoEn: now };
+    const mov = { uuid: crypto.randomUUID(), insumoId, tipo: "venta", cantidad: -total, stockAnterior, stockNuevo, ventaId, fecha, creadoEn: now };
+    stores.movimientos_insumos.add(mov);
+    movimientosCreados.push(mov);
+  }
+  return movimientosCreados;
+}
+
+// Inverso de deductInsumosInTx — se llama al deshacer una venta (undoSale en
+// business.js) para reponer lo que se habia descontado. No toca la
+// calibracion (una anulacion es una correccion, no un nuevo patron de
+// consumo real).
+export async function restoreInsumosInTx(stores, saleItems, ventaId, fecha, now) {
+  const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
+  if (todasLasRecetas.length === 0) return [];
+  const consumo = calcularConsumoInsumos(todasLasRecetas, saleItems);
+
+  const movimientosCreados = [];
+  for (const [insumoId, { total }] of consumo) {
+    const insumo = await requestToPromise(stores.insumos.get(insumoId));
+    if (!insumo || !insumo.activo) continue;
+    const stockAnterior = insumo.stockActual;
+    const stockNuevo = stockAnterior + total;
+    stores.insumos.put({ ...insumo, stockActual: stockNuevo, actualizadoEn: now });
+    const mov = { uuid: crypto.randomUUID(), insumoId, tipo: "devolucion", cantidad: total, stockAnterior, stockNuevo, ventaId, fecha, creadoEn: now };
     stores.movimientos_insumos.add(mov);
     movimientosCreados.push(mov);
   }

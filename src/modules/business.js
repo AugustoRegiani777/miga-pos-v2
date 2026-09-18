@@ -1,7 +1,7 @@
 import { getAll, requestToPromise, withStores } from "../db/idb.js";
 import { currentTime, todayISO } from "../utils/format.js";
 import { calculateCartPricing } from "./pricing.js";
-import { deductInsumosForProductionInTx } from "./aprovisionamiento.js";
+import { deductInsumosForProductionInTx, deductInsumosInTx, restoreInsumosInTx } from "./aprovisionamiento.js";
 
 const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria", "bebidas"]);
 export const TOGOO_FLAT_TOTAL_CENTAVOS = 300;
@@ -340,7 +340,7 @@ export async function confirmSale(items) {
   const hora = currentTime();
   const now = new Date().toISOString();
 
-  return withStores(["productos", "ventas", "detalle_venta", "movimientos_stock"], "readwrite", async (stores) => {
+  return withStores(["productos", "ventas", "detalle_venta", "movimientos_stock", "insumos", "movimientos_insumos", "recetas"], "readwrite", async (stores) => {
     const lines = [];
     let totalCentavos = 0;
     let saleMode = "normal";
@@ -376,6 +376,7 @@ export async function confirmSale(items) {
         quantity: item.quantity,
         saleMode: lineSaleMode,
         productName: item.opcionNombre ? `${nombreConModo} (${item.opcionNombre})` : nombreConModo,
+        opcionNombre: item.opcionNombre || null,
         unitPrice,
         subtotalCentavos,
         unitOrders: item.unitOrders
@@ -409,6 +410,7 @@ export async function confirmSale(items) {
         ventaId: saleId,
         productoId: line.product.id,
         productoNombre: line.productName,
+        opcionNombre: line.opcionNombre,
         cantidad: line.quantity,
         precioUnitarioCentavos: line.unitPrice,
         subtotalCentavos: line.subtotalCentavos,
@@ -473,13 +475,24 @@ export async function confirmSale(items) {
       }
     }
 
+    // Productos que no controlan stock (cafe, bebidas) no pasan por
+    // produccion diaria — para esos, el insumo se descuenta aca, en el
+    // momento de la venta, respetando la variante elegida (ver
+    // insumoEfectivo en aprovisionamiento.js para el caso de la leche).
+    const itemsParaInsumos = lines
+      .filter((line) => !line.product.controlaStock)
+      .map((line) => ({ productId: line.product.id, quantity: line.quantity, opcionNombre: line.opcionNombre }));
+    const movimientosInsumos = itemsParaInsumos.length > 0
+      ? await deductInsumosInTx(stores, itemsParaInsumos, saleId, fecha, now)
+      : [];
+
     return {
       saleId, fecha, hora, totalCentavos, saleMode,
       _syncPayload: {
         venta: { fecha, hora, totalCentavos, saleMode, creadoEn: now, uuid: ventaUuid },
         detalles: _detallesSync,
         movimientosStock: _movStockSync,
-        movimientosInsumos: []
+        movimientosInsumos
       }
     };
   });
@@ -504,9 +517,11 @@ export async function salesForDay(fecha = todayISO()) {
 
 // Deshace una venta: devuelve al stock cada producto vendido (las lineas
 // sinteticas como descuentos de combo, tarifa ToGoo o ajustes de precio de
-// pedido no tienen producto real, asi que se ignoran solas). Los insumos no
-// se tocan: se consumen en produccion, no en la venta, asi que no hay nada
-// que revertir ahi.
+// pedido no tienen producto real, asi que se ignoran solas). Para productos
+// que controlan stock, se devuelve el producto. Para los que no (cafe,
+// bebidas — se descuentan por insumo en el momento de la venta, ver
+// confirmSale), se devuelven los insumos correspondientes, respetando la
+// misma variante de leche que se vendio (guardada en detalle.opcionNombre).
 // No se borra la venta ni su detalle — se marca "anulada". salesForDay() la
 // excluye del historial y de los totales (asi que desaparece igual para el
 // uso normal), pero el registro queda por si hace falta revisarlo despues.
@@ -514,17 +529,19 @@ export async function undoSale(ventaId) {
   const fecha = todayISO();
   const now = new Date().toISOString();
 
-  return withStores(["ventas", "detalle_venta", "productos", "movimientos_stock"], "readwrite", async (stores) => {
+  return withStores(["ventas", "detalle_venta", "productos", "movimientos_stock", "insumos", "movimientos_insumos", "recetas"], "readwrite", async (stores) => {
     const venta = await requestToPromise(stores.ventas.get(ventaId));
     if (!venta) throw new Error("La venta no existe.");
     if (venta.anulada) throw new Error("Esta venta ya fue deshecha antes.");
 
     const detalles = await requestToPromise(stores.detalle_venta.index("ventaId").getAll(ventaId));
 
-    const movimientos = [];
+    const movimientosStock = [];
+    const itemsParaRestituirInsumos = [];
     for (const detalle of detalles) {
       const product = await requestToPromise(stores.productos.get(detalle.productoId));
-      if (product && product.controlaStock) {
+      if (!product) continue;
+      if (product.controlaStock) {
         const stockAnterior = product.stockActual;
         const stockNuevo = stockAnterior + detalle.cantidad;
         stores.productos.put({ ...product, stockActual: stockNuevo, actualizadoEn: now });
@@ -540,9 +557,15 @@ export async function undoSale(ventaId) {
           creadoEn: now
         };
         stores.movimientos_stock.add(movimiento);
-        movimientos.push(movimiento);
+        movimientosStock.push(movimiento);
+      } else {
+        itemsParaRestituirInsumos.push({ productId: detalle.productoId, quantity: detalle.cantidad, opcionNombre: detalle.opcionNombre || null });
       }
     }
+
+    const movimientosInsumos = itemsParaRestituirInsumos.length > 0
+      ? await restoreInsumosInTx(stores, itemsParaRestituirInsumos, ventaId, fecha, now)
+      : [];
 
     stores.ventas.put({ ...venta, anulada: true, anuladaEn: now });
 
@@ -551,6 +574,6 @@ export async function undoSale(ventaId) {
     // le asigna Supabase a la venta son secuencias distintas, no sirven para
     // matchear. fecha/creadoEn quedan de respaldo por si la venta es de antes
     // de este cambio y todavia no tiene uuid.
-    return { uuid: venta.uuid || null, fecha: venta.fecha, creadoEn: venta.creadoEn, movimientos };
+    return { uuid: venta.uuid || null, fecha: venta.fecha, creadoEn: venta.creadoEn, movimientosStock, movimientosInsumos };
   });
 }
