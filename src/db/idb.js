@@ -154,12 +154,17 @@ export async function seedDatabase() {
       sandwichTipo: product.sandwichTipo,
       stockActual: current?.stockActual ?? product.stockActual,
       creadoEn: current?.creadoEn ?? now,
-      actualizadoEn: now
+      actualizadoEn: now,
+      // Marca que este producto lo administra el seed — asi la limpieza de
+      // abajo (sacar de circulacion lo que se borro de initialProducts) NUNCA
+      // toca un producto creado a mano desde Gestion > Menu, que no tiene
+      // esta marca.
+      origenSeed: true
     });
   }
 
   for (const current of currentProducts) {
-    if (!catalogIds.has(current.id) && current.activo) {
+    if (!catalogIds.has(current.id) && current.activo && current.origenSeed) {
       productStore.put({ ...current, activo: false, actualizadoEn: now });
     }
   }
