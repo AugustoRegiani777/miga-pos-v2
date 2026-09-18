@@ -1,6 +1,6 @@
 import { getAll, withStores } from "../db/idb.js";
 import { todayISO, slugify } from "../utils/format.js";
-import { trySyncInsumosSnapshot, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot } from "./sync.js";
+import { trySyncInsumosSnapshot, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncProveedoresSnapshot } from "./sync.js";
 
 // Convierte un archivo (foto o adjunto) a data URL base64, formato que
 // espera la funcion serverless.
@@ -38,7 +38,12 @@ export async function leerFactura(proveedorId, imagenBase64) {
 //
 // Cada linea de `lineas` trae: { insumoId, nombreDetectado, cantidad, unidad,
 // precio, esNuevo, nuevoNombre, nuevaUnidad, nuevoStockMinimo, nuevoStockCritico }
-export async function confirmarFactura(proveedorId, lineas) {
+//
+// `nuevoProveedor`, si viene, trae { id, nombre, tel, email, diasCiclo } — el
+// proveedor tampoco se crea hasta este momento (mismo principio que los
+// insumos nuevos): si el usuario cancela la factura antes de confirmar, no
+// queda ningun proveedor huerfano creado.
+export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = null) {
   const now = new Date().toISOString();
   const fecha = todayISO();
 
@@ -81,7 +86,18 @@ export async function confirmarFactura(proveedorId, lineas) {
   const movimientosCreados = [];
   const proveedorInsumosCreados = [];
 
-  await withStores(["insumos", "movimientos_insumos", "proveedor_insumos"], "readwrite", (stores) => {
+  await withStores(["proveedores", "insumos", "movimientos_insumos", "proveedor_insumos"], "readwrite", (stores) => {
+    if (nuevoProveedor) {
+      stores.proveedores.put({
+        id: nuevoProveedor.id,
+        nombre: nuevoProveedor.nombre,
+        tel: nuevoProveedor.tel || "",
+        email: nuevoProveedor.email || "",
+        notas: "",
+        diasCiclo: Number(nuevoProveedor.diasCiclo) || 7,
+        activo: true
+      });
+    }
     for (const op of operaciones) {
       // cantidadPorUnidad viene de la IA (o de una factura anterior de este
       // mismo proveedor, ver procesar-factura.js) y ya representa cuanto
@@ -132,6 +148,10 @@ export async function confirmarFactura(proveedorId, lineas) {
   trySyncInsumosSnapshot(insumosFinal).catch(() => {});
   trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
   if (movimientosCreados.length > 0) trySyncMovimientosInsumos(movimientosCreados).catch(() => {});
+  if (nuevoProveedor) {
+    const proveedoresFinal = await getAll("proveedores");
+    trySyncProveedoresSnapshot(proveedoresFinal).catch(() => {});
+  }
 
   return { insumosActualizados: operaciones.length };
 }

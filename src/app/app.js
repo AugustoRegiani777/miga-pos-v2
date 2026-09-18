@@ -1,8 +1,8 @@
 import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange } from "../modules/backup.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube } from "../modules/aprovisionamiento.js";
-import { seedProveedores, getProveedoresDashboardData, updateProveedor, saveProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
-import { renderProveedoresList, renderProvProdInsumoSelect } from "../ui/render-proveedores.js";
+import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
+import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, pullCatalogoDesdeNube } from "../modules/menu.js";
 import { renderMenuList, renderMenuRecetaRows } from "../ui/render-menu.js";
 import {
@@ -40,7 +40,7 @@ import {
   TOGOO_FLAT_TOTAL_CENTAVOS
 } from "../modules/business.js";
 import { seedDatabase, getAll } from "../db/idb.js";
-import { todayISO, centsToMoney } from "../utils/format.js";
+import { todayISO, centsToMoney, slugify } from "../utils/format.js";
 import {
   filterProductButtons,
   renderCart,
@@ -82,6 +82,8 @@ let facturaSheetOpen = false;
 let facturaArchivoBase64 = null;
 let facturaLineasActuales = [];
 let facturaInProgress = false;
+let facturaProveedorNuevoInfo = null;
+let facturaProveedorIdActual = "";
 let lecheSheetOpen = false;
 let productoPendienteSeleccion = null;
 
@@ -104,6 +106,9 @@ let provProdInProgress = false;
 let selectedProvId = "";
 let selectedProvProdId = "";
 let provProdMode = "add";
+let provEditMode = "edit";
+let provProdRecetaVinculos = [];
+let provProdProductosDisponibles = [];
 let provEditSheetOpen = false;
 let provProdSheetOpen = false;
 let menuEditInProgress = false;
@@ -289,6 +294,11 @@ const dom = {
   facturaSheet: document.querySelector("#factura-sheet"),
   closeFactura: document.querySelector("#close-factura"),
   facturaProveedor: document.querySelector("#factura-proveedor"),
+  facturaProveedorNuevoFields: document.querySelector("#factura-proveedor-nuevo-fields"),
+  facturaProveedorNombre: document.querySelector("#factura-proveedor-nombre"),
+  facturaProveedorTel: document.querySelector("#factura-proveedor-tel"),
+  facturaProveedorEmail: document.querySelector("#factura-proveedor-email"),
+  facturaProveedorDias: document.querySelector("#factura-proveedor-dias"),
   facturaSacarFoto: document.querySelector("#factura-sacar-foto"),
   facturaAdjuntar: document.querySelector("#factura-adjuntar"),
   facturaInputFoto: document.querySelector("#factura-input-foto"),
@@ -302,8 +312,10 @@ const dom = {
   facturaContinuar: document.querySelector("#factura-continuar"),
   facturaConfirmar: document.querySelector("#factura-confirmar"),
   proveedoresList: document.querySelector("#proveedores-list"),
+  provAddNuevo: document.querySelector("#prov-add-nuevo"),
   provEditSheet: document.querySelector("#prov-edit-sheet"),
   provEditBackdrop: document.querySelector("#prov-edit-backdrop"),
+  provEditTitle: document.querySelector("#prov-edit-title"),
   closeProvEdit: document.querySelector("#close-prov-edit"),
   provEditForm: document.querySelector("#prov-edit-form"),
   provEditNombre: document.querySelector("#prov-edit-nombre"),
@@ -320,6 +332,13 @@ const dom = {
   provProdNombre: document.querySelector("#prov-prod-nombre"),
   provProdUnidad: document.querySelector("#prov-prod-unidad"),
   provProdInsumo: document.querySelector("#prov-prod-insumo"),
+  provProdNuevoInsumoFields: document.querySelector("#prov-prod-nuevo-insumo-fields"),
+  provProdNuevoNombre: document.querySelector("#prov-prod-nuevo-nombre"),
+  provProdNuevoUnidad: document.querySelector("#prov-prod-nuevo-unidad"),
+  provProdNuevoMin: document.querySelector("#prov-prod-nuevo-min"),
+  provProdNuevoCrit: document.querySelector("#prov-prod-nuevo-crit"),
+  provProdRecetaRows: document.querySelector("#prov-prod-receta-rows"),
+  provProdAddRecetaRow: document.querySelector("#prov-prod-add-receta-row"),
   provProdCantidadLabel: document.querySelector("#prov-prod-cantidad-label"),
   provProdCantidad: document.querySelector("#prov-prod-cantidad"),
   provProdPrecio: document.querySelector("#prov-prod-precio"),
@@ -556,11 +575,18 @@ async function openFacturaSheet() {
   const proveedores = (await getAll("proveedores"))
     .filter((p) => p.activo)
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
-  dom.facturaProveedor.innerHTML = proveedores.map((p) => `<option value="${p.id}">${p.nombre}</option>`).join("");
+  dom.facturaProveedor.innerHTML =
+    proveedores.map((p) => `<option value="${p.id}">${p.nombre}</option>`).join("") +
+    `<option value="__nuevo__">+ Crear proveedor nuevo…</option>`;
+  dom.facturaProveedorNuevoFields.hidden = true;
+  dom.facturaProveedorNombre.value = "";
+  dom.facturaProveedorTel.value = "";
+  dom.facturaProveedorEmail.value = "";
+  dom.facturaProveedorDias.value = "7";
   facturaArchivoBase64 = null;
   facturaLineasActuales = [];
   dom.facturaArchivoNombre.textContent = "";
-  dom.facturaContinuar.disabled = true;
+  actualizarFacturaContinuarDisabled();
   mostrarPasoFactura("upload");
   setFacturaSheetOpen(true);
 }
@@ -569,8 +595,24 @@ function closeFacturaSheet() {
   setFacturaSheetOpen(false);
   facturaArchivoBase64 = null;
   facturaLineasActuales = [];
+  facturaProveedorNuevoInfo = null;
+  facturaProveedorIdActual = "";
   dom.facturaInputFoto.value = "";
   dom.facturaInputAdjunto.value = "";
+}
+
+// "Leer factura" necesita un archivo, y si el proveedor es "nuevo" tambien
+// un nombre — sin esto no hay con que crearlo al confirmar.
+function actualizarFacturaContinuarDisabled() {
+  const esProveedorNuevo = dom.facturaProveedor.value === "__nuevo__";
+  const nombreListo = !esProveedorNuevo || dom.facturaProveedorNombre.value.trim().length > 0;
+  dom.facturaContinuar.disabled = !facturaArchivoBase64 || !nombreListo;
+}
+
+function handleFacturaProveedorChange() {
+  const esProveedorNuevo = dom.facturaProveedor.value === "__nuevo__";
+  dom.facturaProveedorNuevoFields.hidden = !esProveedorNuevo;
+  actualizarFacturaContinuarDisabled();
 }
 
 async function handleFacturaArchivoSeleccionado(file) {
@@ -578,7 +620,7 @@ async function handleFacturaArchivoSeleccionado(file) {
   try {
     facturaArchivoBase64 = await archivoABase64(file);
     dom.facturaArchivoNombre.textContent = `Archivo: ${file.name}`;
-    dom.facturaContinuar.disabled = false;
+    actualizarFacturaContinuarDisabled();
   } catch (error) {
     setFlash(error.message || "No se pudo leer el archivo.", "error");
   }
@@ -589,14 +631,43 @@ async function handleFacturaLeer() {
   facturaInProgress = true;
   mostrarPasoFactura("cargando");
   try {
-    const proveedorId = dom.facturaProveedor.value;
+    const esProveedorNuevo = dom.facturaProveedor.value === "__nuevo__";
+    let proveedorId = dom.facturaProveedor.value;
+    let proveedorNombre = dom.facturaProveedor.selectedOptions[0]?.textContent || proveedorId;
+
+    if (esProveedorNuevo) {
+      const nombreNuevo = dom.facturaProveedorNombre.value.trim();
+      if (!nombreNuevo) throw new Error("Escribi el nombre del proveedor nuevo.");
+      const existentes = await getAll("proveedores");
+      const idsUsados = new Set(existentes.map((p) => p.id));
+      proveedorId = slugify(nombreNuevo);
+      let sufijo = 2;
+      while (idsUsados.has(proveedorId)) {
+        proveedorId = `${slugify(nombreNuevo)}-${sufijo}`;
+        sufijo += 1;
+      }
+      proveedorNombre = nombreNuevo;
+      // No se crea el proveedor todavia — recien al confirmar (ver
+      // handleFacturaConfirmar). Este id "provisorio" solo sirve para que la
+      // IA arme el pedido; si el usuario cancela ahora, no queda nada creado.
+      facturaProveedorNuevoInfo = {
+        id: proveedorId,
+        nombre: nombreNuevo,
+        tel: dom.facturaProveedorTel.value.trim(),
+        email: dom.facturaProveedorEmail.value.trim(),
+        diasCiclo: Number(dom.facturaProveedorDias.value) || 7
+      };
+    } else {
+      facturaProveedorNuevoInfo = null;
+    }
+
     const items = await leerFactura(proveedorId, facturaArchivoBase64);
     if (items.length === 0) {
       throw new Error("No se detecto ninguna linea en la factura. Proba con otra foto.");
     }
+    facturaProveedorIdActual = proveedorId;
     facturaLineasActuales = items;
     const insumos = await listInsumos();
-    const proveedorNombre = dom.facturaProveedor.selectedOptions[0]?.textContent || proveedorId;
     dom.facturaResumen.textContent =
       `${proveedorNombre} · ${items.length} línea${items.length === 1 ? "" : "s"} detectada${items.length === 1 ? "" : "s"}`;
     renderFacturaLineas(dom.facturaLineas, facturaLineasActuales, insumos);
@@ -633,7 +704,7 @@ async function handleFacturaConfirmar() {
   if (facturaInProgress) return;
   facturaInProgress = true;
   try {
-    const proveedorId = dom.facturaProveedor.value;
+    const proveedorId = facturaProveedorIdActual;
     const lineas = leerLineasDelFormulario();
     if (lineas.some((l) => l.cantidad <= 0)) {
       throw new Error("Todas las líneas necesitan una cantidad mayor a 0.");
@@ -641,9 +712,9 @@ async function handleFacturaConfirmar() {
     if (lineas.some((l) => l.esNuevo && !l.nuevoNombre)) {
       throw new Error("Completa el nombre de cada insumo nuevo.");
     }
-    const { insumosActualizados } = await confirmarFactura(proveedorId, lineas);
+    const { insumosActualizados } = await confirmarFactura(proveedorId, lineas, facturaProveedorNuevoInfo);
     setFlash(
-      `Factura cargada: ${insumosActualizados} insumo${insumosActualizados === 1 ? "" : "s"} actualizado${insumosActualizados === 1 ? "" : "s"}.`,
+      `Factura cargada: ${insumosActualizados} insumo${insumosActualizados === 1 ? "" : "s"} actualizado${insumosActualizados === 1 ? "" : "s"}${facturaProveedorNuevoInfo ? " · proveedor creado" : ""}.`,
       "success"
     );
     closeFacturaSheet();
@@ -1258,10 +1329,11 @@ async function handleUndoSale(sale) {
   if (!confirmado) return;
   try {
     undoSaleInProgress = true;
-    const { uuid, fecha, creadoEn, movimientos } = await undoSale(sale.id);
+    const { uuid, fecha, creadoEn, movimientosStock, movimientosInsumos } = await undoSale(sale.id);
     setFlash("Venta deshecha, stock reintegrado.", "success");
     trySyncVentaAnulada({ uuid, fecha, creadoEn }).catch(() => {});
-    movimientos.forEach((m) => trySyncMovimientoStock(m).catch(() => {}));
+    movimientosStock.forEach((m) => trySyncMovimientoStock(m).catch(() => {}));
+    if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
     await renderHistoryView();
     await renderCashier();
   } catch (error) {
@@ -1418,7 +1490,9 @@ function setProvProdSheetOpen(isOpen) {
 }
 
 function openProvEdit(proveedor) {
+  provEditMode = "edit";
   selectedProvId = proveedor.id;
+  dom.provEditTitle.textContent = "Editar proveedor";
   dom.provEditNombre.value = proveedor.nombre;
   dom.provEditTel.value = proveedor.tel ?? "";
   dom.provEditEmail.value = proveedor.email ?? "";
@@ -1428,9 +1502,35 @@ function openProvEdit(proveedor) {
   dom.provEditNombre.focus();
 }
 
+function openProvAdd() {
+  provEditMode = "add";
+  selectedProvId = "";
+  dom.provEditTitle.textContent = "Agregar proveedor";
+  dom.provEditNombre.value = "";
+  dom.provEditTel.value = "";
+  dom.provEditEmail.value = "";
+  dom.provEditNotas.value = "";
+  dom.provEditDias.value = "7";
+  setProvEditSheetOpen(true);
+  dom.provEditNombre.focus();
+}
+
 function closeProvEdit() {
   setProvEditSheetOpen(false);
   selectedProvId = "";
+  provEditMode = "edit";
+}
+
+function renderProvProdRecetaRowsView() {
+  renderProvProdRecetaRows(dom.provProdRecetaRows, provProdRecetaVinculos, provProdProductosDisponibles);
+}
+
+function limpiarProvProdNuevoInsumoFields() {
+  dom.provProdNuevoNombre.value = "";
+  dom.provProdNuevoUnidad.value = "";
+  dom.provProdNuevoMin.value = "";
+  dom.provProdNuevoCrit.value = "";
+  provProdRecetaVinculos = [];
 }
 
 async function openProvProdAdd(proveedorId) {
@@ -1443,8 +1543,11 @@ async function openProvProdAdd(proveedorId) {
   dom.provProdUnidad.value = "";
   dom.provProdCantidad.value = "";
   dom.provProdPrecio.value = "";
+  limpiarProvProdNuevoInsumoFields();
   const insumos = await listInsumos();
   renderProvProdInsumoSelect(dom.provProdInsumo, insumos, "");
+  provProdProductosDisponibles = await listProducts();
+  renderProvProdRecetaRowsView();
   updateProvProdCantidadLabel();
   setProvProdSheetOpen(true);
   dom.provProdNombre.focus();
@@ -1460,8 +1563,11 @@ async function openProvProdEdit(producto) {
   dom.provProdUnidad.value = producto.unidadCompra ?? "";
   dom.provProdCantidad.value = String(producto.cantidadPorUnidad ?? "");
   dom.provProdPrecio.value = String((producto.precioUnitarioCentavos / 100).toFixed(2));
+  limpiarProvProdNuevoInsumoFields();
   const insumos = await listInsumos();
   renderProvProdInsumoSelect(dom.provProdInsumo, insumos, producto.insumoId ?? "");
+  provProdProductosDisponibles = await listProducts();
+  renderProvProdRecetaRowsView();
   updateProvProdCantidadLabel();
   setProvProdSheetOpen(true);
   dom.provProdNombre.focus();
@@ -1475,7 +1581,9 @@ function closeProvProd() {
 
 function updateProvProdCantidadLabel() {
   const insumoId = dom.provProdInsumo.value;
-  if (!insumoId) {
+  const esNuevo = insumoId === "__nuevo__";
+  dom.provProdNuevoInsumoFields.hidden = !esNuevo;
+  if (!insumoId || esNuevo) {
     dom.provProdCantidadLabel.textContent = "Cantidad por unidad de compra (unidades)";
     return;
   }
@@ -1488,12 +1596,29 @@ function updateProvProdCantidadLabel() {
     : "Cantidad por unidad de compra";
 }
 
+async function handleDeleteProveedorInsumo(producto) {
+  const confirmado = await confirmDialog({
+    title: "Eliminar producto",
+    message: `¿Eliminar "${producto.nombreProducto}" de este proveedor? El insumo vinculado no se borra, solo deja de venderselo este proveedor.`,
+    acceptText: "Eliminar"
+  });
+  if (!confirmado) return;
+  try {
+    await deleteProveedorInsumo(producto.id);
+    setFlash("Producto eliminado.", "success");
+    await renderProveedoresView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo eliminar.", "error");
+  }
+}
+
 async function renderProveedoresView() {
   const data = await getProveedoresDashboardData();
   renderProveedoresList(dom.proveedoresList, data, {
     onEditProv: openProvEdit,
     onAddProd: openProvProdAdd,
-    onEditProd: openProvProdEdit
+    onEditProd: openProvProdEdit,
+    onDeleteProd: handleDeleteProveedorInsumo
   });
 }
 
@@ -2240,6 +2365,8 @@ function bindEvents() {
   dom.abrirFactura.addEventListener("click", () => { openFacturaSheet().catch(() => {}); });
   dom.closeFactura.addEventListener("click", closeFacturaSheet);
   dom.facturaBackdrop.addEventListener("click", closeFacturaSheet);
+  dom.facturaProveedor.addEventListener("change", handleFacturaProveedorChange);
+  dom.facturaProveedorNombre.addEventListener("input", actualizarFacturaContinuarDisabled);
   dom.facturaSacarFoto.addEventListener("click", () => dom.facturaInputFoto.click());
   dom.facturaAdjuntar.addEventListener("click", () => dom.facturaInputAdjunto.click());
   dom.facturaInputFoto.addEventListener("change", () => handleFacturaArchivoSeleccionado(dom.facturaInputFoto.files[0]));
@@ -2266,6 +2393,7 @@ function bindEvents() {
     }
   });
 
+  dom.provAddNuevo.addEventListener("click", openProvAdd);
   dom.closeProvEdit.addEventListener("click", closeProvEdit);
   dom.provEditBackdrop.addEventListener("click", closeProvEdit);
 
@@ -2274,21 +2402,51 @@ function bindEvents() {
 
   dom.provProdInsumo.addEventListener("change", updateProvProdCantidadLabel);
 
+  dom.provProdAddRecetaRow.addEventListener("click", () => {
+    provProdRecetaVinculos.push({ productoId: "", cantidad: "" });
+    renderProvProdRecetaRowsView();
+  });
+
+  dom.provProdRecetaRows.addEventListener("input", (e) => {
+    const idx = Number(e.target.dataset.idx);
+    if (Number.isNaN(idx) || !provProdRecetaVinculos[idx]) return;
+    if (e.target.classList.contains("prov-prod-receta-cantidad-input")) provProdRecetaVinculos[idx].cantidad = e.target.value;
+  });
+
+  dom.provProdRecetaRows.addEventListener("change", (e) => {
+    const idx = Number(e.target.dataset.idx);
+    if (Number.isNaN(idx) || !provProdRecetaVinculos[idx]) return;
+    if (e.target.classList.contains("prov-prod-receta-producto-select")) provProdRecetaVinculos[idx].productoId = e.target.value;
+  });
+
+  dom.provProdRecetaRows.addEventListener("click", (e) => {
+    const btn = e.target.closest('[data-action="quitar-receta-row"]');
+    if (!btn) return;
+    provProdRecetaVinculos.splice(Number(btn.dataset.idx), 1);
+    renderProvProdRecetaRowsView();
+  });
+
   dom.provEditForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (provEditInProgress || !selectedProvId) return;
+    if (provEditInProgress) return;
+    if (provEditMode === "edit" && !selectedProvId) return;
     try {
       provEditInProgress = true;
       const nombre = dom.provEditNombre.value.trim();
       if (!nombre) throw new Error("El nombre no puede estar vacío.");
-      await updateProveedor(selectedProvId, {
+      const datos = {
         nombre,
         tel: dom.provEditTel.value.trim(),
         email: dom.provEditEmail.value.trim(),
         notas: dom.provEditNotas.value.trim(),
         diasCiclo: Number(dom.provEditDias.value) || 7
-      });
-      setFlash("Proveedor actualizado.", "success");
+      };
+      if (provEditMode === "add") {
+        await createProveedor(datos);
+      } else {
+        await updateProveedor(selectedProvId, datos);
+      }
+      setFlash(provEditMode === "add" ? "Proveedor agregado." : "Proveedor actualizado.", "success");
       closeProvEdit();
       await renderProveedoresView();
     } catch (error) {
@@ -2305,12 +2463,13 @@ function bindEvents() {
       provProdInProgress = true;
       const nombre = dom.provProdNombre.value.trim();
       const unidad = dom.provProdUnidad.value.trim();
-      const precio = parseFloat(dom.provProdPrecio.value);
+      const precio = parseDecimal(dom.provProdPrecio.value);
       if (!nombre) throw new Error("El nombre del producto es obligatorio.");
       if (!unidad) throw new Error("La unidad de compra es obligatoria.");
       if (isNaN(precio) || precio < 0) throw new Error("Ingresa un precio válido.");
       const insumoId = dom.provProdInsumo.value || null;
-      const cantidad = parseFloat(dom.provProdCantidad.value) || 1;
+      const cantidad = parseDecimal(dom.provProdCantidad.value) || 1;
+      const esInsumoNuevo = insumoId === "__nuevo__";
       await saveProveedorInsumo({
         id: provProdMode === "edit" ? selectedProvProdId : undefined,
         proveedorId: selectedProvId,
@@ -2318,7 +2477,16 @@ function bindEvents() {
         nombreProducto: nombre,
         unidadCompra: unidad,
         cantidadPorUnidad: cantidad,
-        precioUnitarioCentavos: Math.round(precio * 100)
+        precioUnitarioCentavos: Math.round(precio * 100),
+        ...(esInsumoNuevo ? {
+          nuevoInsumo: {
+            nombre: dom.provProdNuevoNombre.value,
+            unidad: dom.provProdNuevoUnidad.value,
+            stockMinimo: dom.provProdNuevoMin.value,
+            stockCritico: dom.provProdNuevoCrit.value
+          },
+          recetasVinculadas: provProdRecetaVinculos
+        } : {})
       });
       setFlash(provProdMode === "edit" ? "Producto actualizado." : "Producto agregado.", "success");
       closeProvProd();

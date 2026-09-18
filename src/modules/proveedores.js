@@ -1,6 +1,38 @@
 import { getAll, getOne, putOne, withStores } from "../db/idb.js";
 import { PROVEEDORES_SEED_VERSION, initialProveedores, initialProveedorInsumos } from "./seed.js";
 import { fetchProveedoresCatalogo, fetchProveedorInsumosCatalogo } from "../db/supabase.js";
+import { slugify } from "../utils/format.js";
+import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
+
+export async function createProveedor({ nombre, tel, email, notas, diasCiclo }) {
+  const nombreLimpio = String(nombre || "").trim();
+  if (!nombreLimpio) throw new Error("El nombre del proveedor es obligatorio.");
+
+  const existentes = await getAll("proveedores");
+  const idsUsados = new Set(existentes.map((p) => p.id));
+  let id = slugify(nombreLimpio);
+  let sufijo = 2;
+  while (idsUsados.has(id)) {
+    id = `${slugify(nombreLimpio)}-${sufijo}`;
+    sufijo += 1;
+  }
+
+  const proveedor = {
+    id,
+    nombre: nombreLimpio,
+    tel: tel || "",
+    email: email || "",
+    notas: notas || "",
+    diasCiclo: Number(diasCiclo) || 7,
+    activo: true
+  };
+  await putOne("proveedores", proveedor);
+
+  const proveedores = await getAll("proveedores");
+  trySyncProveedoresSnapshot(proveedores).catch(() => {});
+
+  return proveedor;
+}
 
 // Trae proveedores y proveedor_insumos desde Supabase (ver "Actualizar
 // catalogo" en Gestion) — sin campos en vivo que proteger aca, es un
@@ -77,16 +109,106 @@ export async function updateProveedor(id, changes) {
   await putOne("proveedores", { ...current, ...changes });
 }
 
+// data.insumoId === "__nuevo__" crea el insumo ahi mismo (mismo mecanismo de
+// slugify + resolucion de colision que ya usan facturas.js y menu.js) — en
+// ese caso data.nuevoInsumo trae { nombre, unidad, stockMinimo, stockCritico }.
+// data.recetasVinculadas, opcional y solo tiene sentido junto con un insumo
+// nuevo, trae [{ productoId, cantidad }, ...] para que nazca ya enganchado a
+// la receta de uno o varios productos de una (ej: leche de soja entra en
+// varios cafes a la vez).
 export async function saveProveedorInsumo(data) {
-  const id = data.id ?? `${data.proveedorId}:custom-${Date.now()}`;
+  const now = new Date().toISOString();
+  const esInsumoNuevo = data.insumoId === "__nuevo__";
+
+  let insumoIdFinal = data.insumoId || null;
+  let insumoNuevoCreado = null;
+
+  if (esInsumoNuevo) {
+    const nombreInsumo = String(data.nuevoInsumo?.nombre || "").trim();
+    if (!nombreInsumo) throw new Error("El nombre del insumo nuevo es obligatorio.");
+    const insumosActuales = await getAll("insumos");
+    const idsUsados = new Set(insumosActuales.map((i) => i.id));
+    let insumoId = slugify(nombreInsumo);
+    let sufijo = 2;
+    while (idsUsados.has(insumoId)) {
+      insumoId = `${slugify(nombreInsumo)}-${sufijo}`;
+      sufijo += 1;
+    }
+    insumoIdFinal = insumoId;
+    const unidad = data.nuevoInsumo.unidad?.trim() || "unidad";
+    insumoNuevoCreado = {
+      id: insumoId,
+      nombre: nombreInsumo,
+      unidad,
+      unidadCompra: unidad,
+      factorConversion: 1,
+      stockActual: 0,
+      stockMinimo: parseFloat(String(data.nuevoInsumo.stockMinimo ?? "").replace(",", ".")) || 0,
+      stockCritico: parseFloat(String(data.nuevoInsumo.stockCritico ?? "").replace(",", ".")) || 0,
+      activo: true,
+      creadoEn: now,
+      actualizadoEn: now
+    };
+  }
+
+  const id = data.id ?? (insumoNuevoCreado ? `${data.proveedorId}:${insumoIdFinal}` : `${data.proveedorId}:custom-${Date.now()}`);
   const current = data.id ? (await getOne("proveedor_insumos", data.id) ?? {}) : {};
-  await putOne("proveedor_insumos", { ...current, ...data, id, activo: true });
+  const proveedorInsumo = {
+    ...current,
+    id,
+    proveedorId: data.proveedorId,
+    insumoId: insumoIdFinal,
+    nombreProducto: data.nombreProducto,
+    unidadCompra: data.unidadCompra,
+    cantidadPorUnidad: data.cantidadPorUnidad,
+    precioUnitarioCentavos: data.precioUnitarioCentavos,
+    activo: true
+  };
+
+  const recetasCreadas = insumoNuevoCreado
+    ? (data.recetasVinculadas || [])
+        .filter((v) => v.productoId && parseFloat(String(v.cantidad ?? "").replace(",", ".")) > 0)
+        .map((v) => ({
+          id: `${v.productoId}:${insumoIdFinal}`,
+          productoId: v.productoId,
+          insumoId: insumoIdFinal,
+          cantidadPorUnidad: parseFloat(String(v.cantidad).replace(",", ".")),
+          esEstimado: true,
+          creadoEn: now,
+          actualizadoEn: now
+        }))
+    : [];
+
+  const storeNames = ["proveedor_insumos"];
+  if (insumoNuevoCreado) storeNames.push("insumos");
+  if (recetasCreadas.length > 0) storeNames.push("recetas");
+
+  await withStores(storeNames, "readwrite", (stores) => {
+    if (insumoNuevoCreado) stores.insumos.put(insumoNuevoCreado);
+    stores.proveedor_insumos.put(proveedorInsumo);
+    for (const receta of recetasCreadas) stores.recetas.put(receta);
+  });
+
+  const proveedorInsumosFinal = await getAll("proveedor_insumos");
+  trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
+  if (insumoNuevoCreado) {
+    const insumosFinal = await getAll("insumos");
+    trySyncInsumosSnapshot(insumosFinal).catch(() => {});
+  }
+  if (recetasCreadas.length > 0) {
+    const recetasFinal = await getAll("recetas");
+    trySyncRecetasSnapshot(recetasFinal).catch(() => {});
+  }
+
+  return proveedorInsumo;
 }
 
 export async function deleteProveedorInsumo(id) {
   const current = await getOne("proveedor_insumos", id);
   if (!current) return;
   await putOne("proveedor_insumos", { ...current, activo: false });
+  const proveedorInsumosFinal = await getAll("proveedor_insumos");
+  trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
 }
 
 export async function getProveedoresDashboardData() {

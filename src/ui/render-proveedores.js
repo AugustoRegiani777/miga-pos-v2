@@ -41,6 +41,7 @@ export function renderProveedoresList(el, data, callbacks = {}) {
         <td class="prov-num cal-muted">${precioBaseLabel(p)}</td>
         <td class="prov-td-accion">
           <button class="ghost-button compact" data-action="edit-prod" data-id="${p.id}" data-provid="${proveedor.id}">Editar</button>
+          <button class="ghost-button compact" data-action="delete-prod" data-id="${p.id}" data-provid="${proveedor.id}">Eliminar</button>
         </td>
       </tr>`).join("");
 
@@ -95,7 +96,36 @@ export function renderProveedoresList(el, data, callbacks = {}) {
       const prod = proveedor?.productos.find(p => p.id === btn.dataset.id);
       if (prod) callbacks.onEditProd?.(prod);
     }
+
+    if (action === "delete-prod") {
+      const proveedor = data.find(p => p.id === btn.dataset.provid);
+      const prod = proveedor?.productos.find(p => p.id === btn.dataset.id);
+      if (prod) callbacks.onDeleteProd?.(prod);
+    }
   }, { once: false });
+}
+
+// Filas dinamicas "producto + cantidad" para vincular el insumo nuevo a la
+// receta de varios productos a la vez (ej: leche de soja va en varios
+// cafes) — mismo patron visual de fila que ya usa render-menu.js.
+export function renderProvProdRecetaRows(container, filas, productos) {
+  if (!filas.length) {
+    container.innerHTML = "<p class='cal-muted' style='padding:0.25rem 0'>Sin productos vinculados todavia.</p>";
+    return;
+  }
+
+  const opciones = (seleccionado) =>
+    `<option value="">— elegi un producto —</option>` +
+    productos.map(p => `<option value="${p.id}" ${p.id === seleccionado ? "selected" : ""}>${p.nombre} (${p.categoria})</option>`).join("");
+
+  container.innerHTML = filas.map((fila, index) => `
+    <div class="menu-receta-row" data-idx="${index}">
+      <div class="menu-receta-row-main">
+        <select class="prov-prod-receta-producto-select" data-idx="${index}">${opciones(fila.productoId)}</select>
+        <input class="prov-prod-receta-cantidad-input" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Cantidad" value="${fila.cantidad ?? ""}">
+        <button class="ghost-button compact" type="button" data-action="quitar-receta-row" data-idx="${index}" aria-label="Quitar">×</button>
+      </div>
+    </div>`).join("");
 }
 
 export function renderProvProdInsumoSelect(selectEl, insumos, selectedId) {
@@ -105,5 +135,6 @@ export function renderProvProdInsumoSelect(selectEl, insumos, selectedId) {
       .filter(i => i.activo)
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
       .map(i => `<option value="${i.id}" ${i.id === selectedId ? "selected" : ""}>${i.nombre} (${i.unidad})</option>`)
-      .join("");
+      .join("") +
+    `<option value="__nuevo__" ${selectedId === "__nuevo__" ? "selected" : ""}>+ Crear insumo nuevo…</option>`;
 }

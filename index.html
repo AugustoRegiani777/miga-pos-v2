@@ -489,6 +489,25 @@
               Proveedor
               <select id="factura-proveedor"></select>
             </label>
+            <div id="factura-proveedor-nuevo-fields" hidden>
+              <label class="quantity-field">
+                Nombre del proveedor nuevo
+                <input type="text" id="factura-proveedor-nombre">
+              </label>
+              <label class="quantity-field">
+                Telefono <span class="cal-muted">(opcional)</span>
+                <input type="text" id="factura-proveedor-tel" inputmode="tel">
+              </label>
+              <label class="quantity-field">
+                Email <span class="cal-muted">(opcional)</span>
+                <input type="email" id="factura-proveedor-email">
+              </label>
+              <label class="quantity-field">
+                Dias entre pedidos
+                <input type="number" id="factura-proveedor-dias" min="1" step="1" inputmode="numeric" value="7">
+              </label>
+              <p class="cal-muted">El proveedor se crea recien cuando confirmes la factura, no antes.</p>
+            </div>
             <div class="factura-upload-row">
               <button type="button" class="file-button" id="factura-sacar-foto">Sacar foto</button>
               <button type="button" class="file-button" id="factura-adjuntar">Adjuntar archivo</button>
@@ -581,14 +600,15 @@
       <section class="section-heading">
         <h1 id="proveedores-title">Proveedores</h1>
         <p>Directorio de proveedores con precios extraidos de facturas reales.</p>
+        <button type="button" class="ghost-button compact" id="prov-add-nuevo">+ Agregar proveedor</button>
       </section>
 
-      <!-- Sheet: editar proveedor -->
+      <!-- Sheet: agregar / editar proveedor -->
       <section class="production-sheet-backdrop" id="prov-edit-backdrop" hidden></section>
       <section class="form-section stock-adjust-sheet" id="prov-edit-sheet" aria-hidden="true">
         <form id="prov-edit-form" class="stock-form" novalidate>
           <div class="production-sheet-header">
-            <div><h2>Editar proveedor</h2></div>
+            <div><h2 id="prov-edit-title">Editar proveedor</h2></div>
             <button type="button" class="ghost-button compact" id="close-prov-edit">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
@@ -643,6 +663,29 @@
               <span>Insumo vinculado <span class="cal-muted">(opcional)</span></span>
               <select id="prov-prod-insumo"></select>
             </label>
+            <div id="prov-prod-nuevo-insumo-fields" hidden>
+              <label class="quantity-field">
+                <span>Nombre del insumo nuevo</span>
+                <input id="prov-prod-nuevo-nombre" type="text">
+              </label>
+              <label class="quantity-field">
+                <span>Unidad base (g, ml, unidad...)</span>
+                <input id="prov-prod-nuevo-unidad" type="text">
+              </label>
+              <label class="quantity-field">
+                <span>Stock minimo</span>
+                <input id="prov-prod-nuevo-min" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+              </label>
+              <label class="quantity-field">
+                <span>Stock critico</span>
+                <input id="prov-prod-nuevo-crit" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+              </label>
+              <div class="section-heading" style="margin-top: 0.5rem;">
+                <h2 style="font-size: 0.95rem;">¿A que productos se agrega en su receta? <span class="cal-muted">(opcional, se puede agregar a varios)</span></h2>
+              </div>
+              <div id="prov-prod-receta-rows"></div>
+              <button type="button" class="ghost-button compact" id="prov-prod-add-receta-row">+ Agregar a otro producto</button>
+            </div>
             <label class="quantity-field">
               <span id="prov-prod-cantidad-label">Cantidad por unidad de compra</span>
               <input id="prov-prod-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
