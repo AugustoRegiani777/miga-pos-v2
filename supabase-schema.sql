@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS recetas (
   insumo_id             TEXT NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
   cantidad_por_unidad   NUMERIC NOT NULL,
   es_estimado           BOOLEAN DEFAULT false,
+  variantes_cantidad    JSONB,
   actualizado_en        TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -131,6 +132,17 @@ CREATE TABLE IF NOT EXISTS proveedor_insumos (
   activo                   BOOLEAN NOT NULL DEFAULT true,
   creado_en                TIMESTAMPTZ DEFAULT NOW(),
   actualizado_en           TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Config compartida entre dispositivos, de baja frecuencia de escritura (a
+-- diferencia de insumos/productos, que tienen su propia tabla). Cada fila es
+-- un id fijo + un blob JSON — hoy solo se usa para "variantes_grupos"
+-- (Gestion > Variantes), pero sirve para cualquier config futura que deba
+-- verse igual en todos los dispositivos sin ameritar una tabla propia.
+CREATE TABLE IF NOT EXISTS configuracion_compartida (
+  id             TEXT PRIMARY KEY,
+  valor          JSONB NOT NULL,
+  actualizado_en TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Producción diaria
