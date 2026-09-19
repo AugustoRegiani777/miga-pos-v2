@@ -131,6 +131,46 @@ async function pullCatalogoCompleto() {
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockResult };
 }
 
+let refrescarCatalogoStatusTimeout = null;
+
+// Feedback del boton manual "Actualizar catalogo" — antes quedaba en el
+// flash generico de la app (4 segundos, facil de perderse si no estabas
+// mirando justo ahi) y volvia solo a su texto normal ante un error, sin
+// ninguna llamada a la accion. Ahora: "loading" deja el boton deshabilitado
+// (clickearlo de nuevo mientras corre no hace nada, ver refrescarCatalogoInProgress
+// en el handler — apretarlo de mas nunca puede romper nada), "success" queda
+// visible al lado del boton 20 segundos y se borra sola, y "error" dejar el
+// boton mismo como "↻ Reintentar" — sin apagarse solo, hasta que se
+// reintente y funcione.
+function setRefrescarCatalogoEstado(estado, mensaje = "") {
+  window.clearTimeout(refrescarCatalogoStatusTimeout);
+  const boton = dom.refrescarCatalogo;
+  const status = dom.refrescarCatalogoStatus;
+  if (estado === "loading") {
+    boton.disabled = true;
+    boton.textContent = "Actualizando...";
+    status.hidden = true;
+    return;
+  }
+  if (estado === "success") {
+    boton.disabled = false;
+    boton.textContent = "Actualizar catalogo";
+    status.hidden = false;
+    status.className = "refrescar-catalogo-status success";
+    status.textContent = `✓ ${mensaje}`;
+    refrescarCatalogoStatusTimeout = window.setTimeout(() => {
+      status.hidden = true;
+    }, 20000);
+    return;
+  }
+  // error
+  boton.disabled = false;
+  boton.textContent = "↻ Reintentar";
+  status.hidden = false;
+  status.className = "refrescar-catalogo-status error";
+  status.textContent = `✗ ${mensaje}`;
+}
+
 // Auto-sync SIN boton: se llama al abrir la app y cada vez que se entra a
 // Gestion desde otra vista (ver bootApp/showView) — nunca durante Caja, para
 // que jamas compita con una venta en curso (ver el hilo con el usuario del
@@ -278,6 +318,7 @@ const dom = {
   produccionConsulta: document.querySelector("#produccion-consulta"),
   closePeriodButton: document.querySelector("#close-period-button"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
+  refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
   insumoWarningSheet: document.querySelector("#insumo-warning-sheet"),
   insumoWarningBackdrop: document.querySelector("#insumo-warning-backdrop"),
   closeInsumoWarning: document.querySelector("#close-insumo-warning"),
@@ -2874,25 +2915,22 @@ function bindEvents() {
 
   dom.refrescarCatalogo.addEventListener("click", async () => {
     if (refrescarCatalogoInProgress) return;
+    refrescarCatalogoInProgress = true;
+    setRefrescarCatalogoEstado("loading");
     try {
-      refrescarCatalogoInProgress = true;
-      dom.refrescarCatalogo.disabled = true;
-      dom.refrescarCatalogo.textContent = "Actualizando...";
       const resultado = await pullCatalogoCompleto();
       await refreshGestionSubView(currentGestionSubView);
-      setFlash(
+      setRefrescarCatalogoEstado(
+        "success",
         `Catalogo actualizado: ${resultado.catalogo.productos} productos, ${resultado.insumosCount} insumos, ${resultado.proveedoresResult.proveedores} proveedores` +
         (resultado.stockResult.insumosActualizados > 0 ? `, stock actualizado en ${resultado.stockResult.insumosActualizados} insumo${resultado.stockResult.insumosActualizados === 1 ? "" : "s"}` : "") +
         (resultado.variantesResult.aplicado ? `, ${resultado.variantesResult.grupos} grupo${resultado.variantesResult.grupos === 1 ? "" : "s"} de variante` : "") +
-        ".",
-        "success"
+        "."
       );
     } catch (error) {
-      setFlash(error.message || "No se pudo actualizar el catalogo (revisa la conexion).", "error");
+      setRefrescarCatalogoEstado("error", error.message || "No se pudo actualizar el catalogo (revisa la conexion).");
     } finally {
       refrescarCatalogoInProgress = false;
-      dom.refrescarCatalogo.disabled = false;
-      dom.refrescarCatalogo.textContent = "Actualizar catalogo";
     }
   });
 

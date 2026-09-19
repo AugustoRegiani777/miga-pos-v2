@@ -1202,6 +1202,21 @@ button {
   color: var(--muted);
 }
 
+.refrescar-catalogo-status {
+  display: inline-block;
+  margin-left: 10px;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.refrescar-catalogo-status.success {
+  color: var(--ok);
+}
+
+.refrescar-catalogo-status.error {
+  color: var(--out);
+}
+
 .stock-adjust-button {
   min-width: 148px;
   padding: 0 14px;
