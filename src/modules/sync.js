@@ -74,23 +74,25 @@ async function executeOp(op) {
 }
 
 export async function processSyncQueue() {
-  if (!navigator.onLine) return { synced: 0, pending: getPendingSyncCount() };
+  if (!navigator.onLine) return { synced: 0, pending: getPendingSyncCount(), offline: true };
   const q = loadQueue();
   if (q.length === 0) return { synced: 0, pending: 0 };
 
   const failed = [];
   let synced = 0;
+  let lastError = null;
   for (const op of q) {
     try {
       await executeOp(op);
       synced++;
     } catch (e) {
       console.warn("[sync] Reintento fallido:", op.type, e.message);
+      lastError = { type: op.type, message: e.message };
       failed.push(op);
     }
   }
   saveQueue(failed);
-  return { synced, pending: failed.length };
+  return { synced, pending: failed.length, lastError };
 }
 
 async function tryNow(op) {

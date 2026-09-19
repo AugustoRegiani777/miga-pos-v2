@@ -535,12 +535,15 @@ function setupSyncBadge() {
   window.setInterval(updateSyncBadge, 20000);
   dom.syncStatusBadge?.addEventListener("click", async () => {
     dom.syncStatusBadge.disabled = true;
-    const { synced, pending } = await processSyncQueue().catch(() => ({ synced: 0, pending: getPendingSyncCount() }));
+    const resultado = await processSyncQueue().catch((e) => ({ synced: 0, pending: getPendingSyncCount(), lastError: { type: "?", message: e.message } }));
+    const { synced, pending, offline, lastError } = resultado;
     dom.syncStatusBadge.disabled = false;
     updateSyncBadge();
     if (synced > 0 && pending === 0) setFlash(`${synced} sincronizados. Todo al dia.`);
     else if (synced > 0) setFlash(`${synced} sincronizados, ${pending} pendientes todavia.`, "warning");
-    else setFlash("Sin conexion o sin cambios pendientes.", "warning");
+    else if (offline) setFlash("Sin conexion — se reintenta solo cuando vuelva el wifi.", "warning");
+    else if (lastError) setFlash(`No se pudo sincronizar (${lastError.type}): ${lastError.message}`, "error");
+    else setFlash("No hay cambios pendientes.", "warning");
   });
 }
 
