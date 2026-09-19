@@ -340,7 +340,7 @@ export async function confirmSale(items) {
   const hora = currentTime();
   const now = new Date().toISOString();
 
-  return withStores(["productos", "ventas", "detalle_venta", "movimientos_stock", "insumos", "movimientos_insumos", "recetas"], "readwrite", async (stores) => {
+  return withStores(["productos", "ventas", "detalle_venta", "movimientos_stock", "insumos", "movimientos_insumos", "recetas", "configuracion"], "readwrite", async (stores) => {
     const lines = [];
     let totalCentavos = 0;
     let saleMode = "normal";
@@ -478,7 +478,7 @@ export async function confirmSale(items) {
     // Productos que no controlan stock (cafe, bebidas) no pasan por
     // produccion diaria — para esos, el insumo se descuenta aca, en el
     // momento de la venta, respetando la variante elegida (ver
-    // insumoEfectivo en aprovisionamiento.js para el caso de la leche).
+    // resolverLineaEfectiva en aprovisionamiento.js para el caso de la leche).
     const itemsParaInsumos = lines
       .filter((line) => !line.product.controlaStock)
       .map((line) => ({ productId: line.product.id, quantity: line.quantity, opcionNombre: line.opcionNombre }));
@@ -529,7 +529,7 @@ export async function undoSale(ventaId) {
   const fecha = todayISO();
   const now = new Date().toISOString();
 
-  return withStores(["ventas", "detalle_venta", "productos", "movimientos_stock", "insumos", "movimientos_insumos", "recetas"], "readwrite", async (stores) => {
+  return withStores(["ventas", "detalle_venta", "productos", "movimientos_stock", "insumos", "movimientos_insumos", "recetas", "configuracion"], "readwrite", async (stores) => {
     const venta = await requestToPromise(stores.ventas.get(ventaId));
     if (!venta) throw new Error("La venta no existe.");
     if (venta.anulada) throw new Error("Esta venta ya fue deshecha antes.");

@@ -10,7 +10,8 @@ import {
   pushStockProductos,
   pushProduccionDiaria,
   pushMovimientoStock,
-  updateVentaAnulada
+  updateVentaAnulada,
+  pushVariantesGrupos
 } from "../db/supabase.js";
 
 const QUEUE_KEY = "miga_sync_queue";
@@ -65,6 +66,8 @@ async function executeOp(op) {
       return pushMovimientoStock(op.payload);
     case "venta_anulada":
       return updateVentaAnulada(op.payload);
+    case "variantes_grupos":
+      return pushVariantesGrupos(op.payload);
     default:
       throw new Error(`Tipo de sync desconocido: ${op.type}`);
   }
@@ -146,6 +149,10 @@ export function trySyncMovimientoStock(movimiento) {
 
 export function trySyncVentaAnulada({ uuid, fecha, creadoEn }) {
   return tryNow({ type: "venta_anulada", payload: { uuid, fecha, creadoEn } });
+}
+
+export function trySyncVariantesGrupos(grupos) {
+  return tryNow({ type: "variantes_grupos", payload: grupos });
 }
 
 // Retry automático al recuperar conexión, más un reintento periódico.

@@ -100,7 +100,37 @@ export function renderMenuInsumoSelect(selectEl, insumos, selectedId) {
     `<option value="__nuevo__" ${selectedId === "__nuevo__" ? "selected" : ""}>+ Crear insumo nuevo…</option>`;
 }
 
-export function renderMenuRecetaRows(container, lineas, insumos) {
+// Si el insumo de esta linea es una de las opciones de un grupo de variante
+// (ver Gestion > Variantes), por defecto la cantidad es la misma para
+// cualquier opcion del grupo (solo cambia de que insumo puntual sale al
+// vender, ver resolverLineaEfectiva en aprovisionamiento.js) — pero cada
+// opcion, salvo la que ya tiene su propio campo "Cantidad" arriba, puede
+// pisar ese valor con uno propio (ej: la avena rinde distinto que la
+// entera). Vacio = usa la cantidad base de arriba, sin excepcion.
+function lineaVarianteCantidades(linea, grupos, insumos, index) {
+  const grupo = grupos.find((g) => (g.opciones || []).some((o) => o.insumoId === linea.insumoId));
+  if (!grupo) return "";
+  const unidad = insumos.find((i) => i.id === linea.insumoId)?.unidad || "";
+  const cantidadBase = linea.cantidad || 0;
+  const overrides = linea.variantesCantidad || {};
+  const filas = grupo.opciones
+    .filter((o) => o.insumoId !== linea.insumoId)
+    .map((o) => `
+      <div class="menu-receta-variante-opcion-row">
+        <span>${o.nombre}</span>
+        <input class="menu-receta-variante-cantidad" data-idx="${index}" data-opcion="${o.nombre}" type="number" min="0" step="any" inputmode="decimal" placeholder="${cantidadBase}" value="${overrides[o.nombre] ?? ""}">
+        <span class="cal-muted">${unidad}</span>
+      </div>`)
+    .join("");
+  if (!filas) return "";
+  return `
+    <div class="menu-receta-variante-cantidades">
+      <p class="cal-muted" style="margin: 0.35rem 0 0.15rem;">Cantidad para las otras opciones de "${grupo.nombre}" (vacío = igual que arriba, ${cantidadBase}${unidad})</p>
+      ${filas}
+    </div>`;
+}
+
+export function renderMenuRecetaRows(container, lineas, insumos, grupos = []) {
   if (!lineas.length) {
     container.innerHTML = "<p class='cal-muted' style='padding:0.25rem 0'>Sin insumos agregados todavia.</p>";
     return;
@@ -124,6 +154,7 @@ export function renderMenuRecetaRows(container, lineas, insumos) {
             <input class="menu-receta-nuevo-min" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Stock minimo" value="${linea.nuevoStockMinimo ?? ""}">
             <input class="menu-receta-nuevo-critico" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Stock critico" value="${linea.nuevoStockCritico ?? ""}">
           </div>` : ""}
+        ${lineaVarianteCantidades(linea, grupos, insumos, index)}
       </div>`;
   }).join("");
 

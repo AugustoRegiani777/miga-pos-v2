@@ -1,9 +1,11 @@
 import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange } from "../modules/backup.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, sincronizarStockInsumosDesdeMovimientos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, pullCatalogoDesdeNube } from "../modules/menu.js";
+import { getGruposVariantes, saveGrupoVariante, deleteGrupoVariante, getGrupoDeProducto, setProductoGrupoVariante, pullVariantesGruposDesdeNube } from "../modules/variantes.js";
+import { renderVariantesOpcionesRows, renderVariantesProductosChecklist, renderVariantesGruposList } from "../ui/render-variantes.js";
 import { renderMenuList, renderMenuRecetaRows } from "../ui/render-menu.js";
 import {
   trySyncVenta,
@@ -84,15 +86,74 @@ let facturaLineasActuales = [];
 let facturaInProgress = false;
 let facturaProveedorNuevoInfo = null;
 let facturaProveedorIdActual = "";
+let crearInsumoSheetOpen = false;
+let crearInsumoInProgress = false;
+let variantesOpcionesLineas = [];
+let variantesProductosDisponibles = [];
+let variantesInsumosDisponibles = [];
+let variantesFormInProgress = false;
+let selectedGrupoVarianteId = "";
+let grupoVarianteMode = "add";
 let lecheSheetOpen = false;
 let productoPendienteSeleccion = null;
 
-// Productos cuya receta lleva leche — al tocarlos en Caja, antes de sumarlos
-// al carrito, se pregunta con que leche (para que el ticket lo refleje).
-// Todavia no descuenta insumos por venta (eso queda para mas adelante,
-// ver la conversacion sobre "conectar el cable" de venta de bebidas).
-const PRODUCTOS_CON_LECHE = new Set(["latte", "cafe-con-leche", "promo-cafe-con-leche", "capuccino", "cortado", "flat-white", "ice-latte", "ice-caramel"]);
-const OPCIONES_LECHE = ["Entera", "Avena", "Sin lactosa"];
+// Grupos de variante (ej: "Tipo de leche") que preguntan una opcion en caja
+// antes de sumar el producto al carrito — editables desde Gestion >
+// Variantes (variantes.js), cargados al arrancar y refrescados cada vez que
+// se guarda un cambio ahi. Arranca vacio hasta el primer
+// refreshGruposVariantes() en bootApp.
+let gruposVariantesActual = [];
+
+async function refreshGruposVariantes() {
+  gruposVariantesActual = await getGruposVariantes();
+}
+
+// Todo lo que trae "Actualizar catalogo" de la nube — categorias/productos/
+// recetas, insumos (definicion), proveedores, grupos de variante, y el
+// merge por deltas del stock de insumos (ver sincronizarStockInsumosDesdeMovimientos
+// en aprovisionamiento.js). Un solo punto para el boton manual Y para el
+// auto-sync silencioso (ver sincronizarCatalogoSilencioso), asi nunca se
+// desalinean.
+async function pullCatalogoCompleto() {
+  const [catalogo, insumosCount, proveedoresResult, variantesResult] = await Promise.all([
+    pullCatalogoDesdeNube(),
+    pullInsumosDesdeNube(),
+    pullProveedoresDesdeNube(),
+    pullVariantesGruposDesdeNube()
+  ]);
+  // Recien despues de que los insumos existan localmente (pullInsumosDesdeNube
+  // recien terminado arriba) tiene sentido aplicarles deltas de stock — si un
+  // insumo se creo en el otro dispositivo y todavia no llego, su primer
+  // movimiento se descarta aca pero se aplica solo en el proximo refresco.
+  const stockResult = await sincronizarStockInsumosDesdeMovimientos();
+  await refreshGruposVariantes();
+  await loadProducts();
+  return { catalogo, insumosCount, proveedoresResult, variantesResult, stockResult };
+}
+
+// Auto-sync SIN boton: se llama al abrir la app y cada vez que se entra a
+// Gestion desde otra vista (ver bootApp/showView) — nunca durante Caja, para
+// que jamas compita con una venta en curso (ver el hilo con el usuario del
+// 19/09: si el precio de un producto cambiara a mitad de armar un carrito,
+// confirmSale cobraria el precio nuevo aunque el carrito en pantalla siga
+// mostrando el viejo — evitamos la clase entera de bug no corriendo esto
+// mientras se puede estar vendiendo). Totalmente silencioso: sin flash de
+// exito (seria ruido en cada apertura) ni de error (offline es normal y
+// esperado, no una falla que haya que mostrarle a quien cobra). Comparte el
+// mismo guard que el boton manual para nunca pisarse con un click del
+// usuario ni con otra corrida automatica en simultaneo.
+async function sincronizarCatalogoSilencioso() {
+  if (refrescarCatalogoInProgress) return;
+  refrescarCatalogoInProgress = true;
+  try {
+    await pullCatalogoCompleto();
+    if (currentView === "gestion") await refreshGestionSubView(currentGestionSubView);
+  } catch {
+    // silencioso a proposito — ver comentario de arriba
+  } finally {
+    refrescarCatalogoInProgress = false;
+  }
+}
 
 // "Promo bebida" no dice que bebida es — se pregunta antes de sumarla al
 // carrito, con las opciones reales de la categoria Bebidas.
@@ -119,6 +180,7 @@ let menuProductoMode = "add";
 let menuEditSheetOpen = false;
 let menuRecetaLineas = [];
 let menuInsumosDisponibles = [];
+let menuGruposVarianteDisponibles = [];
 const pedidoCart = new Map();
 const expandedPedidoIds = new Set();
 let pedidoSheetOpen = false;
@@ -290,6 +352,15 @@ const dom = {
   listaComprasList: document.querySelector("#lista-compras-list"),
   exportListaCompras: document.querySelector("#export-lista-compras"),
   abrirFactura: document.querySelector("#abrir-factura"),
+  abrirCrearInsumo: document.querySelector("#abrir-crear-insumo"),
+  crearInsumoBackdrop: document.querySelector("#crear-insumo-backdrop"),
+  crearInsumoSheet: document.querySelector("#crear-insumo-sheet"),
+  closeCrearInsumo: document.querySelector("#close-crear-insumo"),
+  crearInsumoForm: document.querySelector("#crear-insumo-form"),
+  crearInsumoNombre: document.querySelector("#crear-insumo-nombre"),
+  crearInsumoUnidad: document.querySelector("#crear-insumo-unidad"),
+  crearInsumoMin: document.querySelector("#crear-insumo-min"),
+  crearInsumoCrit: document.querySelector("#crear-insumo-crit"),
   facturaBackdrop: document.querySelector("#factura-backdrop"),
   facturaSheet: document.querySelector("#factura-sheet"),
   closeFactura: document.querySelector("#close-factura"),
@@ -358,6 +429,19 @@ const dom = {
   menuEditActivo: document.querySelector("#menu-edit-activo"),
   menuRecetaRows: document.querySelector("#menu-receta-rows"),
   menuAddRecetaRow: document.querySelector("#menu-add-receta-row"),
+  variantesGruposList: document.querySelector("#variantes-grupos-list"),
+  varianteAddGrupo: document.querySelector("#variante-add-grupo"),
+  varianteGrupoBackdrop: document.querySelector("#variante-grupo-backdrop"),
+  varianteGrupoSheet: document.querySelector("#variante-grupo-sheet"),
+  varianteGrupoTitle: document.querySelector("#variante-grupo-title"),
+  closeVarianteGrupo: document.querySelector("#close-variante-grupo"),
+  varianteGrupoForm: document.querySelector("#variante-grupo-form"),
+  varianteGrupoNombre: document.querySelector("#variante-grupo-nombre"),
+  varianteGrupoTitulo: document.querySelector("#variante-grupo-titulo"),
+  varianteGrupoOpcionesRows: document.querySelector("#variante-grupo-opciones-rows"),
+  varianteGrupoAddOpcion: document.querySelector("#variante-grupo-add-opcion"),
+  varianteGrupoProductosChecklist: document.querySelector("#variante-grupo-productos-checklist"),
+  menuEditVariante: document.querySelector("#menu-edit-variante"),
   pedidosGrid: document.querySelector("#pedidos-grid"),
   openNuevoPedido: document.querySelector("#open-nuevo-pedido"),
   pedidoSheet: document.querySelector("#pedido-sheet"),
@@ -553,6 +637,8 @@ function closeAllGestionSheets() {
   setProvProdSheetOpen(false);
   setFacturaSheetOpen(false);
   setMenuEditSheetOpen(false);
+  setCrearInsumoSheetOpen(false);
+  setVarianteGrupoSheetOpen(false);
 }
 
 function setFacturaSheetOpen(isOpen) {
@@ -561,6 +647,27 @@ function setFacturaSheetOpen(isOpen) {
   dom.facturaSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
   dom.facturaBackdrop.hidden = !isOpen;
   dom.facturaBackdrop.classList.toggle("open", isOpen);
+}
+
+function setCrearInsumoSheetOpen(isOpen) {
+  crearInsumoSheetOpen = isOpen;
+  dom.crearInsumoSheet.classList.toggle("open", isOpen);
+  dom.crearInsumoSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  dom.crearInsumoBackdrop.hidden = !isOpen;
+  dom.crearInsumoBackdrop.classList.toggle("open", isOpen);
+}
+
+function openCrearInsumoSheet() {
+  dom.crearInsumoNombre.value = "";
+  dom.crearInsumoUnidad.value = "";
+  dom.crearInsumoMin.value = "";
+  dom.crearInsumoCrit.value = "";
+  setCrearInsumoSheetOpen(true);
+  dom.crearInsumoNombre.focus();
+}
+
+function closeCrearInsumoSheet() {
+  setCrearInsumoSheetOpen(false);
 }
 
 function mostrarPasoFactura(paso) {
@@ -732,6 +839,7 @@ async function refreshGestionSubView(subViewName) {
   if (subViewName === "recetas") await renderRecetasView();
   if (subViewName === "proveedores") await renderProveedoresView();
   if (subViewName === "menu") await renderMenuView();
+  if (subViewName === "variantes") await renderVariantesView();
 }
 
 function showGestionSubView(subViewName) {
@@ -743,7 +851,14 @@ function showGestionSubView(subViewName) {
 }
 
 function showView(viewName) {
+  const vistaAnterior = currentView;
   currentView = viewName;
+  // Auto-sync silencioso solo al ENTRAR a Gestion desde otra vista (no en
+  // cada cambio de sub-pestaña interna, eso lo maneja showGestionSubView) —
+  // nunca mientras se esta en Caja, ver sincronizarCatalogoSilencioso.
+  if (viewName === "gestion" && vistaAnterior !== "gestion") {
+    sincronizarCatalogoSilencioso();
+  }
   if (viewName !== "caja") {
     setLecheSheetOpen(false);
   }
@@ -839,8 +954,9 @@ function addToCart(product, opcionNombre = null) {
 }
 
 function handleProductTap(product) {
-  if (PRODUCTOS_CON_LECHE.has(product.id)) {
-    abrirSelectorOpciones(product, "¿Con qué leche?", OPCIONES_LECHE);
+  const grupoVariante = gruposVariantesActual.find((g) => g.productoIds.includes(product.id));
+  if (grupoVariante) {
+    abrirSelectorOpciones(product, grupoVariante.titulo, grupoVariante.opciones.map((o) => o.nombre));
     return;
   }
   if (PRODUCTOS_CON_BEBIDA_A_ELEGIR.has(product.id)) {
@@ -1631,7 +1747,7 @@ function setMenuEditSheetOpen(isOpen) {
 }
 
 function renderMenuRecetaEditorView() {
-  renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles);
+  renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles, menuGruposVarianteDisponibles);
 }
 
 // Los inputs numericos son type="number", pero en la tablet a veces dejan
@@ -1651,6 +1767,12 @@ function updateMenuTipoVisibility() {
   dom.menuEditTipoWrap.hidden = dom.menuEditCategoria.value !== "sandwiches";
 }
 
+function populateMenuVarianteSelect(selectedGrupoId) {
+  dom.menuEditVariante.innerHTML =
+    `<option value="">— Ninguna —</option>` +
+    menuGruposVarianteDisponibles.map((g) => `<option value="${g.id}" ${g.id === selectedGrupoId ? "selected" : ""}>${g.nombre}</option>`).join("");
+}
+
 async function openMenuProductoAdd(categoriaId) {
   selectedMenuProductoId = "";
   menuProductoMode = "add";
@@ -1663,10 +1785,12 @@ async function openMenuProductoAdd(categoriaId) {
   dom.menuEditActivo.checked = true;
   menuRecetaLineas = [];
   menuInsumosDisponibles = await listInsumos();
+  menuGruposVarianteDisponibles = await getGruposVariantes();
   const categorias = await listCategories();
   dom.menuEditCategoria.innerHTML = categorias
     .map((c) => `<option value="${c.id}" ${c.id === categoriaId ? "selected" : ""}>${c.nombre}</option>`)
     .join("");
+  populateMenuVarianteSelect("");
   updateMenuTipoVisibility();
   renderMenuRecetaEditorView();
   setMenuEditSheetOpen(true);
@@ -1684,14 +1808,22 @@ async function openMenuProductoEdit(producto) {
   dom.menuEditSandwichTipo.value = producto.sandwichTipo === "premium" ? "premium" : "basico";
   dom.menuEditActivo.checked = !!producto.activo;
   menuInsumosDisponibles = await listInsumos();
-  const [categorias, recetas] = await Promise.all([listCategories(), getAll("recetas")]);
+  const [categorias, recetas, grupos, grupoActual] = await Promise.all([listCategories(), getAll("recetas"), getGruposVariantes(), getGrupoDeProducto(producto.id)]);
+  menuGruposVarianteDisponibles = grupos;
   dom.menuEditCategoria.innerHTML = categorias
     .map((c) => `<option value="${c.id}" ${c.id === producto.categoriaId ? "selected" : ""}>${c.nombre}</option>`)
     .join("");
+  populateMenuVarianteSelect(grupoActual?.id || "");
   updateMenuTipoVisibility();
   menuRecetaLineas = recetas
     .filter((r) => r.productoId === producto.id)
-    .map((r) => ({ insumoId: r.insumoId, cantidad: String(r.cantidadPorUnidad), nuevoNombre: "", nuevaUnidad: "" }));
+    .map((r) => ({
+      insumoId: r.insumoId,
+      cantidad: String(r.cantidadPorUnidad),
+      nuevoNombre: "",
+      nuevaUnidad: "",
+      variantesCantidad: r.variantesCantidad ? { ...r.variantesCantidad } : {},
+    }));
   renderMenuRecetaEditorView();
   setMenuEditSheetOpen(true);
   dom.menuEditNombre.focus();
@@ -1730,6 +1862,77 @@ async function renderMenuView() {
     onToggleActivo: handleToggleProductoActivo,
     onMover: handleMoverProducto
   });
+}
+
+function renderVariantesOpcionesRowsView() {
+  renderVariantesOpcionesRows(dom.varianteGrupoOpcionesRows, variantesOpcionesLineas, variantesInsumosDisponibles);
+}
+
+async function renderVariantesView() {
+  const grupos = await getGruposVariantes();
+  renderVariantesGruposList(dom.variantesGruposList, grupos, {
+    onEdit: openVarianteGrupoEdit,
+    onDelete: handleDeleteGrupoVariante
+  });
+}
+
+function setVarianteGrupoSheetOpen(isOpen) {
+  dom.varianteGrupoSheet.classList.toggle("open", isOpen);
+  dom.varianteGrupoSheet.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  dom.varianteGrupoBackdrop.hidden = !isOpen;
+  dom.varianteGrupoBackdrop.classList.toggle("open", isOpen);
+}
+
+async function openVarianteGrupoAdd() {
+  grupoVarianteMode = "add";
+  selectedGrupoVarianteId = "";
+  dom.varianteGrupoTitle.textContent = "Agregar grupo de variante";
+  dom.varianteGrupoNombre.value = "";
+  dom.varianteGrupoTitulo.value = "";
+  variantesOpcionesLineas = [];
+  variantesInsumosDisponibles = await listInsumos();
+  variantesProductosDisponibles = await listProducts();
+  renderVariantesOpcionesRowsView();
+  renderVariantesProductosChecklist(dom.varianteGrupoProductosChecklist, [], variantesProductosDisponibles);
+  setVarianteGrupoSheetOpen(true);
+  dom.varianteGrupoNombre.focus();
+}
+
+async function openVarianteGrupoEdit(grupo) {
+  grupoVarianteMode = "edit";
+  selectedGrupoVarianteId = grupo.id;
+  dom.varianteGrupoTitle.textContent = "Editar grupo de variante";
+  dom.varianteGrupoNombre.value = grupo.nombre;
+  dom.varianteGrupoTitulo.value = grupo.titulo;
+  variantesOpcionesLineas = grupo.opciones.map((o) => ({ nombre: o.nombre, insumoId: o.insumoId }));
+  variantesInsumosDisponibles = await listInsumos();
+  variantesProductosDisponibles = await listProducts();
+  renderVariantesOpcionesRowsView();
+  renderVariantesProductosChecklist(dom.varianteGrupoProductosChecklist, grupo.productoIds, variantesProductosDisponibles);
+  setVarianteGrupoSheetOpen(true);
+  dom.varianteGrupoNombre.focus();
+}
+
+function closeVarianteGrupoSheet() {
+  setVarianteGrupoSheetOpen(false);
+  selectedGrupoVarianteId = "";
+}
+
+async function handleDeleteGrupoVariante(grupo) {
+  const confirmado = await confirmDialog({
+    title: "Eliminar grupo de variante",
+    message: `¿Eliminar "${grupo.nombre}"? Los productos asignados dejan de preguntar esta opción en caja.`,
+    acceptText: "Eliminar"
+  });
+  if (!confirmado) return;
+  try {
+    await deleteGrupoVariante(grupo.id);
+    await refreshGruposVariantes();
+    setFlash("Grupo eliminado.", "success");
+    await renderVariantesView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo eliminar.", "error");
+  }
 }
 
 async function refreshView(viewName = currentView) {
@@ -2365,6 +2568,31 @@ function bindEvents() {
   dom.abrirFactura.addEventListener("click", () => { openFacturaSheet().catch(() => {}); });
   dom.closeFactura.addEventListener("click", closeFacturaSheet);
   dom.facturaBackdrop.addEventListener("click", closeFacturaSheet);
+
+  dom.abrirCrearInsumo.addEventListener("click", openCrearInsumoSheet);
+  dom.closeCrearInsumo.addEventListener("click", closeCrearInsumoSheet);
+  dom.crearInsumoBackdrop.addEventListener("click", closeCrearInsumoSheet);
+
+  dom.crearInsumoForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (crearInsumoInProgress) return;
+    try {
+      crearInsumoInProgress = true;
+      await createInsumo({
+        nombre: dom.crearInsumoNombre.value,
+        unidad: dom.crearInsumoUnidad.value,
+        stockMinimo: dom.crearInsumoMin.value,
+        stockCritico: dom.crearInsumoCrit.value
+      });
+      setFlash("Insumo creado.", "success");
+      closeCrearInsumoSheet();
+      await renderInsumosView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo crear el insumo.", "error");
+    } finally {
+      crearInsumoInProgress = false;
+    }
+  });
   dom.facturaProveedor.addEventListener("change", handleFacturaProveedorChange);
   dom.facturaProveedorNombre.addEventListener("input", actualizarFacturaContinuarDisabled);
   dom.facturaSacarFoto.addEventListener("click", () => dom.facturaInputFoto.click());
@@ -2515,6 +2743,15 @@ function bindEvents() {
     if (e.target.classList.contains("menu-receta-nuevo-unidad")) menuRecetaLineas[idx].nuevaUnidad = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-min")) menuRecetaLineas[idx].nuevoStockMinimo = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-critico")) menuRecetaLineas[idx].nuevoStockCritico = e.target.value;
+    if (e.target.classList.contains("menu-receta-variante-cantidad")) {
+      const opcion = e.target.dataset.opcion;
+      if (!menuRecetaLineas[idx].variantesCantidad) menuRecetaLineas[idx].variantesCantidad = {};
+      if (e.target.value === "") {
+        delete menuRecetaLineas[idx].variantesCantidad[opcion];
+      } else {
+        menuRecetaLineas[idx].variantesCantidad[opcion] = e.target.value;
+      }
+    }
   });
 
   dom.menuRecetaRows.addEventListener("change", (e) => {
@@ -2533,6 +2770,69 @@ function bindEvents() {
     renderMenuRecetaEditorView();
   });
 
+  dom.varianteAddGrupo.addEventListener("click", () => { openVarianteGrupoAdd().catch(() => {}); });
+  dom.closeVarianteGrupo.addEventListener("click", closeVarianteGrupoSheet);
+  dom.varianteGrupoBackdrop.addEventListener("click", closeVarianteGrupoSheet);
+
+  dom.varianteGrupoAddOpcion.addEventListener("click", () => {
+    variantesOpcionesLineas.push({ nombre: "", insumoId: "", nuevoInsumo: {} });
+    renderVariantesOpcionesRowsView();
+  });
+
+  dom.varianteGrupoOpcionesRows.addEventListener("input", (e) => {
+    const idx = Number(e.target.dataset.idx);
+    const linea = variantesOpcionesLineas[idx];
+    if (Number.isNaN(idx) || !linea) return;
+    if (e.target.classList.contains("variante-opcion-nombre")) linea.nombre = e.target.value;
+    if (e.target.classList.contains("variante-nuevo-nombre")) linea.nuevoInsumo = { ...linea.nuevoInsumo, nombre: e.target.value };
+    if (e.target.classList.contains("variante-nuevo-unidad")) linea.nuevoInsumo = { ...linea.nuevoInsumo, unidad: e.target.value };
+    if (e.target.classList.contains("variante-nuevo-min")) linea.nuevoInsumo = { ...linea.nuevoInsumo, stockMinimo: e.target.value };
+    if (e.target.classList.contains("variante-nuevo-crit")) linea.nuevoInsumo = { ...linea.nuevoInsumo, stockCritico: e.target.value };
+  });
+
+  dom.varianteGrupoOpcionesRows.addEventListener("change", (e) => {
+    const idx = Number(e.target.dataset.idx);
+    const linea = variantesOpcionesLineas[idx];
+    if (Number.isNaN(idx) || !linea) return;
+    if (e.target.classList.contains("variante-opcion-insumo")) {
+      linea.insumoId = e.target.value;
+      renderVariantesOpcionesRowsView();
+    }
+  });
+
+  dom.varianteGrupoOpcionesRows.addEventListener("click", (e) => {
+    const btn = e.target.closest('[data-action="quitar-variante"]');
+    if (!btn) return;
+    variantesOpcionesLineas.splice(Number(btn.dataset.idx), 1);
+    renderVariantesOpcionesRowsView();
+  });
+
+  dom.varianteGrupoForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (variantesFormInProgress) return;
+    try {
+      variantesFormInProgress = true;
+      const opciones = variantesOpcionesLineas.filter((l) => l.nombre?.trim() && (l.insumoId === "__nuevo__" ? l.nuevoInsumo?.nombre?.trim() : l.insumoId));
+      const productoIds = Array.from(dom.varianteGrupoProductosChecklist.querySelectorAll(".variante-producto-check:checked")).map((el) => el.value);
+      await saveGrupoVariante({
+        id: grupoVarianteMode === "edit" ? selectedGrupoVarianteId : undefined,
+        nombre: dom.varianteGrupoNombre.value,
+        titulo: dom.varianteGrupoTitulo.value,
+        opciones,
+        productoIds
+      });
+      await refreshGruposVariantes();
+      setFlash(grupoVarianteMode === "edit" ? "Grupo actualizado." : "Grupo agregado.", "success");
+      closeVarianteGrupoSheet();
+      await renderVariantesView();
+      await renderInsumosView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo guardar.", "error");
+    } finally {
+      variantesFormInProgress = false;
+    }
+  });
+
   dom.menuEditForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (menuEditInProgress) return;
@@ -2547,7 +2847,7 @@ function bindEvents() {
       const lineasReceta = menuRecetaLineas
         .filter((l) => (l.insumoId === "__nuevo__" ? l.nuevoNombre?.trim() : l.insumoId) && parseDecimal(l.cantidad) > 0)
         .map((l) => ({ ...l, cantidad: parseDecimal(l.cantidad) }));
-      await saveProducto({
+      const productoGuardado = await saveProducto({
         id: menuProductoMode === "edit" ? selectedMenuProductoId : undefined,
         categoriaId,
         nombre,
@@ -2558,6 +2858,8 @@ function bindEvents() {
         activo: dom.menuEditActivo.checked,
         lineasReceta
       });
+      await setProductoGrupoVariante(productoGuardado.id, dom.menuEditVariante.value || null);
+      await refreshGruposVariantes();
       setFlash(menuProductoMode === "edit" ? "Producto actualizado." : "Producto agregado.", "success");
       closeMenuEdit();
       await renderMenuView();
@@ -2574,15 +2876,13 @@ function bindEvents() {
       refrescarCatalogoInProgress = true;
       dom.refrescarCatalogo.disabled = true;
       dom.refrescarCatalogo.textContent = "Actualizando...";
-      const [catalogo, insumosCount, proveedoresResult] = await Promise.all([
-        pullCatalogoDesdeNube(),
-        pullInsumosDesdeNube(),
-        pullProveedoresDesdeNube()
-      ]);
-      await loadProducts();
+      const resultado = await pullCatalogoCompleto();
       await refreshGestionSubView(currentGestionSubView);
       setFlash(
-        `Catalogo actualizado: ${catalogo.productos} productos, ${insumosCount} insumos, ${proveedoresResult.proveedores} proveedores.`,
+        `Catalogo actualizado: ${resultado.catalogo.productos} productos, ${resultado.insumosCount} insumos, ${resultado.proveedoresResult.proveedores} proveedores` +
+        (resultado.stockResult.insumosActualizados > 0 ? `, stock actualizado en ${resultado.stockResult.insumosActualizados} insumo${resultado.stockResult.insumosActualizados === 1 ? "" : "s"}` : "") +
+        (resultado.variantesResult.aplicado ? `, ${resultado.variantesResult.grupos} grupo${resultado.variantesResult.grupos === 1 ? "" : "s"} de variante` : "") +
+        ".",
         "success"
       );
     } catch (error) {
@@ -2679,6 +2979,7 @@ async function bootApp() {
   await seedInsumos();
   await seedProveedores();
   await initModoConsultaDefault();
+  await refreshGruposVariantes();
   setupAutoSync();
   setupSyncBadge();
   // Subir insumos, recetas, proveedores y proveedor_insumos a Supabase al
@@ -2701,6 +3002,12 @@ async function bootApp() {
   // Solo el dispositivo que opera de verdad empuja produccion al arrancar —
   // un celular en modo consulta no tiene nada propio que empujar.
   if (!isModoConsulta()) syncProduccionDiaria();
+  // Auto-sync silencioso al abrir la app (ver sincronizarCatalogoSilencioso).
+  // Sin await a proposito: no puede demorar el primer render (offline-first).
+  // El carrito de Caja siempre arranca vacio en este momento, asi que no
+  // existe el riesgo de precio-visto-vs-precio-cobrado que si aplicaria si
+  // esto corriera con una venta ya empezada.
+  if (!isModoConsulta()) sincronizarCatalogoSilencioso();
   dom.historyDate.value = todayISO();
   bindEvents();
   const initialView = window.location.hash.replace("#", "") || "caja";

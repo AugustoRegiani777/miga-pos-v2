@@ -300,6 +300,15 @@ export async function fetchProveedorInsumosCatalogo() {
   return sbFetch("/proveedor_insumos?select=*");
 }
 
+// Para fusionar stock de insumos entre dispositivos por DELTAS (ver
+// sincronizarStockInsumosDesdeMovimientos en aprovisionamiento.js) en vez de
+// por snapshot — `desde` es opcional, filtra a movimientos mas nuevos que el
+// cursor guardado localmente (evita traer el historial completo en cada pull).
+export async function fetchMovimientosInsumosCatalogo(desde) {
+  const filtro = desde ? `&creado_en=gt.${encodeURIComponent(desde)}` : "";
+  return sbFetch(`/movimientos_insumos?select=*${filtro}`);
+}
+
 export async function pushCatalogoSnapshot(categorias, productos) {
   await upsert("categorias", categorias.map(c => ({
     id: c.id,
@@ -343,8 +352,31 @@ export async function pushRecetasSnapshot(recetas) {
     insumo_id: r.insumoId,
     cantidad_por_unidad: r.cantidadPorUnidad,
     es_estimado: r.esEstimado || false,
+    variantes_cantidad: r.variantesCantidad && Object.keys(r.variantesCantidad).length ? r.variantesCantidad : null,
     actualizado_en: r.actualizadoEn || new Date().toISOString()
   })));
+}
+
+// Grupos de variante (Gestion > Variantes, ej. "Tipo de leche") — a
+// diferencia de insumos/productos, esto vive en la tabla generica
+// configuracion_compartida (una sola fila, id fijo) en vez de tener su
+// propia tabla: es un blob de config editado rara vez (alta de un grupo,
+// asignar un producto), no una lista de entidades con su propio ciclo de
+// vida. Sync tipo "ultimo que escribe gana" — igual que productos/recetas,
+// no hace falta merge por delta porque no es una cantidad que se acumula.
+const VARIANTES_GRUPOS_CONFIG_ID = "variantes_grupos";
+
+export async function pushVariantesGrupos(grupos) {
+  return upsert("configuracion_compartida", [{
+    id: VARIANTES_GRUPOS_CONFIG_ID,
+    valor: grupos,
+    actualizado_en: new Date().toISOString()
+  }]);
+}
+
+export async function fetchVariantesGrupos() {
+  const filas = await sbFetch(`/configuracion_compartida?id=eq.${VARIANTES_GRUPOS_CONFIG_ID}&select=*`);
+  return filas?.[0] || null;
 }
 
 export async function pushProveedoresSnapshot(proveedores) {

@@ -3,6 +3,7 @@ import { PROVEEDORES_SEED_VERSION, initialProveedores, initialProveedorInsumos }
 import { fetchProveedoresCatalogo, fetchProveedorInsumosCatalogo } from "../db/supabase.js";
 import { slugify } from "../utils/format.js";
 import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
+import { construirInsumoNuevo } from "./aprovisionamiento.js";
 
 export async function createProveedor({ nombre, tel, email, notas, diasCiclo }) {
   const nombreLimpio = String(nombre || "").trim();
@@ -124,31 +125,14 @@ export async function saveProveedorInsumo(data) {
   let insumoNuevoCreado = null;
 
   if (esInsumoNuevo) {
-    const nombreInsumo = String(data.nuevoInsumo?.nombre || "").trim();
-    if (!nombreInsumo) throw new Error("El nombre del insumo nuevo es obligatorio.");
     const insumosActuales = await getAll("insumos");
     const idsUsados = new Set(insumosActuales.map((i) => i.id));
-    let insumoId = slugify(nombreInsumo);
-    let sufijo = 2;
-    while (idsUsados.has(insumoId)) {
-      insumoId = `${slugify(nombreInsumo)}-${sufijo}`;
-      sufijo += 1;
-    }
-    insumoIdFinal = insumoId;
-    const unidad = data.nuevoInsumo.unidad?.trim() || "unidad";
-    insumoNuevoCreado = {
-      id: insumoId,
-      nombre: nombreInsumo,
-      unidad,
-      unidadCompra: unidad,
-      factorConversion: 1,
-      stockActual: 0,
-      stockMinimo: parseFloat(String(data.nuevoInsumo.stockMinimo ?? "").replace(",", ".")) || 0,
-      stockCritico: parseFloat(String(data.nuevoInsumo.stockCritico ?? "").replace(",", ".")) || 0,
-      activo: true,
-      creadoEn: now,
-      actualizadoEn: now
-    };
+    insumoNuevoCreado = construirInsumoNuevo(data.nuevoInsumo?.nombre, idsUsados, {
+      unidad: data.nuevoInsumo?.unidad,
+      stockMinimo: data.nuevoInsumo?.stockMinimo,
+      stockCritico: data.nuevoInsumo?.stockCritico
+    });
+    insumoIdFinal = insumoNuevoCreado.id;
   }
 
   const id = data.id ?? (insumoNuevoCreado ? `${data.proveedorId}:${insumoIdFinal}` : `${data.proveedorId}:custom-${Date.now()}`);

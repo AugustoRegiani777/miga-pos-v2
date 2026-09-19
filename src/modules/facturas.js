@@ -1,6 +1,7 @@
 import { getAll, withStores } from "../db/idb.js";
-import { todayISO, slugify } from "../utils/format.js";
+import { todayISO } from "../utils/format.js";
 import { trySyncInsumosSnapshot, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncProveedoresSnapshot } from "./sync.js";
+import { construirInsumoNuevo } from "./aprovisionamiento.js";
 
 // Convierte un archivo (foto o adjunto) a data URL base64, formato que
 // espera la funcion serverless.
@@ -54,31 +55,12 @@ export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = nul
   const operaciones = lineas.map((linea) => {
     const cantidad = Number(linea.cantidad) || 0;
     if (linea.esNuevo) {
-      let insumoId = slugify(linea.nuevoNombre || linea.nombreDetectado);
-      let sufijo = 2;
-      while (idsUsados.has(insumoId)) {
-        insumoId = `${slugify(linea.nuevoNombre || linea.nombreDetectado)}-${sufijo}`;
-        sufijo += 1;
-      }
-      idsUsados.add(insumoId);
-      const unidad = linea.nuevaUnidad || linea.unidad || "unidad";
-      return {
-        linea,
-        cantidad,
-        insumo: {
-          id: insumoId,
-          nombre: linea.nuevoNombre || linea.nombreDetectado,
-          unidad,
-          unidadCompra: unidad,
-          factorConversion: 1,
-          stockActual: 0,
-          stockMinimo: Number(linea.nuevoStockMinimo) || 0,
-          stockCritico: Number(linea.nuevoStockCritico) || 0,
-          activo: true,
-          creadoEn: now,
-          actualizadoEn: now
-        }
-      };
+      const insumo = construirInsumoNuevo(linea.nuevoNombre || linea.nombreDetectado, idsUsados, {
+        unidad: linea.nuevaUnidad || linea.unidad,
+        stockMinimo: linea.nuevoStockMinimo,
+        stockCritico: linea.nuevoStockCritico
+      });
+      return { linea, cantidad, insumo };
     }
     return { linea, cantidad, insumo: insumosById.get(linea.insumoId) };
   }).filter((op) => op.insumo);

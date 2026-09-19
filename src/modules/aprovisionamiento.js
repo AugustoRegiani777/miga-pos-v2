@@ -1,8 +1,64 @@
-import { getAll, withStores, requestToPromise } from "../db/idb.js";
-import { todayISO } from "../utils/format.js";
+import { getAll, getOne, withStores, requestToPromise } from "../db/idb.js";
+import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
-import { fetchInsumosCatalogo } from "../db/supabase.js";
+import { fetchInsumosCatalogo, fetchMovimientosInsumosCatalogo } from "../db/supabase.js";
+
+// Punto unico para "armar un insumo nuevo" — antes esta misma logica estaba
+// copiada en menu.js, proveedores.js y facturas.js, cada una con su propia
+// resolucion de id. idsUsados se pasa por referencia y esta funcion lo va
+// completando: si se crean varios insumos nuevos en el mismo lote (ej. dos
+// lineas de receta nuevas en un mismo producto), el segundo no puede
+// colisionar con el id que acaba de resolver el primero.
+export function construirInsumoNuevo(nombre, idsUsados, { unidad, stockMinimo, stockCritico } = {}) {
+  const nombreLimpio = String(nombre || "").trim();
+  if (!nombreLimpio) throw new Error("El nombre del insumo nuevo es obligatorio.");
+
+  let id = slugify(nombreLimpio);
+  let sufijo = 2;
+  while (idsUsados.has(id)) {
+    id = `${slugify(nombreLimpio)}-${sufijo}`;
+    sufijo += 1;
+  }
+  idsUsados.add(id);
+
+  const now = new Date().toISOString();
+  const unidadFinal = String(unidad || "").trim() || "unidad";
+  return {
+    id,
+    nombre: nombreLimpio,
+    unidad: unidadFinal,
+    unidadCompra: unidadFinal,
+    factorConversion: 1,
+    stockActual: 0,
+    stockMinimo: parseFloat(String(stockMinimo ?? "").replace(",", ".")) || 0,
+    stockCritico: parseFloat(String(stockCritico ?? "").replace(",", ".")) || 0,
+    activo: true,
+    creadoEn: now,
+    actualizadoEn: now
+  };
+}
+
+// Crear un insumo suelto, sin producto ni proveedor asociado (boton
+// "+ Crear insumo" en Gestion > Insumos). Los otros tres lugares que crean
+// insumos (Menu, Proveedores, Cargar por factura) usan construirInsumoNuevo
+// directo porque necesitan escribirlo en la MISMA transaccion que su
+// producto/receta/proveedor_insumo — esta funcion es para cuando no hay
+// nada mas que crear junto con el.
+export async function createInsumo({ nombre, unidad, stockMinimo, stockCritico }) {
+  const insumosActuales = await getAll("insumos");
+  const idsUsados = new Set(insumosActuales.map((i) => i.id));
+  const insumo = construirInsumoNuevo(nombre, idsUsados, { unidad, stockMinimo, stockCritico });
+
+  await withStores(["insumos"], "readwrite", (stores) => {
+    stores.insumos.put(insumo);
+  });
+
+  const insumosFinal = await getAll("insumos");
+  trySyncInsumosSnapshot(insumosFinal).catch(() => {});
+
+  return insumo;
+}
 
 // Trae insumos desde Supabase y los fusiona con lo local (ver "Actualizar
 // catalogo" en Gestion) — para que un insumo nuevo creado desde otro
@@ -32,6 +88,85 @@ export async function pullInsumosDesdeNube() {
   });
 
   return remotos.length;
+}
+
+const CURSOR_MOVIMIENTOS_INSUMOS = "cursor_movimientos_insumos_nube";
+
+// Fusiona el stock de insumos entre dispositivos por DELTAS, no por snapshot.
+//
+// stockActual de un insumo es un numero DERIVADO: parte de un valor base y se
+// mueve solo a traves de movimientos_insumos (venta, produccion, compra por
+// factura, devolucion, calibracion — ver deductInsumosInTx, restoreInsumosInTx,
+// confirmarFactura, calibrarInsumo). Por eso pullInsumosDesdeNube nunca toca
+// este campo: si trajera un numero final de la nube, pisaria sin darse cuenta
+// la actividad que este mismo dispositivo todavia no llego a empujar.
+//
+// La forma segura de fusionar un valor derivado entre dos dispositivos que
+// pueden estar offline en cualquier momento es aplicar los EVENTOS que faltan,
+// no reemplazar el resultado — la suma de deltas da lo mismo sin importar en
+// que orden lleguen los movimientos de cada dispositivo. Ejemplo real: el celu
+// escanea una factura y suma 9000ml de leche de avena; mientras tanto la
+// tablet vendio 3 lattes y resto 3x210ml. Cualquiera de los dos que haga
+// "Actualizar catalogo" primero, termina en el mismo numero.
+//
+// Idempotente por uuid (igual que el resto del sync, ver CLAUDE.md 8.7): un
+// movimiento ya aplicado localmente — sea porque se creo en ESTE dispositivo,
+// sea porque ya se trajo en un pull anterior — nunca se vuelve a sumar. El
+// cursor por fecha en "configuracion" es pura optimizacion (no traer TODO el
+// historial en cada pull); si algo saliera mal con el cursor, el filtro por
+// uuid sigue garantizando que nunca se aplique un movimiento dos veces.
+export async function sincronizarStockInsumosDesdeMovimientos() {
+  const cursor = await getOne("configuracion", CURSOR_MOVIMIENTOS_INSUMOS);
+  const desde = cursor?.valor || null;
+
+  const [remotos, locales, insumosActuales] = await Promise.all([
+    fetchMovimientosInsumosCatalogo(desde),
+    getAll("movimientos_insumos"),
+    getAll("insumos")
+  ]);
+
+  const uuidsLocales = new Set(locales.map((m) => m.uuid).filter(Boolean));
+  const nuevos = remotos.filter((r) => r.uuid && !uuidsLocales.has(r.uuid));
+  if (nuevos.length === 0) return { aplicados: 0, insumosActualizados: 0 };
+
+  const deltaPorInsumo = new Map();
+  for (const r of nuevos) {
+    const delta = Number(r.cantidad) || 0;
+    deltaPorInsumo.set(r.insumo_id, (deltaPorInsumo.get(r.insumo_id) || 0) + delta);
+  }
+
+  const insumosById = new Map(insumosActuales.map((i) => [i.id, i]));
+  const now = new Date().toISOString();
+  let maxFecha = desde || "";
+  for (const r of nuevos) {
+    if (r.creado_en && r.creado_en > maxFecha) maxFecha = r.creado_en;
+  }
+
+  await withStores(["insumos", "movimientos_insumos", "configuracion"], "readwrite", (stores) => {
+    for (const [insumoId, delta] of deltaPorInsumo) {
+      const insumo = insumosById.get(insumoId);
+      if (!insumo) continue; // insumo nuevo del otro dispositivo: llega con el proximo pullInsumosDesdeNube
+      const stockNuevo = (insumo.stockActual || 0) + delta;
+      stores.insumos.put({ ...insumo, stockActual: stockNuevo, actualizadoEn: now });
+    }
+    for (const r of nuevos) {
+      stores.movimientos_insumos.add({
+        uuid: r.uuid,
+        insumoId: r.insumo_id,
+        tipo: r.tipo,
+        cantidad: Number(r.cantidad) || 0,
+        stockAnterior: r.stock_anterior,
+        stockNuevo: r.stock_nuevo,
+        productoId: r.producto_id || undefined,
+        ventaId: r.venta_id_local || undefined,
+        fecha: r.fecha,
+        creadoEn: r.creado_en
+      });
+    }
+    stores.configuracion.put({ id: CURSOR_MOVIMIENTOS_INSUMOS, valor: maxFecha, actualizadoEn: now });
+  });
+
+  return { aplicados: nuevos.length, insumosActualizados: deltaPorInsumo.size };
 }
 
 const SEED_VERSION_KEY = "insumos_seed_version";
@@ -684,39 +819,76 @@ export async function deductInsumosForProductionInTx(stores, productId, cantidad
   return { movimientos: movimientosCreados, warnings };
 }
 
-// Bebidas con leche a elegir (ver PRODUCTOS_CON_LECHE en app.js): la receta
-// del producto siempre apunta a "leche-normal", pero si el cliente eligio
-// otra variante en caja hay que descontar/devolver ESA leche puntual, no la
-// de la receta por defecto — sino la leche de avena/sin lactosa nunca baja
-// de stock por mas que el selector diga que se vendio.
-const INSUMO_POR_OPCION_LECHE = {
-  "Entera": "leche-normal",
-  "Avena": "leche-avena",
-  "Sin lactosa": "leche-sin-lactosa"
-};
-const INSUMOS_LECHE = new Set(Object.values(INSUMO_POR_OPCION_LECHE));
-
-function insumoEfectivo(insumoId, opcionNombre) {
-  if (INSUMOS_LECHE.has(insumoId) && opcionNombre && INSUMO_POR_OPCION_LECHE[opcionNombre]) {
-    return INSUMO_POR_OPCION_LECHE[opcionNombre];
+// Productos con una opcion a elegir en caja (ver Gestion > Variantes, grupos
+// como "Tipo de leche"): la receta del producto siempre apunta al insumo por
+// defecto del grupo, pero si el cliente eligio otra opcion en caja hay que
+// descontar/devolver ESE insumo puntual, no el de la receta por defecto —
+// sino la leche de avena/sin lactosa (o lo que sea que se agregue despues)
+// nunca baja de stock por mas que el selector diga que se vendio.
+// Default de emergencia si todavia no se guardo nunca nada en Gestion >
+// Variantes (ej. recien deployado este cambio) — mismo dataset con el que
+// arranco el sistema. La version editable (con soporte para varios grupos)
+// vive en variantes.js; no se importa de aca para evitar un import circular
+// (variantes.js ya importa construirInsumoNuevo desde este archivo).
+const GRUPOS_VARIANTES_DEFAULT = [
+  {
+    id: "leche",
+    opciones: [
+      { nombre: "Entera", insumoId: "leche-normal" },
+      { nombre: "Avena", insumoId: "leche-avena" },
+      { nombre: "Sin lactosa", insumoId: "leche-sin-lactosa" }
+    ]
   }
-  return insumoId;
+];
+
+// Lee TODOS los grupos de variante (Gestion > Variantes) DENTRO de la
+// transaccion activa — por eso stores.configuracion.get en vez de
+// getGruposVariantes() de variantes.js, que abre su propia lectura afuera de
+// cualquier transaccion.
+async function cargarGruposVariantes(stores) {
+  const row = await requestToPromise(stores.configuracion.get("variantes_grupos"));
+  return Array.isArray(row?.valor) && row.valor.length > 0 ? row.valor : GRUPOS_VARIANTES_DEFAULT;
+}
+
+// OJO: la resolucion tiene que hacerse POR GRUPO, nunca con un mapa
+// "opcion -> insumo" combinado entre todos los grupos — si dos grupos
+// distintos (ej. "Tipo de leche" y "Tipo de cafe") tuvieran una opcion con
+// el mismo nombre, un mapa combinado cruzaria mal la sustitucion (la leche
+// terminaria descontando como si fuera cafe). Por eso primero se busca a que
+// grupo pertenece el insumo de la receta, y solo ahi se busca la opcion
+// elegida DENTRO de ese mismo grupo.
+//
+// Ademas de cambiar el insumo, cada opcion puede tener su PROPIA cantidad
+// (ej. la avena rinde distinto que la leche entera) via
+// receta.variantesCantidad[opcionNombre] — ver menu.js/render-menu.js. Si no
+// hay override para esa opcion (o es invalido), se usa la cantidad base de
+// la receta tal cual.
+function resolverLineaEfectiva(receta, opcionNombre, grupos) {
+  if (!opcionNombre) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
+  const grupo = grupos.find((g) => (g.opciones || []).some((o) => o.insumoId === receta.insumoId));
+  if (!grupo) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
+  const opcionElegida = grupo.opciones.find((o) => o.nombre === opcionNombre);
+  if (!opcionElegida) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
+  const override = receta.variantesCantidad?.[opcionNombre];
+  const cantidad = typeof override === "number" && override > 0 ? override : receta.cantidadPorUnidad;
+  return { insumoId: opcionElegida.insumoId, cantidad };
 }
 
 // Compartido entre deductInsumosInTx y restoreInsumosInTx — tienen que
 // resolver la variante de leche exactamente igual, sino deshacer una venta
-// devolveria un insumo distinto del que se desconto al venderla.
-function calcularConsumoInsumos(todasLasRecetas, saleItems) {
+// devolveria un insumo distinto (o una cantidad distinta) de lo que se
+// desconto al venderla.
+function calcularConsumoInsumos(todasLasRecetas, saleItems, grupos) {
   const consumo = new Map();
   for (const item of saleItems) {
     const recetasDelProducto = todasLasRecetas.filter(r => r.productoId === item.productId);
     for (const receta of recetasDelProducto) {
-      const insumoId = insumoEfectivo(receta.insumoId, item.opcionNombre);
+      const { insumoId, cantidad } = resolverLineaEfectiva(receta, item.opcionNombre, grupos);
       if (!consumo.has(insumoId)) {
         consumo.set(insumoId, { total: 0, ventasPorProducto: {} });
       }
       const c = consumo.get(insumoId);
-      c.total += receta.cantidadPorUnidad * item.quantity;
+      c.total += cantidad * item.quantity;
       c.ventasPorProducto[item.productId] = (c.ventasPorProducto[item.productId] || 0) + item.quantity;
     }
   }
@@ -728,7 +900,8 @@ function calcularConsumoInsumos(todasLasRecetas, saleItems) {
 export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) {
   const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
   if (todasLasRecetas.length === 0) return [];
-  const consumo = calcularConsumoInsumos(todasLasRecetas, saleItems);
+  const grupos = await cargarGruposVariantes(stores);
+  const consumo = calcularConsumoInsumos(todasLasRecetas, saleItems, grupos);
 
   const movimientosCreados = [];
   for (const [insumoId, { total, ventasPorProducto }] of consumo) {
@@ -764,7 +937,8 @@ export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) 
 export async function restoreInsumosInTx(stores, saleItems, ventaId, fecha, now) {
   const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
   if (todasLasRecetas.length === 0) return [];
-  const consumo = calcularConsumoInsumos(todasLasRecetas, saleItems);
+  const grupos = await cargarGruposVariantes(stores);
+  const consumo = calcularConsumoInsumos(todasLasRecetas, saleItems, grupos);
 
   const movimientosCreados = [];
   for (const [insumoId, { total }] of consumo) {

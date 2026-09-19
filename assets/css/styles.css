@@ -2377,6 +2377,35 @@ details[open] > .prov-summary::before {
   font: inherit;
 }
 
+.menu-receta-variante-cantidades {
+  border-top: 1px dashed var(--line);
+  margin-top: 0.5rem;
+  padding-top: 0.35rem;
+}
+
+.menu-receta-variante-opcion-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.menu-receta-variante-opcion-row span:first-child {
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+.menu-receta-variante-opcion-row input {
+  width: 6rem;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+}
+
 /* ── Lista de compras smart ──────────────────────────── */
 
 .ldc-tabs {

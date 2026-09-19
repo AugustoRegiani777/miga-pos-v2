@@ -394,6 +394,7 @@
         <button class="nav-link sub-nav-link" type="button" data-subview="recetas">Recetas</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="proveedores">Proveedores</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="menu">Menu</button>
+        <button class="nav-link sub-nav-link" type="button" data-subview="variantes">Variantes</button>
       </nav>
 
       <section class="subview active" id="subview-insumos" aria-labelledby="insumos-title">
@@ -538,6 +539,39 @@
       <section class="stock-toolbar">
         <button class="ghost-button compact" type="button" id="ver-lista-compras">Lista de compras</button>
         <button class="ghost-button compact" type="button" id="abrir-factura">Cargar por factura</button>
+        <button class="ghost-button compact" type="button" id="abrir-crear-insumo">+ Crear insumo</button>
+      </section>
+
+      <!-- Sheet: crear insumo suelto (sin producto ni proveedor asociado) -->
+      <section class="production-sheet-backdrop" id="crear-insumo-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="crear-insumo-sheet" aria-hidden="true">
+        <form id="crear-insumo-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div><h2>Crear insumo</h2></div>
+            <button type="button" class="ghost-button compact" id="close-crear-insumo">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <label class="quantity-field">
+              <span>Nombre</span>
+              <input id="crear-insumo-nombre" type="text" required>
+            </label>
+            <label class="quantity-field">
+              <span>Unidad base (g, ml, unidad...)</span>
+              <input id="crear-insumo-unidad" type="text">
+            </label>
+            <label class="quantity-field">
+              <span>Stock minimo</span>
+              <input id="crear-insumo-min" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+            </label>
+            <label class="quantity-field">
+              <span>Stock critico</span>
+              <input id="crear-insumo-crit" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+            </label>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar</button>
+          </div>
+        </form>
       </section>
 
       <section id="lista-compras-section" hidden>
@@ -752,6 +786,12 @@
                 <input id="menu-edit-activo" type="checkbox" checked>
                 <span>Mostrar en caja</span>
               </label>
+              <label class="quantity-field">
+                <span>Variante <span class="cal-muted">(opcional — pregunta que se hace en caja antes de sumarlo al carrito)</span></span>
+                <select id="menu-edit-variante">
+                  <option value="">— Ninguna —</option>
+                </select>
+              </label>
 
               <div class="section-heading" style="margin-top: 1rem;">
                 <h2 style="font-size: 1rem;">Receta</h2>
@@ -767,6 +807,53 @@
         </section>
 
         <div id="menu-list"></div>
+      </section>
+
+      <section class="subview" id="subview-variantes" aria-labelledby="variantes-title">
+        <section class="section-heading">
+          <h1 id="variantes-title">Variantes</h1>
+          <p>Grupos de opciones a elegir en caja (ej: tipo de leche) — que insumo descuenta cada opcion y en que productos aparece.</p>
+          <button type="button" class="ghost-button compact" id="variante-add-grupo">+ Agregar grupo de variante</button>
+        </section>
+
+        <!-- Sheet: agregar / editar grupo de variante -->
+        <section class="production-sheet-backdrop" id="variante-grupo-backdrop" hidden></section>
+        <section class="form-section stock-adjust-sheet" id="variante-grupo-sheet" aria-hidden="true">
+          <form id="variante-grupo-form" class="stock-form" novalidate>
+            <div class="production-sheet-header">
+              <div><h2 id="variante-grupo-title">Agregar grupo de variante</h2></div>
+              <button type="button" class="ghost-button compact" id="close-variante-grupo">Cerrar</button>
+            </div>
+            <div class="sheet-scroll-body">
+              <label class="quantity-field">
+                <span>Nombre del grupo (ej: Tipo de leche)</span>
+                <input id="variante-grupo-nombre" type="text" required>
+              </label>
+              <label class="quantity-field">
+                <span>Pregunta que se muestra en caja</span>
+                <input id="variante-grupo-titulo" type="text" placeholder="¿Con qué leche?">
+              </label>
+
+              <div class="section-heading" style="margin-top: 0.5rem;">
+                <h2 style="font-size: 0.95rem;">Opciones</h2>
+                <p class="cal-muted">Se muestran en caja en este mismo orden.</p>
+              </div>
+              <div id="variante-grupo-opciones-rows"></div>
+              <button type="button" class="ghost-button compact" id="variante-grupo-add-opcion">+ Agregar opción</button>
+
+              <div class="section-heading" style="margin-top: 1rem;">
+                <h2 style="font-size: 0.95rem;">Productos con este selector</h2>
+                <p class="cal-muted">Tambien se puede asignar un producto a un grupo desde Menu al crearlo/editarlo.</p>
+              </div>
+              <div id="variante-grupo-productos-checklist"></div>
+            </div>
+            <div class="sheet-footer">
+              <button class="primary-button" type="submit">Guardar</button>
+            </div>
+          </form>
+        </section>
+
+        <div id="variantes-grupos-list"></div>
       </section>
     </section>
   </main>

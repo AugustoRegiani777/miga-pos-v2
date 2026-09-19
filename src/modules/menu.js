@@ -2,13 +2,16 @@ import { getAll, getOne, putOne, withStores } from "../db/idb.js";
 import { slugify } from "../utils/format.js";
 import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot } from "./sync.js";
 import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo } from "../db/supabase.js";
+import { construirInsumoNuevo } from "./aprovisionamiento.js";
+import { getInsumoAGrupoVariante } from "./variantes.js";
 
 export async function getMenuDashboardData() {
-  const [categorias, productos, recetas, insumos] = await Promise.all([
+  const [categorias, productos, recetas, insumos, insumoAGrupo] = await Promise.all([
     getAll("categorias"),
     getAll("productos"),
     getAll("recetas"),
-    getAll("insumos")
+    getAll("insumos"),
+    getInsumoAGrupoVariante()
   ]);
   const insumosById = new Map(insumos.map(i => [i.id, i]));
   const recetasPorProducto = new Map();
@@ -24,8 +27,15 @@ export async function getMenuDashboardData() {
         .filter(p => p.categoriaId === categoria.id)
         .sort((a, b) => a.orden - b.orden)
         .map(producto => {
+          // Para insumos que son parte de un grupo de variante (ej. leche),
+          // mostrar el nombre del GRUPO ("Tipo de leche") en vez del insumo
+          // puntual (ej. "Leche entera") — la receta siempre apunta a ese por
+          // defecto, pero en caja se puede vender con otra variante sin que
+          // la receta en si cambie nunca. Mostrar el nombre puntual da a
+          // entender que ese producto SOLO usa esa opcion, cosa que no es
+          // cierta.
           const recetaResumen = (recetasPorProducto.get(producto.id) || [])
-            .map(r => insumosById.get(r.insumoId)?.nombre)
+            .map(r => insumoAGrupo.get(r.insumoId) ?? insumosById.get(r.insumoId)?.nombre)
             .filter(Boolean);
           return { ...producto, recetaResumen };
         });
@@ -82,33 +92,33 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
 
   const cantidadDecimal = (l) => parseFloat(String(l.cantidad ?? "").replace(",", "."));
 
+  // Overrides de cantidad por opcion de variante (ej. "Avena": 220) — solo
+  // se guardan las que el usuario cargo con un numero valido > 0, el resto
+  // (vacias o invalidas) caen y usan la cantidad base al vender.
+  const variantesCantidadDecimal = (l) => {
+    const overrides = l.variantesCantidad || {};
+    const resultado = {};
+    for (const [opcion, valor] of Object.entries(overrides)) {
+      const num = parseFloat(String(valor ?? "").replace(",", "."));
+      if (Number.isFinite(num) && num > 0) resultado[opcion] = num;
+    }
+    return resultado;
+  };
+
   const lineasFinales = (lineasReceta || [])
     .filter(l => (l.insumoId === "__nuevo__" ? l.nuevoNombre?.trim() : l.insumoId) && cantidadDecimal(l) > 0)
     .map(l => {
+      const variantesCantidad = variantesCantidadDecimal(l);
       if (l.insumoId === "__nuevo__") {
-        let insumoId = slugify(l.nuevoNombre);
-        let sufijo = 2;
-        while (idsInsumoUsados.has(insumoId)) {
-          insumoId = `${slugify(l.nuevoNombre)}-${sufijo}`;
-          sufijo += 1;
-        }
-        idsInsumoUsados.add(insumoId);
-        insumosNuevos.push({
-          id: insumoId,
-          nombre: l.nuevoNombre.trim(),
-          unidad: l.nuevaUnidad?.trim() || "unidad",
-          unidadCompra: l.nuevaUnidad?.trim() || "unidad",
-          factorConversion: 1,
-          stockActual: 0,
-          stockMinimo: parseFloat(String(l.nuevoStockMinimo ?? "").replace(",", ".")) || 0,
-          stockCritico: parseFloat(String(l.nuevoStockCritico ?? "").replace(",", ".")) || 0,
-          activo: true,
-          creadoEn: now,
-          actualizadoEn: now
+        const insumoNuevo = construirInsumoNuevo(l.nuevoNombre, idsInsumoUsados, {
+          unidad: l.nuevaUnidad,
+          stockMinimo: l.nuevoStockMinimo,
+          stockCritico: l.nuevoStockCritico
         });
-        return { insumoId, cantidadPorUnidad: cantidadDecimal(l) };
+        insumosNuevos.push(insumoNuevo);
+        return { insumoId: insumoNuevo.id, cantidadPorUnidad: cantidadDecimal(l), variantesCantidad };
       }
-      return { insumoId: l.insumoId, cantidadPorUnidad: cantidadDecimal(l) };
+      return { insumoId: l.insumoId, cantidadPorUnidad: cantidadDecimal(l), variantesCantidad };
     });
 
   const recetasDelProducto = recetasActuales.filter(r => r.productoId === productoId);
@@ -123,6 +133,7 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
         productoId,
         insumoId: linea.insumoId,
         cantidadPorUnidad: linea.cantidadPorUnidad,
+        ...(Object.keys(linea.variantesCantidad || {}).length ? { variantesCantidad: linea.variantesCantidad } : {}),
         esEstimado: true,
         creadoEn: now,
         actualizadoEn: now
@@ -191,6 +202,7 @@ export async function pullCatalogoDesdeNube() {
         insumoId: r.insumo_id,
         cantidadPorUnidad: r.cantidad_por_unidad,
         esEstimado: r.es_estimado,
+        ...(r.variantes_cantidad ? { variantesCantidad: r.variantes_cantidad } : {}),
         actualizadoEn: r.actualizado_en || new Date().toISOString()
       });
     }
