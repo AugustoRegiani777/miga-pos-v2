@@ -225,6 +225,7 @@ ALTER TABLE detalle_pedido       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_productos      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proveedores          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proveedor_insumos    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE configuracion_compartida ENABLE ROW LEVEL SECURITY;
 
 -- Cualquier usuario autenticado (las 3 cuentas) puede leer, insertar y
 -- actualizar todas las tablas. DELETE solo existe en pedidos/detalle_pedido
@@ -286,6 +287,10 @@ CREATE POLICY proveedores_update ON proveedores FOR UPDATE TO authenticated USIN
 CREATE POLICY proveedor_insumos_select ON proveedor_insumos FOR SELECT TO authenticated USING (true);
 CREATE POLICY proveedor_insumos_insert ON proveedor_insumos FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY proveedor_insumos_update ON proveedor_insumos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY configuracion_compartida_select ON configuracion_compartida FOR SELECT TO authenticated USING (true);
+CREATE POLICY configuracion_compartida_insert ON configuracion_compartida FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY configuracion_compartida_update ON configuracion_compartida FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 
 -- Índices útiles para queries del dashboard
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha               ON ventas(fecha);
