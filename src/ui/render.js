@@ -35,18 +35,30 @@ function formatProductionTime(isoString) {
   });
 }
 
+// Etiqueta un movimiento de stock (produccion/ajuste_manual/ajuste_stock) para
+// el resumen de cada producto en Produccion — nunca incluye ventas/devoluciones,
+// esas se resumen aparte en "Vendidos hoy" (ver productionSnapshot en
+// business.js, que ya las deja afuera de movimientosProduccion).
+function labelForMovement(movement) {
+  const absoluteQuantity = Math.abs(Number(movement.cantidad) || 0);
+  if (movement.tipo === "ajuste_stock") {
+    const motivo = movement.motivo || "Ajuste de stock";
+    if (motivo === "Error de produccion" || motivo === "Error") {
+      return `${movement.cantidad > 0 ? "Alta por error" : "Baja por error"}: ${absoluteQuantity}`;
+    }
+    const signo = movement.cantidad > 0 ? "+" : "-";
+    return `${motivo}: ${signo}${absoluteQuantity}`;
+  }
+  return `${movement.cantidad} sandwiches`;
+}
+
 export function productionSummaryLines(product) {
   if (!product.movimientosProduccion?.length) {
     return [`Produccion cargada hoy: ${product.cantidadProducida}`];
   }
   return product.movimientosProduccion.map((movement) => {
-    const isStockErrorAdjustment = movement.tipo === "ajuste_stock" && (movement.motivo === "Error de produccion" || movement.motivo === "Error");
-    const absoluteQuantity = Math.abs(Number(movement.cantidad) || 0);
-    const quantityLabel = isStockErrorAdjustment
-      ? `${movement.cantidad > 0 ? "Alta por error" : "Baja por error"}: ${absoluteQuantity}`
-      : `${movement.cantidad} sandwiches`;
     const timeLabel = formatProductionTime(movement.creadoEn);
-    return `${quantityLabel} ${timeLabel}hs`;
+    return `${labelForMovement(movement)} ${timeLabel}hs`;
   });
 }
 
@@ -202,7 +214,7 @@ function renderProductionRow(product, selectedProductId, onProductionProductSele
   wrapper.appendChild(
     renderStockRow(
       product,
-      [`Ayer quedaron: ${product.cantidadAyer ?? 0}`, ...productionSummaryLines(product)],
+      [`Ayer quedaron: ${product.cantidadAyer ?? 0}`, `Vendidos hoy: ${product.vendidoHoy ?? 0}`, ...productionSummaryLines(product)],
       {
         clickable: true,
         selected: product.id === selectedProductId,
@@ -292,12 +304,14 @@ export function renderProduccionConsulta(container, products) {
       <div>
         <h2></h2>
         <p class="production-ayer"></p>
+        <p class="production-vendido"></p>
         <p></p>
       </div>
       <strong></strong>
     `;
     row.querySelector("h2").textContent = product.nombre;
     row.querySelector(".production-ayer").textContent = `Ayer quedaron: ${product.cantidadAyer ?? 0}`;
+    row.querySelector(".production-vendido").textContent = `Vendidos hoy: ${product.vendidoHoy ?? 0}`;
     const subtitleNode = row.querySelector("p:last-of-type");
     subtitleNode.innerHTML = productionSummaryLines(product).map((line) => `<span>${line}</span>`).join("");
     row.querySelector("strong").textContent = product.stockActual;

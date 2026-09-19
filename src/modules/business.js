@@ -5,7 +5,7 @@ import { deductInsumosForProductionInTx, deductInsumosInTx, restoreInsumosInTx }
 
 const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria", "bebidas"]);
 export const TOGOO_FLAT_TOTAL_CENTAVOS = 300;
-const DECREASE_ONLY_MOTIVOS = new Set(["Consumo", "Pedidos offline"]);
+const DECREASE_ONLY_MOTIVOS = new Set(["Consumo"]);
 const productionCommentKey = (fecha) => `production-comment:${fecha}`;
 
 function normalizeProductionComments(rawValue) {
@@ -91,12 +91,9 @@ export async function productionSnapshot(fecha = todayISO()) {
     const row = await requestToPromise(stores.configuracion.get(productionCommentKey(fecha)));
     return normalizeProductionComments(row?.valor);
   });
-  const productionMovements = (await getAll("movimientos_stock"))
-    .filter((row) => row.fecha === fecha && (
-      row.tipo === "produccion" ||
-      row.tipo === "ajuste_manual" ||
-      (row.tipo === "ajuste_stock" && (row.motivo === "Error de produccion" || row.motivo === "Error"))
-    ))
+  const movimientosStockHoy = (await getAll("movimientos_stock")).filter((row) => row.fecha === fecha);
+  const productionMovements = movimientosStockHoy
+    .filter((row) => row.tipo === "produccion" || row.tipo === "ajuste_manual" || row.tipo === "ajuste_stock")
     .sort((a, b) => String(a.creadoEn || "").localeCompare(String(b.creadoEn || "")));
   const producedByProduct = new Map(productionRows.map((row) => [row.productoId, row.cantidad]));
   const movementsByProduct = new Map();
@@ -110,6 +107,21 @@ export async function productionSnapshot(fecha = todayISO()) {
     });
     movementsByProduct.set(movement.productoId, list);
   }
+  // Cuanto se vendio hoy de cada producto, NETO de anulaciones — movimientos_stock
+  // tipo "venta" es exactamente eso (lo escribe confirmSale al cerrar cada
+  // venta), pero si esa venta se deshace despues (undoSale), no se borra ese
+  // movimiento: se agrega uno nuevo tipo "devolucion" que repone el stock. Sin
+  // restar ese devolucion, una venta anulada seguiria contando como vendida.
+  const soldByProduct = new Map();
+  for (const movement of movimientosStockHoy) {
+    if (movement.tipo === "venta") {
+      const cantidadVendida = Math.abs(Number(movement.cantidad) || 0);
+      soldByProduct.set(movement.productoId, (soldByProduct.get(movement.productoId) || 0) + cantidadVendida);
+    } else if (movement.tipo === "devolucion") {
+      const cantidadDevuelta = Math.abs(Number(movement.cantidad) || 0);
+      soldByProduct.set(movement.productoId, (soldByProduct.get(movement.productoId) || 0) - cantidadDevuelta);
+    }
+  }
   return {
     fecha,
     comentarios: productionComments,
@@ -118,28 +130,32 @@ export async function productionSnapshot(fecha = todayISO()) {
       .map((product) => ({
         ...product,
         cantidadProducida: producedByProduct.get(product.id) || 0,
-        movimientosProduccion: movementsByProduct.get(product.id) || []
+        movimientosProduccion: movementsByProduct.get(product.id) || [],
+        vendidoHoy: soldByProduct.get(product.id) || 0
       })),
     bolleria: products
       .filter((product) => product.categoriaId === "bolleria")
       .map((product) => ({
         ...product,
         cantidadProducida: producedByProduct.get(product.id) || 0,
-        movimientosProduccion: movementsByProduct.get(product.id) || []
+        movimientosProduccion: movementsByProduct.get(product.id) || [],
+        vendidoHoy: soldByProduct.get(product.id) || 0
       })),
     bebidas: products
       .filter((product) => product.categoriaId === "bebidas")
       .map((product) => ({
         ...product,
         cantidadProducida: producedByProduct.get(product.id) || 0,
-        movimientosProduccion: movementsByProduct.get(product.id) || []
+        movimientosProduccion: movementsByProduct.get(product.id) || [],
+        vendidoHoy: soldByProduct.get(product.id) || 0
       })),
     productionProducts: products
       .filter((product) => PRODUCTION_CATEGORIES.has(product.categoriaId) && product.controlaStock)
       .map((product) => ({
         ...product,
         cantidadProducida: producedByProduct.get(product.id) || 0,
-        movimientosProduccion: movementsByProduct.get(product.id) || []
+        movimientosProduccion: movementsByProduct.get(product.id) || [],
+        vendidoHoy: soldByProduct.get(product.id) || 0
       }))
   };
 }

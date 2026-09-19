@@ -1100,12 +1100,13 @@ function markConsultaLoaded(container) {
   container.dataset.loaded = "1";
 }
 
-// tipo "produccion"/"ajuste_manual" siempre cuenta; "ajuste_stock" solo cuando
-// es una correccion de error de produccion — igual filtro que productionSnapshot()
-// en business.js, aplicado aca sobre los movimientos traidos de Supabase.
+// produccion/ajuste_manual/ajuste_stock cuentan todos (recuento, consumo,
+// error, pedidos offline, cierre de periodo...) — venta/devolucion quedan
+// afuera a proposito, esas se resumen aparte en "Vendidos hoy". Igual filtro
+// que productionSnapshot() en business.js, aplicado aca sobre los
+// movimientos traidos de Supabase.
 function esMovimientoDeProduccion(row) {
-  if (row.tipo === "produccion" || row.tipo === "ajuste_manual") return true;
-  return row.tipo === "ajuste_stock" && (row.motivo === "Error de produccion" || row.motivo === "Error");
+  return row.tipo === "produccion" || row.tipo === "ajuste_manual" || row.tipo === "ajuste_stock";
 }
 
 // Version remota de stockHistoricoPorFecha() (business.js): reconstruye
@@ -1197,7 +1198,8 @@ async function renderProductionView() {
             ...p,
             cantidadProducida,
             movimientosProduccion: movimientosPorProducto.get(p.id) || [],
-            cantidadAyer: (Number(p.stockActual) || 0) - cantidadProducida + vendido
+            cantidadAyer: (Number(p.stockActual) || 0) - cantidadProducida + vendido,
+            vendidoHoy: vendido
           };
         });
       renderProduccionConsulta(dom.produccionConsulta, productosProduccion);
