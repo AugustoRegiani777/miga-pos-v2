@@ -1191,7 +1191,15 @@ button {
 
 .stock-row-actions {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.production-vendido-hoy {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
 }
 
 .stock-adjust-button {

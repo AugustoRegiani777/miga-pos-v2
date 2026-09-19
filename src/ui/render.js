@@ -214,11 +214,12 @@ function renderProductionRow(product, selectedProductId, onProductionProductSele
   wrapper.appendChild(
     renderStockRow(
       product,
-      [`Ayer quedaron: ${product.cantidadAyer ?? 0}`, `Vendidos hoy: ${product.vendidoHoy ?? 0}`, ...productionSummaryLines(product)],
+      [`Ayer quedaron: ${product.cantidadAyer ?? 0}`, ...productionSummaryLines(product)],
       {
         clickable: true,
         selected: product.id === selectedProductId,
-        onClick: () => onProductionProductSelect(product)
+        onClick: () => onProductionProductSelect(product),
+        vendidoHoy: product.vendidoHoy ?? 0
       }
     )
   );
@@ -404,6 +405,7 @@ function renderStockRow(product, subtitle, options = {}) {
     cargarButton.type = "button";
     cargarButton.addEventListener("click", options.onClick);
     actionsNode.appendChild(cargarButton);
+    actionsNode.appendChild(el("div", "production-vendido-hoy", `Vendidos hoy: ${options.vendidoHoy ?? 0}`));
   }
   if (options.actionLabel && typeof options.onAction === "function") {
     const actionButton = el("button", "ghost-button stock-adjust-button", options.actionLabel);
