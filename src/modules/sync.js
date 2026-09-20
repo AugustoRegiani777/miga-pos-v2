@@ -50,10 +50,11 @@ async function executeOp(op) {
       return pushRecetasSnapshot(op.payload);
     case "movimientos_insumos":
       return pushMovimientosInsumos(op.payload);
-    // Nada nuevo encola este tipo (ver migracion 004 en el repo: stock_productos
-    // ahora se calcula solo en Supabase a partir de movimientos_stock). Se deja
-    // el caso para drenar en paz lo que ya estuviera en la cola local de algun
-    // dispositivo al momento del deploy.
+    // Nada nuevo encola estos dos tipos (ver migraciones 004 y 010: tanto
+    // stock_productos como produccion_diaria ahora se calculan solos en
+    // Supabase a partir de movimientos_stock). Se dejan los casos para drenar
+    // en paz lo que ya estuviera en la cola local de algun dispositivo al
+    // momento del deploy.
     case "stock_productos":
       return pushStockProductos(op.payload);
     case "produccion_diaria":
@@ -139,9 +140,11 @@ export function trySyncMovimientosInsumos(movimientos) {
   return tryNow({ type: "movimientos_insumos", payload: movimientos });
 }
 
-export function trySyncProduccionDiaria(rows) {
-  return tryNow({ type: "produccion_diaria", payload: rows });
-}
+// No hay trySyncProduccionDiaria: nada crea mas ops de este tipo (ver
+// migracion 010 — produccion_diaria se calcula sola en Supabase a partir de
+// movimientos_stock). El caso "produccion_diaria" sigue en executeOp() de
+// arriba solo para drenar en paz lo que ya estuviera encolado localmente en
+// algun dispositivo al momento de este deploy.
 
 // Movimiento individual (con hora) para que "modo consulta" pueda mostrar
 // "a que hora" se cargo cada produccion, igual que en la tablet.

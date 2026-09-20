@@ -13,7 +13,6 @@ import {
   trySyncCatalogoSnapshot,
   trySyncInsumosSnapshot,
   trySyncRecetasSnapshot,
-  trySyncProduccionDiaria,
   trySyncMovimientoStock,
   trySyncProveedoresSnapshot,
   trySyncProveedorInsumosSnapshot,
@@ -2351,7 +2350,6 @@ async function commitProduction(productId, quantityRaw) {
     setFlash("Produccion guardada.", "success");
   }
   closeProductionSheet();
-  syncProduccionDiaria();
   trySyncMovimientoStock(movimiento).catch(() => {});
   if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
   await renderCashier();
@@ -2535,7 +2533,6 @@ function bindEvents() {
         setFlash(`Stock de ${product.nombre} ajustado a ${newStock}.`, "success");
       }
       closeStockAdjustSheet();
-      syncProduccionDiaria();
       trySyncMovimientoStock(movimiento).catch(() => {});
       if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
       await renderProductionView();
@@ -3076,18 +3073,6 @@ function bindAuthEvents() {
   });
 }
 
-// Empuja la produccion de hoy a Supabase, fire-and-forget. El stock ya no se
-// empuja por separado: stock_productos se calcula solo, dentro de Supabase,
-// a partir de cada fila que llega a movimientos_stock (ver migracion 004) —
-// un solo camino para ese numero, no puede desincronizarse de su propio
-// historial.
-function syncProduccionDiaria() {
-  const fecha = todayISO();
-  getAll("produccion_diaria").then((produccion) => {
-    const produccionHoy = produccion.filter((row) => row.fecha === fecha);
-    if (produccionHoy.length > 0) trySyncProduccionDiaria(produccionHoy).catch(() => {});
-  }).catch(() => {});
-}
 
 async function bootApp() {
   await seedDatabase();
@@ -3114,9 +3099,6 @@ async function bootApp() {
     .then(([categorias, productos]) => {
       trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
     }).catch(() => {});
-  // Solo el dispositivo que opera de verdad empuja produccion al arrancar —
-  // un celular en modo consulta no tiene nada propio que empujar.
-  if (!isModoConsulta()) syncProduccionDiaria();
   // Auto-sync silencioso al abrir la app (ver sincronizarCatalogoSilencioso).
   // Sin await a proposito: no puede demorar el primer render (offline-first).
   // El carrito de Caja siempre arranca vacio en este momento, asi que no
