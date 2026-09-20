@@ -86,7 +86,6 @@ export async function listProducts() {
 
 export async function productionSnapshot(fecha = todayISO()) {
   const products = await listProducts();
-  const productionRows = (await getAll("produccion_diaria")).filter((row) => row.fecha === fecha);
   const productionComments = await withStores(["configuracion"], "readonly", async (stores) => {
     const row = await requestToPromise(stores.configuracion.get(productionCommentKey(fecha)));
     return normalizeProductionComments(row?.valor);
@@ -95,7 +94,19 @@ export async function productionSnapshot(fecha = todayISO()) {
   const productionMovements = movimientosStockHoy
     .filter((row) => row.tipo === "produccion" || row.tipo === "ajuste_manual" || row.tipo === "ajuste_stock")
     .sort((a, b) => String(a.creadoEn || "").localeCompare(String(b.creadoEn || "")));
-  const producedByProduct = new Map(productionRows.map((row) => [row.productoId, row.cantidad]));
+  // "Producido hoy" se deriva de la MISMA fuente que las lineas de abajo (los
+  // propios movimientos_stock tipo "produccion" de hoy) — nunca de un contador
+  // aparte (produccion_diaria) que se actualiza por separado y puede
+  // desalinearse del historial real (ver incidente del 19/09/2026: un
+  // registro fantasma en movimientos_stock hizo que el total mostrado no
+  // coincidiera con la suma de sus propias lineas). Con una sola fuente, eso
+  // ya no puede pasar — el total SIEMPRE es la suma de lo que se ve debajo.
+  const producedByProduct = new Map();
+  for (const movement of movimientosStockHoy) {
+    if (movement.tipo !== "produccion") continue;
+    const cantidad = Number(movement.cantidad) || 0;
+    producedByProduct.set(movement.productoId, (producedByProduct.get(movement.productoId) || 0) + cantidad);
+  }
   const movementsByProduct = new Map();
   for (const movement of productionMovements) {
     const list = movementsByProduct.get(movement.productoId) || [];
@@ -228,14 +239,35 @@ export async function stockHistoricoPorFecha(fecha) {
   };
 
   const sumaPosterior = sumaPorProducto(movimientos.filter((m) => m.fecha > fecha));
-  const sumaDelDia = sumaPorProducto(movimientos.filter((m) => m.fecha === fecha));
+  const movimientosDelDia = movimientos.filter((m) => m.fecha === fecha);
+  const sumaDelDia = sumaPorProducto(movimientosDelDia);
+  // Ajustes del dia (recuento, consumo, cierre de periodo, altas/bajas
+  // manuales) — aparte de produccion/venta/devolucion, para que el resumen de
+  // Historial ("De ayer + Producido - Vendido + Ajustes = Quedan") pueda
+  // mostrar ese numero en vez de dejarlo escondido dentro de "Quedan" nada
+  // mas. Sin esto, un recuento de stock hace que la cuenta simple del usuario
+  // (ayer + producido - vendido) no cierre con lo que ve en pantalla, sin
+  // ninguna pista de por que.
+  //
+  // "Error de produccion" queda AFUERA de "ajuste" a proposito y se cuenta
+  // aparte (erroresProduccion): no es un movimiento fisico de stock como un
+  // recuento o una merma, es la correccion de un numero de produccion mal
+  // cargado — mezclarlo con los ajustes reales confunde cuanto stock se movio
+  // de verdad por causas externas.
+  const esErrorDeProduccion = (m) => m.tipo === "ajuste_stock" && (m.motivo === "Error de produccion" || m.motivo === "Error");
+  const sumaAjustesDelDia = sumaPorProducto(
+    movimientosDelDia.filter((m) => (m.tipo === "ajuste_manual" || m.tipo === "ajuste_stock") && !esErrorDeProduccion(m))
+  );
+  const sumaErroresDelDia = sumaPorProducto(movimientosDelDia.filter(esErrorDeProduccion));
 
   const resultado = new Map();
   for (const producto of productos) {
     const stockHoy = Number(producto.stockActual) || 0;
     const stockAlFinal = stockHoy - (sumaPosterior.get(producto.id) || 0);
     const stockAlInicio = stockAlFinal - (sumaDelDia.get(producto.id) || 0);
-    resultado.set(producto.id, { stockAlInicio, stockAlFinal });
+    const ajuste = sumaAjustesDelDia.get(producto.id) || 0;
+    const erroresProduccion = sumaErroresDelDia.get(producto.id) || 0;
+    resultado.set(producto.id, { stockAlInicio, stockAlFinal, ajuste, erroresProduccion });
   }
   return resultado;
 }

@@ -1,5 +1,5 @@
 import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange } from "../modules/backup.js";
-import { signIn, signOut, restoreSession, fetchStockProductos, fetchProduccionDiaria, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
+import { signIn, signOut, restoreSession, fetchStockProductos, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, sincronizarStockInsumosDesdeMovimientos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
@@ -1153,9 +1153,44 @@ function esMovimientoDeProduccion(row) {
   return row.tipo === "produccion" || row.tipo === "ajuste_manual" || row.tipo === "ajuste_stock";
 }
 
+// El "de que fue" detras del numero de Ajustes: recorre los mismos
+// movimientosProduccion que ya usa cada card de Produccion (ver
+// productionSummaryLines en render.js) y arma "Producto: motivo +/-cantidad"
+// por cada ajuste real del dia — asi Historial no solo dice CUANTO cambio
+// fuera de produccion/venta, dice QUE producto y POR QUE, sin tener que ir a
+// revisar card por card en Produccion.
+//
+// "Error de produccion" queda AFUERA a proposito (igual que en
+// stockHistoricoPorFecha, business.js): no es un movimiento fisico de stock,
+// es la correccion de un numero de produccion mal cargado.
+function desglosarAjustesDelDia(productos) {
+  const partes = [];
+  for (const producto of productos) {
+    for (const movimiento of producto.movimientosProduccion || []) {
+      if (movimiento.tipo !== "ajuste_stock" && movimiento.tipo !== "ajuste_manual") continue;
+      if (movimiento.tipo === "ajuste_stock" && (movimiento.motivo === "Error de produccion" || movimiento.motivo === "Error")) continue;
+      const cantidad = Number(movimiento.cantidad) || 0;
+      if (cantidad === 0) continue;
+      const motivo = movimiento.tipo === "ajuste_manual" ? "Ajuste manual" : (movimiento.motivo || "Ajuste de stock");
+      partes.push(`${producto.nombre}: ${motivo} ${formatearAjuste(cantidad)}`);
+    }
+  }
+  return partes;
+}
+
 // Version remota de stockHistoricoPorFecha() (business.js): reconstruye
 // cuanto stock habia en una fecha pasada a partir del stock actual y los
 // movimientos sincronizados a Supabase desde esa fecha en adelante.
+// "De ayer + Producido - Vendido + Ajustes = Quedan" — Ajustes junta todo lo
+// que mueve stock sin ser produccion ni venta (recuento, consumo, error,
+// cierre de periodo, alta/baja manual). Sin mostrar este numero aparte, un
+// dia con un recuento de stock hace que la cuenta simple de Producido/Vendido
+// no cierre con lo que se ve en pantalla, sin ninguna pista de por que — ver
+// stockHistoricoPorFecha en business.js / historicoDesdeMovimientosRemotos.
+function formatearAjuste(cantidad) {
+  return cantidad > 0 ? `+${cantidad}` : String(cantidad);
+}
+
 function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fecha) {
   const sumaPorProducto = (lista) => {
     const map = new Map();
@@ -1165,13 +1200,18 @@ function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fecha) {
     return map;
   };
   const sumaPosterior = sumaPorProducto(movimientosDesde.filter((m) => m.fecha > fecha));
-  const sumaDelDia = sumaPorProducto(movimientosDesde.filter((m) => m.fecha === fecha));
+  const movimientosDelDia = movimientosDesde.filter((m) => m.fecha === fecha);
+  const sumaDelDia = sumaPorProducto(movimientosDelDia);
+  const sumaAjustesDelDia = sumaPorProducto(
+    movimientosDelDia.filter((m) => m.tipo === "ajuste_manual" || m.tipo === "ajuste_stock")
+  );
   const resultado = new Map();
   for (const producto of catalogo) {
     const stockHoy = Number(producto.stockActual) || 0;
     const stockAlFinal = stockHoy - (sumaPosterior.get(producto.id) || 0);
     const stockAlInicio = stockAlFinal - (sumaDelDia.get(producto.id) || 0);
-    resultado.set(producto.id, { stockAlInicio, stockAlFinal });
+    const ajuste = sumaAjustesDelDia.get(producto.id) || 0;
+    resultado.set(producto.id, { stockAlInicio, stockAlFinal, ajuste });
   }
   return resultado;
 }
@@ -1211,18 +1251,26 @@ async function renderProductionView() {
     showConsultaPlaceholder(dom.produccionConsulta, "Cargando...");
     try {
       const fecha = todayISO();
-      const [catalogo, produccionRows, movimientosRemotos, ventasRemotas] = await Promise.all([
+      const [catalogo, movimientosRemotos, ventasRemotas] = await Promise.all([
         catalogoConStockRemoto(),
-        fetchProduccionDiaria(fecha),
         fetchMovimientosStock(fecha),
         fetchVentasDelDia(fecha)
       ]);
-      const producidoPorProducto = new Map(produccionRows.map((row) => [row.producto_id, row.cantidad]));
+      // "Producido hoy" sale de los mismos movimientos_stock que se listan
+      // abajo (tipo "produccion"), nunca de produccion_diaria por separado —
+      // mismo principio que productionSnapshot() en business.js, para que el
+      // total y sus propias lineas nunca puedan desalinearse (ver incidente
+      // del 19/09/2026).
+      const producidoPorProducto = new Map();
       const movimientosPorProducto = new Map();
       for (const row of movimientosRemotos.filter(esMovimientoDeProduccion)) {
         const lista = movimientosPorProducto.get(row.producto_id) || [];
         lista.push({ tipo: row.tipo, motivo: row.motivo, cantidad: row.cantidad, creadoEn: row.creado_en });
         movimientosPorProducto.set(row.producto_id, lista);
+        if (row.tipo === "produccion") {
+          const cantidad = Number(row.cantidad) || 0;
+          producidoPorProducto.set(row.producto_id, (producidoPorProducto.get(row.producto_id) || 0) + cantidad);
+        }
       }
       const vendidoPorProducto = new Map();
       for (const venta of ventasRemotas) {
@@ -1392,16 +1440,28 @@ async function renderHistoryView() {
     dom.historialBackupPanel.style.display = "none";
     showConsultaPlaceholder(dom.historyList, "Cargando...");
     try {
-      const [catalogo, produccionRows, ventasRemotas, movimientosDesde] = await Promise.all([
+      const [catalogo, ventasRemotas, movimientosDesde] = await Promise.all([
         catalogoConStockRemoto(),
-        fetchProduccionDiaria(fecha),
         fetchVentasDelDia(fecha),
         fetchMovimientosStockDesde(fecha)
       ]);
       const sales = ventasRemotas.map(mapVentaRemota);
       const sandwiches = catalogo.filter((p) => p.categoriaId === "sandwiches" && p.controlaStock);
       const sandwichIds = new Set(sandwiches.map((p) => p.id));
-      const producidoPorProducto = new Map(produccionRows.map((row) => [row.producto_id, row.cantidad]));
+      // "Producido hoy" sale de movimientos_stock (tipo "produccion"), nunca
+      // de produccion_diaria por separado — mismo principio que
+      // productionSnapshot() en business.js (ver incidente del 19/09/2026).
+      const movimientosPorProductoHoy = new Map();
+      const producidoPorProducto = new Map();
+      for (const row of movimientosDesde.filter((m) => m.fecha === fecha && esMovimientoDeProduccion(m))) {
+        const lista = movimientosPorProductoHoy.get(row.producto_id) || [];
+        lista.push({ tipo: row.tipo, motivo: row.motivo, cantidad: row.cantidad });
+        movimientosPorProductoHoy.set(row.producto_id, lista);
+        if (row.tipo === "produccion") {
+          const cantidad = Number(row.cantidad) || 0;
+          producidoPorProducto.set(row.producto_id, (producidoPorProducto.get(row.producto_id) || 0) + cantidad);
+        }
+      }
       const totalSandwichesProduced = sandwiches.reduce((total, p) => total + (producidoPorProducto.get(p.id) || 0), 0);
       const totalSandwichesSold = sales.reduce(
         (total, sale) => total + sale.detalles.reduce(
@@ -1419,7 +1479,14 @@ async function renderHistoryView() {
         (total, p) => total + (historico.get(p.id)?.stockAlInicio ?? 0),
         0
       );
-      dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
+      const totalAjustes = sandwiches.reduce(
+        (total, p) => total + (historico.get(p.id)?.ajuste ?? 0),
+        0
+      );
+      const desgloseAjustes = desglosarAjustesDelDia(
+        sandwiches.map((p) => ({ ...p, movimientosProduccion: movimientosPorProductoHoy.get(p.id) || [] }))
+      );
+      dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)}${desgloseAjustes.length ? ` (${desgloseAjustes.join(", ")})` : ""} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
       renderHistory(dom.historyList, sales, {
         onShareSale: handleShareSale,
         onPrintSale: handlePrintSale
@@ -1455,7 +1522,12 @@ async function renderHistoryView() {
     (total, product) => total + (historico.get(product.id)?.stockAlInicio ?? 0),
     0
   );
-  dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
+  const totalAjustes = snapshot.sandwiches.reduce(
+    (total, product) => total + (historico.get(product.id)?.ajuste ?? 0),
+    0
+  );
+  const desgloseAjustes = desglosarAjustesDelDia(snapshot.sandwiches);
+  dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)}${desgloseAjustes.length ? ` (${desgloseAjustes.join(", ")})` : ""} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
   renderHistory(dom.historyList, sales, {
     onUndoSale: handleUndoSale,
     onShareSale: handleShareSale,

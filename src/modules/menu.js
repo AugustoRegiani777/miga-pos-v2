@@ -1,4 +1,4 @@
-import { getAll, getOne, putOne, withStores } from "../db/idb.js";
+import { getAll, getOne, putOne, withStores, requestToPromise } from "../db/idb.js";
 import { slugify } from "../utils/format.js";
 import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot } from "./sync.js";
 import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo } from "../db/supabase.js";
@@ -159,29 +159,37 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
 // aparezca en este. Nunca toca stockActual: ese campo es en vivo, cambia con
 // cada venta/produccion de ESTE dispositivo, y no viaja por esta via (ver
 // pushCatalogoSnapshot, que ni siquiera lo manda a Supabase).
+//
+// OJO con esto — incidente real (19/09/2026): la version anterior leia el
+// producto local ANTES de esperar la respuesta de red (fetchProductosCatalogo,
+// etc.), y recien despues escribia usando ese dato ya viejo. Si en el medio
+// (mientras se esperaba la red) se cargaba una venta o produccion en este
+// mismo dispositivo — por ej. otra pestaña abierta — la escritura de esta
+// funcion pisaba ese cambio con el stockActual de antes, haciendo que el
+// stock "retrocediera" sin ningun aviso. La lectura que protege stockActual
+// tiene que pasar DENTRO de la misma transaccion en la que se escribe, nunca
+// minutos (ni milisegundos) antes.
 export async function pullCatalogoDesdeNube() {
-  const [categoriasRemotas, productosRemotos, recetasRemotas, categoriasLocales, productosLocales] = await Promise.all([
+  const [categoriasRemotas, productosRemotos, recetasRemotas] = await Promise.all([
     fetchCategoriasCatalogo(),
     fetchProductosCatalogo(),
-    fetchRecetasCatalogo(),
-    getAll("categorias"),
-    getAll("productos")
+    fetchRecetasCatalogo()
   ]);
-  const categoriasLocalesById = new Map(categoriasLocales.map(c => [c.id, c]));
-  const productosLocalesById = new Map(productosLocales.map(p => [p.id, p]));
 
-  await withStores(["categorias", "productos", "recetas"], "readwrite", (stores) => {
+  await withStores(["categorias", "productos", "recetas"], "readwrite", async (stores) => {
     for (const c of categoriasRemotas) {
+      const local = await requestToPromise(stores.categorias.get(c.id));
       stores.categorias.put({
-        ...(categoriasLocalesById.get(c.id) || {}),
+        ...(local || {}),
         id: c.id,
         nombre: c.nombre,
         orden: c.orden
       });
     }
     for (const p of productosRemotos) {
+      const local = await requestToPromise(stores.productos.get(p.id));
       stores.productos.put({
-        ...(productosLocalesById.get(p.id) || { stockActual: 0 }),
+        ...(local || { stockActual: 0 }),
         id: p.id,
         categoriaId: p.categoria_id,
         nombre: p.nombre,

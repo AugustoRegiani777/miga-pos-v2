@@ -65,14 +65,20 @@ export async function createInsumo({ nombre, unidad, stockMinimo, stockCritico }
 // dispositivo (ej. al agregar la receta de un producto desde el celu)
 // aparezca aca. stockActual NUNCA se pisa: es en vivo, se descuenta con cada
 // produccion/venta de ESTE dispositivo.
+//
+// La lectura que protege stockActual tiene que pasar DENTRO de la misma
+// transaccion en la que se escribe (ver incidente real del 19/09/2026 en
+// pullCatalogoDesdeNube, menu.js — mismo patron, mismo riesgo: leer el local
+// ANTES de esperar la red y escribir con ese dato ya viejo pisa cualquier
+// venta/produccion que haya pasado mientras tanto en este dispositivo).
 export async function pullInsumosDesdeNube() {
-  const [remotos, locales] = await Promise.all([fetchInsumosCatalogo(), getAll("insumos")]);
-  const localesById = new Map(locales.map(i => [i.id, i]));
+  const remotos = await fetchInsumosCatalogo();
 
-  await withStores(["insumos"], "readwrite", (stores) => {
+  await withStores(["insumos"], "readwrite", async (stores) => {
     for (const r of remotos) {
+      const local = await requestToPromise(stores.insumos.get(r.id));
       stores.insumos.put({
-        ...(localesById.get(r.id) || { stockActual: 0 }),
+        ...(local || { stockActual: 0 }),
         id: r.id,
         nombre: r.nombre,
         unidad: r.unidad,
@@ -119,10 +125,9 @@ export async function sincronizarStockInsumosDesdeMovimientos() {
   const cursor = await getOne("configuracion", CURSOR_MOVIMIENTOS_INSUMOS);
   const desde = cursor?.valor || null;
 
-  const [remotos, locales, insumosActuales] = await Promise.all([
+  const [remotos, locales] = await Promise.all([
     fetchMovimientosInsumosCatalogo(desde),
-    getAll("movimientos_insumos"),
-    getAll("insumos")
+    getAll("movimientos_insumos")
   ]);
 
   const uuidsLocales = new Set(locales.map((m) => m.uuid).filter(Boolean));
@@ -135,16 +140,20 @@ export async function sincronizarStockInsumosDesdeMovimientos() {
     deltaPorInsumo.set(r.insumo_id, (deltaPorInsumo.get(r.insumo_id) || 0) + delta);
   }
 
-  const insumosById = new Map(insumosActuales.map((i) => [i.id, i]));
   const now = new Date().toISOString();
   let maxFecha = desde || "";
   for (const r of nuevos) {
     if (r.creado_en && r.creado_en > maxFecha) maxFecha = r.creado_en;
   }
 
-  await withStores(["insumos", "movimientos_insumos", "configuracion"], "readwrite", (stores) => {
+  // El stockActual base se lee ACA DENTRO, recien al escribir — no antes,
+  // no desde un Map armado mientras se esperaba la red (mismo incidente real
+  // del 19/09/2026 que en pullCatalogoDesdeNube/menu.js: leer el local antes
+  // de esperar la red y escribir con ese dato ya viejo pisa cualquier
+  // venta/produccion que haya pasado mientras tanto en este dispositivo).
+  await withStores(["insumos", "movimientos_insumos", "configuracion"], "readwrite", async (stores) => {
     for (const [insumoId, delta] of deltaPorInsumo) {
-      const insumo = insumosById.get(insumoId);
+      const insumo = await requestToPromise(stores.insumos.get(insumoId));
       if (!insumo) continue; // insumo nuevo del otro dispositivo: llega con el proximo pullInsumosDesdeNube
       const stockNuevo = (insumo.stockActual || 0) + delta;
       stores.insumos.put({ ...insumo, stockActual: stockNuevo, actualizadoEn: now });
