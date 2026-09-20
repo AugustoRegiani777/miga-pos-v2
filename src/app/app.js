@@ -1152,31 +1152,6 @@ function esMovimientoDeProduccion(row) {
   return row.tipo === "produccion" || row.tipo === "ajuste_manual" || row.tipo === "ajuste_stock";
 }
 
-// El "de que fue" detras del numero de Ajustes: recorre los mismos
-// movimientosProduccion que ya usa cada card de Produccion (ver
-// productionSummaryLines en render.js) y arma "Producto: motivo +/-cantidad"
-// por cada ajuste real del dia — asi Historial no solo dice CUANTO cambio
-// fuera de produccion/venta, dice QUE producto y POR QUE, sin tener que ir a
-// revisar card por card en Produccion.
-//
-// "Error de produccion" queda AFUERA a proposito (igual que en
-// stockHistoricoPorFecha, business.js): no es un movimiento fisico de stock,
-// es la correccion de un numero de produccion mal cargado.
-function desglosarAjustesDelDia(productos) {
-  const partes = [];
-  for (const producto of productos) {
-    for (const movimiento of producto.movimientosProduccion || []) {
-      if (movimiento.tipo !== "ajuste_stock" && movimiento.tipo !== "ajuste_manual") continue;
-      if (movimiento.tipo === "ajuste_stock" && (movimiento.motivo === "Error de produccion" || movimiento.motivo === "Error")) continue;
-      const cantidad = Number(movimiento.cantidad) || 0;
-      if (cantidad === 0) continue;
-      const motivo = movimiento.tipo === "ajuste_manual" ? "Ajuste manual" : (movimiento.motivo || "Ajuste de stock");
-      partes.push(`${producto.nombre}: ${motivo} ${formatearAjuste(cantidad)}`);
-    }
-  }
-  return partes;
-}
-
 // Version remota de stockHistoricoPorFecha() (business.js): reconstruye
 // cuanto stock habia en una fecha pasada a partir del stock actual y los
 // movimientos sincronizados a Supabase desde esa fecha en adelante.
@@ -1450,16 +1425,10 @@ async function renderHistoryView() {
       // "Producido hoy" sale de movimientos_stock (tipo "produccion"), nunca
       // de produccion_diaria por separado — mismo principio que
       // productionSnapshot() en business.js (ver incidente del 19/09/2026).
-      const movimientosPorProductoHoy = new Map();
       const producidoPorProducto = new Map();
-      for (const row of movimientosDesde.filter((m) => m.fecha === fecha && esMovimientoDeProduccion(m))) {
-        const lista = movimientosPorProductoHoy.get(row.producto_id) || [];
-        lista.push({ tipo: row.tipo, motivo: row.motivo, cantidad: row.cantidad });
-        movimientosPorProductoHoy.set(row.producto_id, lista);
-        if (row.tipo === "produccion") {
-          const cantidad = Number(row.cantidad) || 0;
-          producidoPorProducto.set(row.producto_id, (producidoPorProducto.get(row.producto_id) || 0) + cantidad);
-        }
+      for (const row of movimientosDesde.filter((m) => m.fecha === fecha && m.tipo === "produccion")) {
+        const cantidad = Number(row.cantidad) || 0;
+        producidoPorProducto.set(row.producto_id, (producidoPorProducto.get(row.producto_id) || 0) + cantidad);
       }
       const totalSandwichesProduced = sandwiches.reduce((total, p) => total + (producidoPorProducto.get(p.id) || 0), 0);
       const totalSandwichesSold = sales.reduce(
@@ -1482,10 +1451,7 @@ async function renderHistoryView() {
         (total, p) => total + (historico.get(p.id)?.ajuste ?? 0),
         0
       );
-      const desgloseAjustes = desglosarAjustesDelDia(
-        sandwiches.map((p) => ({ ...p, movimientosProduccion: movimientosPorProductoHoy.get(p.id) || [] }))
-      );
-      dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)}${desgloseAjustes.length ? ` (${desgloseAjustes.join(", ")})` : ""} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
+      dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
       renderHistory(dom.historyList, sales, {
         onShareSale: handleShareSale,
         onPrintSale: handlePrintSale
@@ -1525,8 +1491,7 @@ async function renderHistoryView() {
     (total, product) => total + (historico.get(product.id)?.ajuste ?? 0),
     0
   );
-  const desgloseAjustes = desglosarAjustesDelDia(snapshot.sandwiches);
-  dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)}${desgloseAjustes.length ? ` (${desgloseAjustes.join(", ")})` : ""} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
+  dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
   renderHistory(dom.historyList, sales, {
     onUndoSale: handleUndoSale,
     onShareSale: handleShareSale,
