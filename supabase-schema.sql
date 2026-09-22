@@ -3,7 +3,7 @@
 -- Ejecutar en: Supabase Dashboard → SQL Editor
 --
 -- Este archivo es el reflejo COMPLETO y ACTUAL de la base — equivale a
--- correr, en orden, la migracion 002 hasta la 011 sobre la version original.
+-- correr, en orden, la migracion 002 hasta la 013 sobre la version original.
 -- Para una base nueva desde cero, corriendo SOLO este archivo alcanza (no
 -- hace falta correr las migraciones numeradas despues). Las migraciones
 -- numeradas quedan igual en el repo como registro historico de como se
@@ -94,13 +94,18 @@ CREATE TABLE IF NOT EXISTS detalle_venta (
 );
 
 -- Insumos (ingredientes)
+-- stock_actual NO vive aca — ver stock_insumos mas abajo (definicion y stock
+-- en vivo separados a proposito, migracion 012/013: 8 lugares del codigo
+-- empujan esta definicion completa cada vez que cambia cualquier cosa del
+-- insumo, y si el stock viviera en la misma fila, cualquiera de esos pushes
+-- pisaria sin darse cuenta el stock real con un numero viejo de otro
+-- dispositivo — incidente real confirmado 22/09/2026, caso "atun".
 CREATE TABLE IF NOT EXISTS insumos (
   id                    TEXT PRIMARY KEY,
   nombre                TEXT NOT NULL,
   unidad                TEXT NOT NULL,
   unidad_compra         TEXT,
   factor_conversion     NUMERIC NOT NULL DEFAULT 1,
-  stock_actual          NUMERIC NOT NULL DEFAULT 0,
   stock_minimo          NUMERIC NOT NULL DEFAULT 0,
   stock_critico         NUMERIC NOT NULL DEFAULT 0,
   necesita_calibracion  BOOLEAN DEFAULT false,
@@ -323,6 +328,56 @@ CREATE TRIGGER trg_produccion_diaria_desde_movimiento
   FOR EACH ROW
   EXECUTE FUNCTION produccion_diaria_desde_movimiento();
 
+-- Stock actual de insumos (materias primas) — separado de la definicion en
+-- insumos por el mismo motivo que stock_productos arriba, pero derivado por
+-- SUMA de deltas (no por snapshot con guarda de fecha): a diferencia de
+-- productos, que tiene un solo escritor real (la tablet), insumos tiene
+-- MULTIPLES escritores concurrentes (el celu escribe compras por factura, la
+-- tablet escribe consumo por produccion/venta/calibracion, sobre los mismos
+-- insumos, al mismo tiempo) — con varios escritores, sumar deltas es lo unico
+-- que da el mismo resultado sin importar el orden de llegada (migracion 012).
+CREATE TABLE IF NOT EXISTS stock_insumos (
+  id             TEXT PRIMARY KEY REFERENCES insumos(id) ON DELETE CASCADE,
+  stock_actual   NUMERIC NOT NULL DEFAULT 0,
+  actualizado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION stock_insumos_desde_movimiento()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    UPDATE stock_insumos
+      SET stock_actual = stock_actual - OLD.cantidad, actualizado_en = NOW()
+      WHERE id = OLD.insumo_id;
+    RETURN OLD;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.cantidad IS NOT DISTINCT FROM OLD.cantidad
+       AND NEW.insumo_id IS NOT DISTINCT FROM OLD.insumo_id THEN
+      RETURN NEW;
+    END IF;
+    UPDATE stock_insumos
+      SET stock_actual = stock_actual - OLD.cantidad, actualizado_en = NOW()
+      WHERE id = OLD.insumo_id;
+  END IF;
+
+  INSERT INTO stock_insumos (id, stock_actual, actualizado_en)
+  VALUES (NEW.insumo_id, NEW.cantidad, NOW())
+  ON CONFLICT (id) DO UPDATE
+    SET stock_actual = stock_insumos.stock_actual + NEW.cantidad,
+        actualizado_en = NOW();
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_stock_insumos_desde_movimiento ON movimientos_insumos;
+CREATE TRIGGER trg_stock_insumos_desde_movimiento
+  AFTER INSERT OR UPDATE OR DELETE ON movimientos_insumos
+  FOR EACH ROW
+  EXECUTE FUNCTION stock_insumos_desde_movimiento();
+
 -- Pedidos (Instagram/WhatsApp) — fuente de verdad en Supabase, no en IDB local
 CREATE TABLE IF NOT EXISTS pedidos (
   id                BIGSERIAL PRIMARY KEY,
@@ -370,6 +425,7 @@ ALTER TABLE movimientos_stock      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detalle_pedido         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_productos        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_insumos          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proveedores            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proveedor_insumos      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE configuracion_compartida ENABLE ROW LEVEL SECURITY;
@@ -440,6 +496,10 @@ CREATE POLICY detalle_pedido_delete ON detalle_pedido FOR DELETE TO authenticate
 CREATE POLICY stock_productos_select ON stock_productos FOR SELECT TO authenticated USING (true);
 CREATE POLICY stock_productos_insert ON stock_productos FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY stock_productos_update ON stock_productos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY stock_insumos_select ON stock_insumos FOR SELECT TO authenticated USING (true);
+CREATE POLICY stock_insumos_insert ON stock_insumos FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY stock_insumos_update ON stock_insumos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 
 CREATE POLICY proveedores_select ON proveedores FOR SELECT TO authenticated USING (true);
 CREATE POLICY proveedores_insert ON proveedores FOR INSERT TO authenticated WITH CHECK (true);

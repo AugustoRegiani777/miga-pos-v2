@@ -1,0 +1,25 @@
+-- =========================================
+-- Miga POS v2 — Migracion 013 (PARTE 2/2): quitar insumos.stock_actual
+-- Ejecutar en: Supabase Dashboard → SQL Editor
+--
+-- *** NO CORRER TODAVIA ***
+-- Orden obligatorio:
+--   1. Correr la migracion 012 (crea stock_insumos + trigger).
+--   2. Deployar el codigo nuevo (pushInsumosSnapshot ya sin stock_actual).
+--   3. CERRAR Y REABRIR DEL TODO la app en la tablet y en el celular
+--      (una pestaña vieja sigue corriendo el codigo de antes — ver
+--      CLAUDE.md seccion 8.7, punto 4).
+--   4. Confirmar que "Actualizar catalogo" funciona bien en los dos
+--      dispositivos con el codigo nuevo.
+--   5. Recien ahi correr ESTE archivo.
+--
+-- Por que en un archivo aparte y no en la 012: esto es DESTRUCTIVO (borra
+-- una columna). Si se corriera antes de deployar el codigo nuevo, cualquier
+-- dispositivo que todavia tenga la pestaña vieja abierta (que arma su
+-- payload de "insumos" incluyendo stock_actual) empezaria a fallar CADA
+-- push de definicion con un error de Postgres ("la columna no existe") —
+-- no solo el problema que estamos arreglando, sino tambien crear insumos,
+-- confirmar facturas, etc. Separarla evita esa ventana de fragilidad.
+-- =========================================
+
+ALTER TABLE insumos DROP COLUMN IF EXISTS stock_actual;
