@@ -1,5 +1,5 @@
 import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange } from "../modules/backup.js";
-import { signIn, signOut, restoreSession, fetchStockProductos, fetchVentasDelDia, fetchMovimientosStock, fetchMovimientosStockDesde } from "../db/supabase.js";
+import { signIn, signOut, restoreSession, fetchStockProductos, fetchVentasDelDia, fetchMovimientosStock } from "../db/supabase.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, sincronizarStockInsumosDesdeMovimientos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
@@ -38,7 +38,9 @@ import {
   saveProductionComment,
   stockHistoricoPorFecha,
   undoSale,
-  TOGOO_FLAT_TOTAL_CENTAVOS
+  TOGOO_FLAT_TOTAL_CENTAVOS,
+  sincronizarStockProductosDesdeMovimientos,
+  datosRemotosDelDia
 } from "../modules/business.js";
 import { seedDatabase, getAll } from "../db/idb.js";
 import { todayISO, centsToMoney, slugify } from "../utils/format.js";
@@ -109,10 +111,11 @@ async function refreshGruposVariantes() {
 
 // Todo lo que trae "Actualizar catalogo" de la nube — categorias/productos/
 // recetas, insumos (definicion), proveedores, grupos de variante, y el
-// merge por deltas del stock de insumos (ver sincronizarStockInsumosDesdeMovimientos
-// en aprovisionamiento.js). Un solo punto para el boton manual Y para el
-// auto-sync silencioso (ver sincronizarCatalogoSilencioso), asi nunca se
-// desalinean.
+// merge por deltas del stock de insumos Y productos (ver
+// sincronizarStockInsumosDesdeMovimientos en aprovisionamiento.js y
+// sincronizarStockProductosDesdeMovimientos en business.js). Un solo punto
+// para el boton manual Y para el auto-sync silencioso (ver
+// sincronizarCatalogoSilencioso), asi nunca se desalinean.
 async function pullCatalogoCompleto() {
   const [catalogo, insumosCount, proveedoresResult, variantesResult] = await Promise.all([
     pullCatalogoDesdeNube(),
@@ -120,14 +123,17 @@ async function pullCatalogoCompleto() {
     pullProveedoresDesdeNube(),
     pullVariantesGruposDesdeNube()
   ]);
-  // Recien despues de que los insumos existan localmente (pullInsumosDesdeNube
-  // recien terminado arriba) tiene sentido aplicarles deltas de stock — si un
-  // insumo se creo en el otro dispositivo y todavia no llego, su primer
-  // movimiento se descarta aca pero se aplica solo en el proximo refresco.
-  const stockResult = await sincronizarStockInsumosDesdeMovimientos();
+  // Recien despues de que insumos/productos existan localmente (los pulls de
+  // arriba ya terminaron) tiene sentido aplicarles deltas de stock — si algo
+  // se creo en el otro dispositivo y todavia no llego, su primer movimiento
+  // se descarta aca pero se aplica solo en el proximo refresco.
+  const [stockResult, stockProductosResult] = await Promise.all([
+    sincronizarStockInsumosDesdeMovimientos(),
+    sincronizarStockProductosDesdeMovimientos()
+  ]);
   await refreshGruposVariantes();
   await loadProducts();
-  return { catalogo, insumosCount, proveedoresResult, variantesResult, stockResult };
+  return { catalogo, insumosCount, proveedoresResult, variantesResult, stockResult, stockProductosResult };
 }
 
 let refrescarCatalogoStatusTimeout = null;
@@ -1152,42 +1158,14 @@ function esMovimientoDeProduccion(row) {
   return row.tipo === "produccion" || row.tipo === "ajuste_manual" || row.tipo === "ajuste_stock";
 }
 
-// Version remota de stockHistoricoPorFecha() (business.js): reconstruye
-// cuanto stock habia en una fecha pasada a partir del stock actual y los
-// movimientos sincronizados a Supabase desde esa fecha en adelante.
 // "De ayer + Producido - Vendido + Ajustes = Quedan" — Ajustes junta todo lo
-// que mueve stock sin ser produccion ni venta (recuento, consumo, error,
-// cierre de periodo, alta/baja manual). Sin mostrar este numero aparte, un
+// que mueve stock sin ser produccion ni venta (recuento, consumo, cierre de
+// periodo, alta/baja manual — "Error de produccion" queda afuera, ver
+// stockHistoricoPorFecha en business.js). Sin mostrar este numero aparte, un
 // dia con un recuento de stock hace que la cuenta simple de Producido/Vendido
-// no cierre con lo que se ve en pantalla, sin ninguna pista de por que — ver
-// stockHistoricoPorFecha en business.js / historicoDesdeMovimientosRemotos.
+// no cierre con lo que se ve en pantalla, sin ninguna pista de por que.
 function formatearAjuste(cantidad) {
   return cantidad > 0 ? `+${cantidad}` : String(cantidad);
-}
-
-function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fecha) {
-  const sumaPorProducto = (lista) => {
-    const map = new Map();
-    for (const m of lista) {
-      map.set(m.producto_id, (map.get(m.producto_id) || 0) + (Number(m.cantidad) || 0));
-    }
-    return map;
-  };
-  const sumaPosterior = sumaPorProducto(movimientosDesde.filter((m) => m.fecha > fecha));
-  const movimientosDelDia = movimientosDesde.filter((m) => m.fecha === fecha);
-  const sumaDelDia = sumaPorProducto(movimientosDelDia);
-  const sumaAjustesDelDia = sumaPorProducto(
-    movimientosDelDia.filter((m) => m.tipo === "ajuste_manual" || m.tipo === "ajuste_stock")
-  );
-  const resultado = new Map();
-  for (const producto of catalogo) {
-    const stockHoy = Number(producto.stockActual) || 0;
-    const stockAlFinal = stockHoy - (sumaPosterior.get(producto.id) || 0);
-    const stockAlInicio = stockAlFinal - (sumaDelDia.get(producto.id) || 0);
-    const ajuste = sumaAjustesDelDia.get(producto.id) || 0;
-    resultado.set(producto.id, { stockAlInicio, stockAlFinal, ajuste });
-  }
-  return resultado;
 }
 
 async function renderCashier() {
@@ -1384,53 +1362,18 @@ function nudgeStockAdjust(delta) {
   dom.stockAdjustQuantity.value = String(nextValue);
 }
 
-function mapVentaRemota(row) {
-  return {
-    id: row.id,
-    fecha: row.fecha,
-    hora: row.hora,
-    totalCentavos: row.total_centavos,
-    saleMode: row.sale_mode || "normal",
-    origen: row.origen,
-    pedidoId: row.pedido_id,
-    clienteNombre: row.cliente_nombre,
-    detalles: (row.detalle_venta || []).map((d) => ({
-      id: d.id,
-      ventaId: d.venta_id,
-      productoId: d.producto_id,
-      productoNombre: d.producto_nombre,
-      cantidad: d.cantidad,
-      precioUnitarioCentavos: d.precio_unitario_centavos,
-      subtotalCentavos: d.subtotal_centavos
-    }))
-  };
-}
-
 async function renderHistoryView() {
   const fecha = dom.historyDate.value || todayISO();
   dom.historyDate.value = fecha;
 
   if (isModoConsulta()) {
-    dom.historialBackupPanel.style.display = "none";
     showConsultaPlaceholder(dom.historyList, "Cargando...");
     try {
-      const [catalogo, ventasRemotas, movimientosDesde] = await Promise.all([
-        catalogoConStockRemoto(),
-        fetchVentasDelDia(fecha),
-        fetchMovimientosStockDesde(fecha)
-      ]);
-      const sales = ventasRemotas.map(mapVentaRemota);
-      const sandwiches = catalogo.filter((p) => p.categoriaId === "sandwiches" && p.controlaStock);
-      const sandwichIds = new Set(sandwiches.map((p) => p.id));
-      // "Producido hoy" sale de movimientos_stock (tipo "produccion"), nunca
-      // de produccion_diaria por separado — mismo principio que
-      // productionSnapshot() en business.js (ver incidente del 19/09/2026).
-      const producidoPorProducto = new Map();
-      for (const row of movimientosDesde.filter((m) => m.fecha === fecha && m.tipo === "produccion")) {
-        const cantidad = Number(row.cantidad) || 0;
-        producidoPorProducto.set(row.producto_id, (producidoPorProducto.get(row.producto_id) || 0) + cantidad);
-      }
-      const totalSandwichesProduced = sandwiches.reduce((total, p) => total + (producidoPorProducto.get(p.id) || 0), 0);
+      const { sales, snapshot, historico } = await datosRemotosDelDia(fecha);
+      const totalSandwichesProduced = snapshot.sandwiches.reduce(
+        (total, p) => total + (Number(p.cantidadProducida) || 0), 0
+      );
+      const sandwichIds = new Set(snapshot.sandwiches.map((p) => p.id));
       const totalSandwichesSold = sales.reduce(
         (total, sale) => total + sale.detalles.reduce(
           (saleTotal, detail) => saleTotal + (sandwichIds.has(detail.productoId) ? Number(detail.cantidad) || 0 : 0),
@@ -1438,18 +1381,14 @@ async function renderHistoryView() {
         ),
         0
       );
-      const historico = historicoDesdeMovimientosRemotos(sandwiches, movimientosDesde, fecha);
-      const totalSandwichesDisponibles = sandwiches.reduce(
-        (total, p) => total + (historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)),
-        0
+      const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
+        (total, p) => total + (historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)), 0
       );
-      const totalStockAyer = sandwiches.reduce(
-        (total, p) => total + (historico.get(p.id)?.stockAlInicio ?? 0),
-        0
+      const totalStockAyer = snapshot.sandwiches.reduce(
+        (total, p) => total + (historico.get(p.id)?.stockAlInicio ?? 0), 0
       );
-      const totalAjustes = sandwiches.reduce(
-        (total, p) => total + (historico.get(p.id)?.ajuste ?? 0),
-        0
+      const totalAjustes = snapshot.sandwiches.reduce(
+        (total, p) => total + (historico.get(p.id)?.ajuste ?? 0), 0
       );
       dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
       renderHistory(dom.historyList, sales, {
@@ -2961,6 +2900,7 @@ function bindEvents() {
         "success",
         `Catalogo actualizado: ${resultado.catalogo.productos} productos, ${resultado.insumosCount} insumos, ${resultado.proveedoresResult.proveedores} proveedores` +
         (resultado.stockResult.insumosActualizados > 0 ? `, stock actualizado en ${resultado.stockResult.insumosActualizados} insumo${resultado.stockResult.insumosActualizados === 1 ? "" : "s"}` : "") +
+        (resultado.stockProductosResult.productosActualizados > 0 ? `, stock actualizado en ${resultado.stockProductosResult.productosActualizados} producto${resultado.stockProductosResult.productosActualizados === 1 ? "" : "s"}` : "") +
         (resultado.variantesResult.aplicado ? `, ${resultado.variantesResult.grupos} grupo${resultado.variantesResult.grupos === 1 ? "" : "s"} de variante` : "") +
         "."
       );

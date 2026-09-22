@@ -1,7 +1,9 @@
-import { getAll, requestToPromise, withStores } from "../db/idb.js";
+import { getAll, getOne, requestToPromise, withStores } from "../db/idb.js";
 import { currentTime, todayISO } from "../utils/format.js";
 import { calculateCartPricing } from "./pricing.js";
 import { deductInsumosForProductionInTx, deductInsumosInTx, restoreInsumosInTx } from "./aprovisionamiento.js";
+import { fetchMovimientosStockCatalogo, fetchStockProductos, fetchVentasDelDia, fetchMovimientosStockDesde, fetchConfiguracionCompartida } from "../db/supabase.js";
+import { trySyncConfiguracionCompartida } from "./sync.js";
 
 const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria", "bebidas"]);
 export const TOGOO_FLAT_TOTAL_CENTAVOS = 300;
@@ -177,16 +179,22 @@ export async function saveProductionComment(comment, fecha = todayISO()) {
     throw new Error("Escribe un comentario antes de guardar.");
   }
   const now = new Date().toISOString();
-  return withStores(["configuracion"], "readwrite", async (stores) => {
+  const comentarios = await withStores(["configuracion"], "readwrite", async (stores) => {
     const currentRow = await requestToPromise(stores.configuracion.get(productionCommentKey(fecha)));
-    const comentarios = normalizeProductionComments(currentRow?.valor);
-    comentarios.push(comentario);
+    const comentariosActualizados = normalizeProductionComments(currentRow?.valor);
+    comentariosActualizados.push(comentario);
     stores.configuracion.put({
       id: productionCommentKey(fecha),
-      valor: comentarios,
+      valor: comentariosActualizados,
       actualizadoEn: now
     });
+    return comentariosActualizados;
   });
+  // Antes esto quedaba SOLO en la tablet — si se rompia, se perdian los
+  // comentarios del dia para siempre. Reusa configuracion_compartida (misma
+  // tabla que ya usan los grupos de variante) con el mismo id que la fila
+  // local, asi no hace falta una tabla nueva para esto.
+  trySyncConfiguracionCompartida(productionCommentKey(fecha), comentarios).catch(() => {});
 }
 
 export async function stockSnapshot(fecha = todayISO()) {
@@ -270,6 +278,214 @@ export async function stockHistoricoPorFecha(fecha) {
     resultado.set(producto.id, { stockAlInicio, stockAlFinal, ajuste, erroresProduccion });
   }
   return resultado;
+}
+
+const CURSOR_MOVIMIENTOS_STOCK = "cursor_movimientos_stock_nube";
+
+// Fusiona el stock de PRODUCTOS (sandwiches/bolleria) entre dispositivos por
+// DELTAS — mismo mecanismo exacto que sincronizarStockInsumosDesdeMovimientos
+// en aprovisionamiento.js, aplicado aca porque stockActual de un producto es
+// igual de derivado: parte de un valor base y se mueve solo a traves de
+// movimientos_stock (venta, produccion, ajuste_stock, devolucion — ver
+// confirmSale, undoSale, saveDailyProduction, adjustStockLevel).
+//
+// Hoy solo vende/produce una tablet, asi que esto no tiene nada que fusionar
+// en la practica (todo se genera en un solo lugar). Queda andando para el
+// dia que eso cambie: si dos dispositivos alguna vez tocaran el stock del
+// mismo producto, la suma de deltas da lo mismo sin importar el orden en que
+// lleguen — a diferencia de traer "el numero final" y pisar, que es
+// exactamente la falla de fondo que causo los incidentes del 13/15/19 de
+// septiembre en produccion_diaria (ver migracion 010).
+//
+// Idempotente por uuid, igual que el resto del sync (CLAUDE.md 8.7): un
+// movimiento ya aplicado localmente nunca se vuelve a sumar. El cursor por
+// fecha es pura optimizacion; el filtro por uuid es lo que garantiza
+// correctitud aunque el cursor fallara.
+export async function sincronizarStockProductosDesdeMovimientos() {
+  const cursor = await getOne("configuracion", CURSOR_MOVIMIENTOS_STOCK);
+  const desde = cursor?.valor || null;
+
+  const [remotos, locales] = await Promise.all([
+    fetchMovimientosStockCatalogo(desde),
+    getAll("movimientos_stock")
+  ]);
+
+  const uuidsLocales = new Set(locales.map((m) => m.uuid).filter(Boolean));
+  const nuevos = remotos.filter((r) => r.uuid && !uuidsLocales.has(r.uuid));
+  if (nuevos.length === 0) return { aplicados: 0, productosActualizados: 0 };
+
+  const deltaPorProducto = new Map();
+  for (const r of nuevos) {
+    if (!r.producto_id) continue;
+    const delta = Number(r.cantidad) || 0;
+    deltaPorProducto.set(r.producto_id, (deltaPorProducto.get(r.producto_id) || 0) + delta);
+  }
+
+  const now = new Date().toISOString();
+  let maxFecha = desde || "";
+  for (const r of nuevos) {
+    if (r.creado_en && r.creado_en > maxFecha) maxFecha = r.creado_en;
+  }
+
+  // El stockActual base se lee ACA DENTRO, recien al escribir — no antes, no
+  // desde un Map armado mientras se esperaba la red (mismo incidente real del
+  // 19/09/2026 en pullCatalogoDesdeNube: leer el local antes de esperar la
+  // red y escribir con ese dato ya viejo pisa cualquier venta/produccion que
+  // haya pasado mientras tanto en este dispositivo).
+  await withStores(["productos", "movimientos_stock", "configuracion"], "readwrite", async (stores) => {
+    for (const [productoId, delta] of deltaPorProducto) {
+      const producto = await requestToPromise(stores.productos.get(productoId));
+      if (!producto) continue; // producto nuevo del otro dispositivo: llega con el proximo pullCatalogoDesdeNube
+      const stockNuevo = (Number(producto.stockActual) || 0) + delta;
+      stores.productos.put({ ...producto, stockActual: stockNuevo, actualizadoEn: now });
+    }
+    for (const r of nuevos) {
+      stores.movimientos_stock.add({
+        uuid: r.uuid,
+        productoId: r.producto_id,
+        tipo: r.tipo,
+        cantidad: Number(r.cantidad) || 0,
+        stockAnterior: r.stock_anterior,
+        stockNuevo: r.stock_nuevo,
+        motivo: r.motivo || undefined,
+        referencia: r.referencia || undefined,
+        fecha: r.fecha,
+        creadoEn: r.creado_en
+      });
+    }
+    stores.configuracion.put({ id: CURSOR_MOVIMIENTOS_STOCK, valor: maxFecha, actualizadoEn: now });
+  });
+
+  return { aplicados: nuevos.length, productosActualizados: deltaPorProducto.size };
+}
+
+// Version remota de stockHistoricoPorFecha() — misma logica, pero sobre
+// movimientos_stock traidos de Supabase en vez de locales (para "modo
+// consulta" y para datosRemotosDelDia, mas abajo). Antes vivia duplicada
+// (con una version mas vieja, sin separar "Error de produccion") en app.js;
+// unificada aca para que ambos usos compartan exactamente la misma logica.
+export function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fecha) {
+  const sumaPorProducto = (lista) => {
+    const map = new Map();
+    for (const m of lista) {
+      map.set(m.producto_id, (map.get(m.producto_id) || 0) + (Number(m.cantidad) || 0));
+    }
+    return map;
+  };
+  const sumaPosterior = sumaPorProducto(movimientosDesde.filter((m) => m.fecha > fecha));
+  const movimientosDelDia = movimientosDesde.filter((m) => m.fecha === fecha);
+  const sumaDelDia = sumaPorProducto(movimientosDelDia);
+  const esErrorDeProduccion = (m) => m.tipo === "ajuste_stock" && (m.motivo === "Error de produccion" || m.motivo === "Error");
+  const sumaAjustesDelDia = sumaPorProducto(
+    movimientosDelDia.filter((m) => (m.tipo === "ajuste_manual" || m.tipo === "ajuste_stock") && !esErrorDeProduccion(m))
+  );
+  const sumaErroresDelDia = sumaPorProducto(movimientosDelDia.filter(esErrorDeProduccion));
+  const resultado = new Map();
+  for (const producto of catalogo) {
+    const stockHoy = Number(producto.stockActual) || 0;
+    const stockAlFinal = stockHoy - (sumaPosterior.get(producto.id) || 0);
+    const stockAlInicio = stockAlFinal - (sumaDelDia.get(producto.id) || 0);
+    const ajuste = sumaAjustesDelDia.get(producto.id) || 0;
+    const erroresProduccion = sumaErroresDelDia.get(producto.id) || 0;
+    resultado.set(producto.id, { stockAlInicio, stockAlFinal, ajuste, erroresProduccion });
+  }
+  return resultado;
+}
+
+function mapVentaRemota(row) {
+  return {
+    id: row.id,
+    fecha: row.fecha,
+    hora: row.hora,
+    totalCentavos: row.total_centavos,
+    saleMode: row.sale_mode || "normal",
+    origen: row.origen,
+    pedidoId: row.pedido_id,
+    clienteNombre: row.cliente_nombre,
+    detalles: (row.detalle_venta || []).map((d) => ({
+      id: d.id,
+      ventaId: d.venta_id,
+      productoId: d.producto_id,
+      productoNombre: d.producto_nombre,
+      cantidad: d.cantidad,
+      precioUnitarioCentavos: d.precio_unitario_centavos,
+      subtotalCentavos: d.subtotal_centavos,
+      opcionNombre: d.opcion_nombre || null
+    }))
+  };
+}
+
+// Version "cualquier dispositivo" de salesForDay/productionSnapshot/
+// stockHistoricoPorFecha juntas — para el exportador de TXT/ZIP (backup.js),
+// que hasta ahora solo funcionaba bien desde la tablet que realmente opera:
+// si se generaba desde otro dispositivo (el celu, una pestaña vieja), leia
+// su base local vacia y entregaba un archivo prolijo pero en cero, sin
+// avisar que estaba mirando en el lugar equivocado (incidente real,
+// 19/09/2026). Junta en UNA sola pasada de red lo mismo que overia el
+// dispositivo que opera, en la MISMA forma exacta (sales/snapshot/historico),
+// para que el resto del codigo de backup.js no tenga que saber de donde
+// salio. El catalogo (nombre/categoria/controlaStock) se lee local porque
+// eso ya es identico en todos los dispositivos via seed + sync de catalogo;
+// lo unico que de verdad varia por dispositivo es el stock EN VIVO, y eso
+// se trae de Supabase.
+export async function datosRemotosDelDia(fecha) {
+  const [productosLocales, stockRemoto, ventasRemotas, movimientosDesde, comentarioRow] = await Promise.all([
+    listProducts(),
+    fetchStockProductos(),
+    fetchVentasDelDia(fecha),
+    fetchMovimientosStockDesde(fecha),
+    fetchConfiguracionCompartida(productionCommentKey(fecha)).catch(() => null)
+  ]);
+
+  const stockById = new Map(stockRemoto.map((row) => [row.id, Number(row.stock_actual)]));
+  const productos = productosLocales.map((p) => ({
+    ...p,
+    stockActual: stockById.has(p.id) ? stockById.get(p.id) : p.stockActual
+  }));
+
+  const sales = ventasRemotas.map(mapVentaRemota);
+
+  const movimientosDelDia = movimientosDesde.filter((m) => m.fecha === fecha);
+  const producedByProduct = new Map();
+  const soldByProduct = new Map();
+  const movementsByProduct = new Map();
+  for (const m of movimientosDelDia) {
+    if (m.tipo === "produccion") {
+      producedByProduct.set(m.producto_id, (producedByProduct.get(m.producto_id) || 0) + (Number(m.cantidad) || 0));
+    }
+    if (m.tipo === "venta") {
+      soldByProduct.set(m.producto_id, (soldByProduct.get(m.producto_id) || 0) + Math.abs(Number(m.cantidad) || 0));
+    } else if (m.tipo === "devolucion") {
+      soldByProduct.set(m.producto_id, (soldByProduct.get(m.producto_id) || 0) - Math.abs(Number(m.cantidad) || 0));
+    }
+    if (m.tipo === "produccion" || m.tipo === "ajuste_manual" || m.tipo === "ajuste_stock") {
+      const list = movementsByProduct.get(m.producto_id) || [];
+      list.push({ tipo: m.tipo, motivo: m.motivo, cantidad: m.cantidad, creadoEn: m.creado_en });
+      movementsByProduct.set(m.producto_id, list);
+    }
+  }
+
+  const conDatos = (product) => ({
+    ...product,
+    cantidadProducida: producedByProduct.get(product.id) || 0,
+    movimientosProduccion: movementsByProduct.get(product.id) || [],
+    vendidoHoy: soldByProduct.get(product.id) || 0
+  });
+
+  const comentarios = normalizeProductionComments(comentarioRow?.valor);
+
+  const snapshot = {
+    fecha,
+    comentarios,
+    sandwiches: productos.filter((p) => p.categoriaId === "sandwiches" && p.controlaStock).map(conDatos),
+    bolleria: productos.filter((p) => p.categoriaId === "bolleria").map(conDatos),
+    bebidas: productos.filter((p) => p.categoriaId === "bebidas").map(conDatos),
+    productionProducts: productos.filter((p) => PRODUCTION_CATEGORIES.has(p.categoriaId) && p.controlaStock).map(conDatos)
+  };
+
+  const historico = historicoDesdeMovimientosRemotos(productos, movimientosDesde, fecha);
+
+  return { sales, products: productos, snapshot, historico, movimientosDelDia };
 }
 
 export async function adjustStockLevel(productId, newStockValue, reason, fecha = todayISO()) {

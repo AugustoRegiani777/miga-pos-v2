@@ -328,6 +328,18 @@ export async function pushCatalogoSnapshot(categorias, productos) {
   })));
 }
 
+// stock_actual NUNCA va aca — deliberadamente. Esta funcion empuja la
+// DEFINICION del insumo (nombre/unidad/minimos), y se llama desde 8 lugares
+// distintos del codigo (crear insumo, confirmar factura, calibrar, editar
+// proveedor, agregar variante, boot de la app...) cada vez que cambia
+// cualquier cosa de un insumo — no solo su stock. Si stock_actual viajara
+// en este mismo payload, cualquiera de esos 8 lugares pisaria sin darse
+// cuenta el stock en vivo de Supabase con lo que este dispositivo tenia
+// guardado en ESE momento (incidente real confirmado 22/09/2026, caso
+// "atun": un dispositivo con datos viejos abrio la app y piso el stock real
+// con un numero de dias atras). El stock en vivo vive en stock_insumos,
+// derivado SOLO del trigger sobre movimientos_insumos (ver migracion 012) —
+// asi que estructuralmente ya no hay forma de repetir este bug desde aca.
 export async function pushInsumosSnapshot(insumos) {
   return upsert("insumos", insumos.map(i => ({
     id: i.id,
@@ -335,7 +347,6 @@ export async function pushInsumosSnapshot(insumos) {
     unidad: i.unidad,
     unidad_compra: i.unidadCompra || null,
     factor_conversion: i.factorConversion,
-    stock_actual: i.stockActual,
     stock_minimo: i.stockMinimo,
     stock_critico: i.stockCritico,
     necesita_calibracion: i.necesitaCalibracion || false,
@@ -364,19 +375,27 @@ export async function pushRecetasSnapshot(recetas) {
 // asignar un producto), no una lista de entidades con su propio ciclo de
 // vida. Sync tipo "ultimo que escribe gana" — igual que productos/recetas,
 // no hace falta merge por delta porque no es una cantidad que se acumula.
+// Punto generico para cualquier config de baja frecuencia que deba viajar
+// entre dispositivos sin ameritar su propia tabla — un id fijo (o, para
+// datos por fecha, "algo:fecha") + un blob JSON. Ver configuracion_compartida
+// en supabase-schema.sql.
+export async function pushConfiguracionCompartida(id, valor) {
+  return upsert("configuracion_compartida", [{ id, valor, actualizado_en: new Date().toISOString() }]);
+}
+
+export async function fetchConfiguracionCompartida(id) {
+  const filas = await sbFetch(`/configuracion_compartida?id=eq.${id}&select=*`);
+  return filas?.[0] || null;
+}
+
 const VARIANTES_GRUPOS_CONFIG_ID = "variantes_grupos";
 
 export async function pushVariantesGrupos(grupos) {
-  return upsert("configuracion_compartida", [{
-    id: VARIANTES_GRUPOS_CONFIG_ID,
-    valor: grupos,
-    actualizado_en: new Date().toISOString()
-  }]);
+  return pushConfiguracionCompartida(VARIANTES_GRUPOS_CONFIG_ID, grupos);
 }
 
 export async function fetchVariantesGrupos() {
-  const filas = await sbFetch(`/configuracion_compartida?id=eq.${VARIANTES_GRUPOS_CONFIG_ID}&select=*`);
-  return filas?.[0] || null;
+  return fetchConfiguracionCompartida(VARIANTES_GRUPOS_CONFIG_ID);
 }
 
 export async function pushProveedoresSnapshot(proveedores) {
@@ -422,6 +441,19 @@ export async function pushMovimientosInsumos(movimientos) {
     fecha: m.fecha,
     creado_en: m.creadoEn
   })), "uuid");
+}
+
+export async function pushHistorialReceta(evento) {
+  return upsertOnConflict("historial_recetas", [{
+    uuid: evento.uuid,
+    receta_id: evento.recetaId,
+    producto_id: evento.productoId || null,
+    insumo_id: evento.insumoId || null,
+    valor_anterior: evento.valorAnterior,
+    valor_nuevo: evento.valorNuevo,
+    motivo: evento.motivo || null,
+    creado_en: evento.creadoEn
+  }], "uuid");
 }
 
 // --- Sync para "modo consulta" (Caja/Produccion/Historial de solo lectura
@@ -502,6 +534,15 @@ export async function fetchMovimientosStock(fecha) {
 // puede no ser exacta hasta que se acumule mas historial en Supabase.
 export async function fetchMovimientosStockDesde(fecha) {
   return sbFetch(`/movimientos_stock?fecha=gte.${fecha}&order=fecha.asc`);
+}
+
+// Para fusionar stock de PRODUCTOS entre dispositivos por DELTAS (mismo
+// mecanismo que fetchMovimientosInsumosCatalogo para insumos) — `desde` es
+// opcional, filtra a movimientos mas nuevos que el cursor guardado
+// localmente en vez de traer todo el historial en cada pull.
+export async function fetchMovimientosStockCatalogo(desde) {
+  const filtro = desde ? `&creado_en=gt.${encodeURIComponent(desde)}` : "";
+  return sbFetch(`/movimientos_stock?select=*${filtro}`);
 }
 
 export async function fetchVentasDelDia(fecha) {

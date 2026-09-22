@@ -3,7 +3,7 @@
 -- Ejecutar en: Supabase Dashboard → SQL Editor
 --
 -- Este archivo es el reflejo COMPLETO y ACTUAL de la base — equivale a
--- correr, en orden, la migracion 002 hasta la 009 sobre la version original.
+-- correr, en orden, la migracion 002 hasta la 011 sobre la version original.
 -- Para una base nueva desde cero, corriendo SOLO este archivo alcanza (no
 -- hace falta correr las migraciones numeradas despues). Las migraciones
 -- numeradas quedan igual en el repo como registro historico de como se
@@ -161,6 +161,20 @@ CREATE TABLE IF NOT EXISTS historial_calibraciones (
   estimado_antes    NUMERIC,
   estimado_despues  NUMERIC,
   creado_en         TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Historial de cambios manuales a recetas (Gestion > Recetas) — "antes vs
+-- despues y por que" cada vez que se corrige a mano una cantidad.
+CREATE TABLE IF NOT EXISTS historial_recetas (
+  id             BIGSERIAL PRIMARY KEY,
+  uuid           TEXT UNIQUE,
+  receta_id      TEXT NOT NULL REFERENCES recetas(id) ON DELETE CASCADE,
+  producto_id    TEXT REFERENCES productos(id),
+  insumo_id      TEXT REFERENCES insumos(id),
+  valor_anterior NUMERIC,
+  valor_nuevo    NUMERIC,
+  motivo         TEXT,
+  creado_en      TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Proveedores
@@ -349,6 +363,7 @@ ALTER TABLE detalle_venta          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE insumos                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recetas                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_insumos    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE historial_recetas      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE historial_calibraciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE produccion_diaria      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimientos_stock      ENABLE ROW LEVEL SECURITY;
@@ -392,6 +407,10 @@ CREATE POLICY recetas_update ON recetas FOR UPDATE TO authenticated USING (true)
 CREATE POLICY movimientos_insumos_select ON movimientos_insumos FOR SELECT TO authenticated USING (true);
 CREATE POLICY movimientos_insumos_insert ON movimientos_insumos FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY movimientos_insumos_update ON movimientos_insumos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY historial_recetas_select ON historial_recetas FOR SELECT TO authenticated USING (true);
+CREATE POLICY historial_recetas_insert ON historial_recetas FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY historial_recetas_update ON historial_recetas FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 
 CREATE POLICY historial_calibraciones_select ON historial_calibraciones FOR SELECT TO authenticated USING (true);
 CREATE POLICY historial_calibraciones_insert ON historial_calibraciones FOR INSERT TO authenticated WITH CHECK (true);
@@ -443,6 +462,7 @@ CREATE INDEX IF NOT EXISTS idx_recetas_producto_id         ON recetas(producto_i
 CREATE INDEX IF NOT EXISTS idx_mov_insumos_insumo_id       ON movimientos_insumos(insumo_id);
 CREATE INDEX IF NOT EXISTS idx_mov_insumos_fecha           ON movimientos_insumos(fecha);
 CREATE INDEX IF NOT EXISTS idx_histcal_insumo_id           ON historial_calibraciones(insumo_id);
+CREATE INDEX IF NOT EXISTS idx_histrecetas_receta_id       ON historial_recetas(receta_id);
 CREATE INDEX IF NOT EXISTS idx_mov_stock_fecha             ON movimientos_stock(fecha);
 CREATE INDEX IF NOT EXISTS idx_pedidos_estado              ON pedidos(estado);
 CREATE INDEX IF NOT EXISTS idx_pedidos_fecha_retiro        ON pedidos(fecha_hora_retiro);

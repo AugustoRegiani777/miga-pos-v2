@@ -11,7 +11,9 @@ import {
   pushProduccionDiaria,
   pushMovimientoStock,
   updateVentaAnulada,
-  pushVariantesGrupos
+  pushVariantesGrupos,
+  pushHistorialReceta,
+  pushConfiguracionCompartida
 } from "../db/supabase.js";
 
 const QUEUE_KEY = "miga_sync_queue";
@@ -69,6 +71,10 @@ async function executeOp(op) {
       return updateVentaAnulada(op.payload);
     case "variantes_grupos":
       return pushVariantesGrupos(op.payload);
+    case "historial_receta":
+      return pushHistorialReceta(op.payload);
+    case "configuracion_compartida":
+      return pushConfiguracionCompartida(op.payload.id, op.payload.valor);
     default:
       throw new Error(`Tipo de sync desconocido: ${op.type}`);
   }
@@ -158,6 +164,14 @@ export function trySyncVentaAnulada({ uuid, fecha, creadoEn }) {
 
 export function trySyncVariantesGrupos(grupos) {
   return tryNow({ type: "variantes_grupos", payload: grupos });
+}
+
+export function trySyncHistorialReceta(evento) {
+  return tryNow({ type: "historial_receta", payload: evento });
+}
+
+export function trySyncConfiguracionCompartida(id, valor) {
+  return tryNow({ type: "configuracion_compartida", payload: { id, valor } });
 }
 
 // Retry automático al recuperar conexión, más un reintento periódico.

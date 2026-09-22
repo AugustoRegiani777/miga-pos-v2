@@ -1,7 +1,7 @@
 import { getAll, getOne, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta } from "./sync.js";
 import { fetchInsumosCatalogo, fetchMovimientosInsumosCatalogo } from "../db/supabase.js";
 
 // Punto unico para "armar un insumo nuevo" — antes esta misma logica estaba
@@ -595,18 +595,23 @@ export async function actualizarReceta(recetaId, nuevaCantidadRaw, motivo = "", 
     ...(recetaFija !== null ? { recetaFija } : {})
   };
 
+  const eventoHistorial = {
+    uuid: crypto.randomUUID(),
+    recetaId,
+    productoId: receta.productoId,
+    insumoId: receta.insumoId,
+    valorAnterior,
+    valorNuevo: nuevaCantidad,
+    motivo: motivo.trim(),
+    creadoEn: now
+  };
+
   await withStores(["recetas", "historial_recetas"], "readwrite", (stores) => {
     stores.recetas.put(updatedReceta);
-    stores.historial_recetas.add({
-      recetaId,
-      productoId: receta.productoId,
-      insumoId: receta.insumoId,
-      valorAnterior,
-      valorNuevo: nuevaCantidad,
-      motivo: motivo.trim(),
-      creadoEn: now
-    });
+    stores.historial_recetas.add(eventoHistorial);
   });
+
+  trySyncHistorialReceta(eventoHistorial).catch(() => {});
 }
 
 export async function exportarListaCompras() {
