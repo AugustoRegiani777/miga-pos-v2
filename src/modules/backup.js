@@ -1,7 +1,55 @@
 import { exportAllData, getAll, importAllData } from "../db/idb.js";
-import { listProducts, productionSnapshot, salesForDay, stockHistoricoPorFecha } from "./business.js";
+import { listProducts, productionSnapshot, salesForDay, stockHistoricoPorFecha, datosRemotosDelDia } from "./business.js";
 import { centsToMoney, downloadText, shareOrDownloadText, shareOrDownloadBlob, normalizeText, todayISO } from "../utils/format.js";
 import { createZip } from "../utils/zip.js";
+
+const MODO_CONSULTA_KEY = "miga_modo_consulta";
+
+function isModoConsulta() {
+  try { return localStorage.getItem(MODO_CONSULTA_KEY) === "1"; }
+  catch { return false; }
+}
+
+// El exportador tiene que funcionar igual de bien desde CUALQUIER
+// dispositivo, no solo la tablet que realmente opera — antes, generarlo
+// desde otro dispositivo (el celu, una pestaña vieja) leia una base local
+// vacia y entregaba un archivo prolijo pero en cero, sin avisar que estaba
+// mirando en el lugar equivocado (incidente real, 19/09/2026). En modo
+// consulta se trae todo de Supabase (ver datosRemotosDelDia en business.js);
+// en el dispositivo que opera, se sigue leyendo local como siempre — mismos
+// datos, misma forma exacta, el resto de este archivo no necesita saber de
+// donde salieron.
+async function obtenerDatosDelDia(fecha) {
+  if (isModoConsulta()) {
+    const { sales, products, snapshot, historico, movimientosDelDia } = await datosRemotosDelDia(fecha);
+    // Normalizado a la MISMA forma (camelCase) que movimientos_stock local,
+    // para que el resto de este archivo arme "AJUSTES DE STOCK" sin tener
+    // que saber si los datos vinieron de local o de la nube.
+    const stockAdjustments = movimientosDelDia
+      .filter((m) => m.tipo === "ajuste_stock")
+      .map((m) => ({
+        productoId: m.producto_id,
+        stockAnterior: m.stock_anterior,
+        stockNuevo: m.stock_nuevo,
+        motivo: m.motivo,
+        referencia: m.referencia,
+        creadoEn: m.creado_en
+      }))
+      .sort((a, b) => String(a.creadoEn || "").localeCompare(String(b.creadoEn || "")));
+    return { sales, products, snapshot, historico, stockAdjustments };
+  }
+  const [sales, products, snapshot, historico, movimientosStock] = await Promise.all([
+    salesForDay(fecha),
+    listProducts(),
+    productionSnapshot(fecha),
+    stockHistoricoPorFecha(fecha),
+    getAll("movimientos_stock")
+  ]);
+  const stockAdjustments = movimientosStock
+    .filter((m) => m.fecha === fecha && m.tipo === "ajuste_stock")
+    .sort((a, b) => String(a.creadoEn || "").localeCompare(String(b.creadoEn || "")));
+  return { sales, products, snapshot, historico, stockAdjustments };
+}
 
 const FALLBACK_CATEGORIES = [
   {
@@ -79,15 +127,9 @@ function padL(str, width) {
 }
 
 export async function buildSalesSummaryText(fecha) {
-  const sales = await salesForDay(fecha);
-  const products = await listProducts();
-  const snapshot = await productionSnapshot(fecha);
-  const historico = await stockHistoricoPorFecha(fecha);
+  const { sales, products, snapshot, historico, stockAdjustments } = await obtenerDatosDelDia(fecha);
   const productsById = new Map(products.map((p) => [p.id, p]));
   const productsByName = new Map(products.map((p) => [normalizeText(p.nombre), p]));
-  const stockAdjustments = (await getAll("movimientos_stock"))
-    .filter((m) => m.fecha === fecha && m.tipo === "ajuste_stock")
-    .sort((a, b) => String(a.creadoEn || "").localeCompare(String(b.creadoEn || "")));
 
   const salesSummary = new Map();
   const toGooByProduct = new Map();
@@ -412,10 +454,7 @@ export async function exportSalesSummaryRange(fechaDesde, fechaHasta) {
 }
 
 export async function exportDailySummaryJSON(fecha) {
-  const sales = await salesForDay(fecha);
-  const products = await listProducts();
-  const snapshot = await productionSnapshot(fecha);
-  const historico = await stockHistoricoPorFecha(fecha);
+  const { sales, products, snapshot, historico } = await obtenerDatosDelDia(fecha);
   const productsById = new Map(products.map((p) => [p.id, p]));
   const productsByName = new Map(products.map((p) => [normalizeText(p.nombre), p]));
 
