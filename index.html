@@ -12,6 +12,13 @@
   <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body>
+  <!-- Reloj simulado: solo se muestra corriendo local contra staging (ver
+       supabase.js / format.js). En la tablet real (Netlify) queda oculto
+       siempre, sin excepcion. -->
+  <div class="reloj-simulado" id="reloj-simulado" hidden>
+    <span>🧪 STAGING — hoy: <strong id="reloj-simulado-fecha"></strong></span>
+    <button type="button" id="reloj-simulado-avanzar">+1 día</button>
+  </div>
   <section class="login-screen" id="login-screen">
     <form id="login-form" class="login-form" novalidate>
       <h1>Miga POS</h1>

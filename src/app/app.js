@@ -43,7 +43,7 @@ import {
   datosRemotosDelDia
 } from "../modules/business.js";
 import { seedDatabase, getAll } from "../db/idb.js";
-import { todayISO, centsToMoney, slugify } from "../utils/format.js";
+import { todayISO, centsToMoney, slugify, avanzarFechaSimulada } from "../utils/format.js";
 import {
   filterProductButtons,
   renderCart,
@@ -325,6 +325,9 @@ const dom = {
   closePeriodButton: document.querySelector("#close-period-button"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
+  relojSimulado: document.querySelector("#reloj-simulado"),
+  relojSimuladoFecha: document.querySelector("#reloj-simulado-fecha"),
+  relojSimuladoAvanzar: document.querySelector("#reloj-simulado-avanzar"),
   insumoWarningSheet: document.querySelector("#insumo-warning-sheet"),
   insumoWarningBackdrop: document.querySelector("#insumo-warning-backdrop"),
   closeInsumoWarning: document.querySelector("#close-insumo-warning"),
@@ -2980,6 +2983,22 @@ function bindAuthEvents() {
 }
 
 
+// Reloj simulado (solo local/staging, ver format.js) — recarga la pagina
+// entera al avanzar el dia a proposito: es una herramienta de prueba, no
+// una feature de UX, asi que preferimos la garantia de "todo se vuelve a
+// calcular de cero contra la fecha nueva" por sobre la suavidad de refrescar
+// sin recargar.
+function setupRelojSimulado() {
+  const esLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  if (!esLocal) return;
+  dom.relojSimulado.hidden = false;
+  dom.relojSimuladoFecha.textContent = todayISO();
+  dom.relojSimuladoAvanzar.addEventListener("click", () => {
+    avanzarFechaSimulada();
+    window.location.reload();
+  });
+}
+
 async function bootApp() {
   await seedDatabase();
   await seedInsumos();
@@ -3018,6 +3037,7 @@ async function bootApp() {
 }
 
 export async function startApp() {
+  setupRelojSimulado();
   bindAuthEvents();
   const session = await restoreSession();
   if (session) {

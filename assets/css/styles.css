@@ -2546,3 +2546,32 @@ details[open] > .prov-summary::before {
 
 .ldc-prov-group .ldc-row { padding-left: 1.4rem; border-bottom: none; }
 .ldc-prov-group .ldc-row:last-child { border-bottom: none; }
+
+/* Reloj simulado (solo staging/local) — franja fija arriba de todo, para
+   que sea imposible confundirla con la app real. */
+.reloj-simulado {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.reloj-simulado button {
+  border: none;
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  background: #fff;
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}

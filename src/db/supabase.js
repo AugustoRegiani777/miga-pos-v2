@@ -1,5 +1,25 @@
-const SUPABASE_URL = "https://iknytfgqkdddtqpykgab.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlrbnl0Zmdxa2RkZHRxcHlrZ2FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NjY1OTQsImV4cCI6MjA5ODI0MjU5NH0.1qAJ71w1DaZu1i0G5an6AOuLwyu4_OU-uMvms4AjM0w";
+const PROD_URL = "https://iknytfgqkdddtqpykgab.supabase.co";
+const PROD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlrbnl0Zmdxa2RkZHRxcHlrZ2FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NjY1OTQsImV4cCI6MjA5ODI0MjU5NH0.1qAJ71w1DaZu1i0G5an6AOuLwyu4_OU-uMvms4AjM0w";
+
+// Proyecto de staging — se completa una vez creado desde el dashboard de
+// Supabase (branch arquitectura-productos-v2). Hasta que estos dos campos
+// tengan valor, correr local sigue apuntando a produccion sin romper nada.
+const STAGING_URL = "";
+const STAGING_ANON_KEY = "";
+
+// Solo se usa staging si el codigo corre local (tu compu, localhost) Y ya
+// existe la config de arriba. En Netlify (produccion real) esto siempre da
+// false, sin importar que pase con STAGING_URL — no hay forma de que la
+// tablet real termine apuntando por error a la base de prueba.
+const esLocal = typeof location !== "undefined" && ["localhost", "127.0.0.1"].includes(location.hostname);
+const usarStaging = esLocal && STAGING_URL;
+
+const SUPABASE_URL = usarStaging ? STAGING_URL : PROD_URL;
+const SUPABASE_ANON_KEY = usarStaging ? STAGING_ANON_KEY : PROD_ANON_KEY;
+
+if (usarStaging) {
+  console.warn(`[Miga POS] Corriendo contra STAGING (${STAGING_URL}) — no produccion.`);
+}
 
 const BASE = `${SUPABASE_URL}/rest/v1`;
 const AUTH_BASE = `${SUPABASE_URL}/auth/v1`;
