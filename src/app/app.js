@@ -123,13 +123,14 @@ async function pullCatalogoCompleto() {
     pullProveedoresDesdeNube(),
     pullVariantesGruposDesdeNube()
   ]);
-  // Recien despues de que insumos/productos existan localmente (los pulls de
-  // arriba ya terminaron) tiene sentido aplicarles deltas de stock — si algo
-  // se creo en el otro dispositivo y todavia no llego, su primer movimiento
-  // se descarta aca pero se aplica solo en el proximo refresco.
+  // sincronizarStockProductosDesdeMovimientos DESACTIVADA (22/09/2026): su
+  // primera corrida real produjo un salto de stock sin movimiento que lo
+  // explique (jamon-queso, +10 entre las 17:38 y las 18:20). Apagada hasta
+  // encontrar la causa exacta — sincronizarStockInsumosDesdeMovimientos no
+  // esta relacionada (es codigo mas viejo, no tocado hoy) y sigue activa.
   const [stockResult, stockProductosResult] = await Promise.all([
     sincronizarStockInsumosDesdeMovimientos(),
-    sincronizarStockProductosDesdeMovimientos()
+    Promise.resolve({ aplicados: 0, productosActualizados: 0 })
   ]);
   await refreshGruposVariantes();
   await loadProducts();
