@@ -13,13 +13,12 @@ function fmtFecha(isoString) {
   return `${dia} ${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`;
 }
 
+// Antes esto pegaba el resto (rebanadas sueltas) despues de un punto, como
+// si fuera la parte decimal — con miga (factor 12), 6 rebanadas daba
+// "0.6 paquetes" en vez de la division real, 6/12 = 0.5. Ahora es la
+// division de verdad, igual que la otra rama de abajo (kg/L).
 function fmtPaquetes(amount, insumo) {
-  const fc = insumo.factorConversion;
-  let paquetes = Math.floor(amount / fc);
-  let resto = Math.round(amount % fc);
-  if (resto >= fc) { paquetes++; resto = 0; }
-  if (resto === 0) return `${paquetes} paquetes`;
-  return `${paquetes}.${resto} paquetes`;
+  return `${(amount / insumo.factorConversion).toFixed(2)} paquetes`;
 }
 
 function displayAmount(amount, insumo) {

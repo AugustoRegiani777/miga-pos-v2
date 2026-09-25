@@ -171,7 +171,7 @@ export async function marcarPedidoListo(pedido) {
 
       if (line.product.controlaStock) {
         const stockAnterior = line.product.stockActual;
-        const stockNuevo = Math.max(0, stockAnterior - line.quantity);
+        const stockNuevo = stockAnterior - line.quantity; // = suma de la nube (ver deductInsumosInTx)
         stores.productos.put({ ...line.product, stockActual: stockNuevo, actualizadoEn: now });
         const mov = {
           uuid: crypto.randomUUID(),
@@ -181,6 +181,7 @@ export async function marcarPedidoListo(pedido) {
           stockAnterior,
           stockNuevo,
           referencia: `Pedido #${pedido.id}`,
+          ventaUuid,
           fecha,
           creadoEn: now
         };

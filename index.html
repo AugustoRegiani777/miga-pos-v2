@@ -19,6 +19,12 @@
     <span>🧪 STAGING — hoy: <strong id="reloj-simulado-fecha"></strong></span>
     <button type="button" id="reloj-simulado-avanzar">+1 día</button>
   </div>
+  <!-- Aviso de "sin conexion": lo maneja app.js (setupSyncBadge). Mientras
+       esta visible, todo lo que se hace queda guardado en este dispositivo y
+       sube solo al volver internet. -->
+  <div class="offline-banner" id="offline-banner" role="status" hidden>
+    Sin conexión — lo que hagas se guarda en este dispositivo y se sincroniza solo cuando vuelva internet.
+  </div>
   <section class="login-screen" id="login-screen">
     <form id="login-form" class="login-form" novalidate>
       <h1>Miga POS</h1>
@@ -303,8 +309,8 @@
             <label class="quantity-field">
               <span>Motivo</span>
               <select id="stock-adjust-reason" required>
-                <option value="Recuento de stock" selected>Recuento de stock</option>
-                <option value="Consumo">Consumo</option>
+                <option value="Consumo" selected>Consumo</option>
+                <option value="Baja por desperdicio">Baja por desperdicio</option>
                 <option value="Error de produccion">Error de produccion</option>
                 <option value="Cierre de periodo">Cierre de periodo</option>
               </select>
@@ -363,9 +369,20 @@
           <p>Exporta el cierre del dia en TXT (para imprimir/compartir) o JSON (para analisis de datos).</p>
         </div>
         <div class="backup-actions">
-          <button class="ghost-button" type="button" id="export-sales-summary">Exportar TXT</button>
+          <button class="ghost-button" type="button" id="export-sales-summary">Ver resumen</button>
           <button class="ghost-button" type="button" id="export-sales-json">Exportar JSON</button>
         </div>
+      </section>
+
+      <section class="backup-panel resumen-preview" id="resumen-preview" hidden>
+        <div class="resumen-preview-header">
+          <h2>Resumen del día</h2>
+          <div class="backup-actions">
+            <button class="ghost-button compact" type="button" id="resumen-preview-download">Descargar TXT</button>
+            <button class="ghost-button compact" type="button" id="resumen-preview-close">Cerrar</button>
+          </div>
+        </div>
+        <pre id="resumen-preview-text" class="resumen-preview-text"></pre>
       </section>
 
       <section class="backup-panel" id="historial-rango-panel">
@@ -411,75 +428,6 @@
       </section>
 
       <div id="calibracion-alert" hidden></div>
-
-      <section class="production-sheet-backdrop" id="insumos-ajuste-backdrop" hidden></section>
-
-      <section class="form-section stock-adjust-sheet" id="insumos-ajuste-sheet" aria-hidden="true">
-        <form id="insumos-ajuste-form" class="stock-form" novalidate>
-          <div class="production-sheet-header">
-            <div>
-              <h2>Registrar</h2>
-              <p>Compra recibida o ajuste manual de stock.</p>
-            </div>
-            <button type="button" class="ghost-button compact" id="close-insumos-ajuste" aria-label="Cerrar">Cerrar</button>
-          </div>
-          <div class="sheet-scroll-body">
-            <div class="production-selected-box" id="insumos-ajuste-selected">
-              <strong>Selecciona un insumo</strong>
-              <small>Stock actual: —</small>
-            </div>
-            <div class="insumo-tipo-switcher">
-              <button type="button" class="ghost-button compact active" id="insumo-tipo-compra">Compra</button>
-              <button type="button" class="ghost-button compact" id="insumo-tipo-ajuste">Ajuste manual</button>
-            </div>
-            <label class="quantity-field" id="insumos-compra-field">
-              <span id="insumos-compra-label">Cantidad recibida</span>
-              <input id="insumos-compra-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
-            </label>
-            <div id="insumos-ajuste-field" hidden>
-              <div class="insumo-stepper">
-                <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-minus">−</button>
-                <div class="insumo-stepper-center">
-                  <input id="insumos-ajuste-cantidad" type="number" min="0" step="any" inputmode="decimal">
-                  <span class="insumo-stepper-unit" id="insumos-ajuste-unidad">g</span>
-                </div>
-                <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-plus">+</button>
-              </div>
-              <p class="insumo-stepper-hint" id="insumos-ajuste-delta-hint"></p>
-              <p class="insumo-motivos-label">Motivo del ajuste</p>
-              <div class="insumo-motivos" id="insumos-ajuste-motivos">
-                <label class="insumo-motivo">
-                  <input type="radio" name="insumo-motivo" value="desperdicio">
-                  <div class="insumo-motivo-body">
-                    <strong>Baja por desperdicio</strong>
-                    <span>Producto vencido, derrame o consumo fuera de producción.</span>
-                    <span class="insumo-motivo-badge no-afecta">Se registra como pérdida</span>
-                  </div>
-                </label>
-                <label class="insumo-motivo">
-                  <input type="radio" name="insumo-motivo" value="no_recibido">
-                  <div class="insumo-motivo-body">
-                    <strong>Cantidad no recibida</strong>
-                    <span>La compra llegó incompleta o se registró de más.</span>
-                    <span class="insumo-motivo-badge no-afecta">Solo corrige el stock</span>
-                  </div>
-                </label>
-                <label class="insumo-motivo">
-                  <input type="radio" name="insumo-motivo" value="error_conteo">
-                  <div class="insumo-motivo-body">
-                    <strong>Error de conteo</strong>
-                    <span>El stock registrado no coincidía con el real.</span>
-                    <span class="insumo-motivo-badge no-afecta">Solo corrige el stock</span>
-                  </div>
-                </label>
-              </div>
-            </div>
-          </div>
-          <div class="sheet-footer">
-            <button class="primary-button" type="submit">Guardar</button>
-          </div>
-        </form>
-      </section>
 
       <section class="production-sheet-backdrop" id="factura-backdrop" hidden></section>
 
@@ -591,6 +539,14 @@
         </div>
       </section>
 
+      <label class="quantity-field" id="insumos-orden-field">
+        <span>Ordenar por</span>
+        <select id="insumos-orden">
+          <option value="estado">Estado (crítico primero)</option>
+          <option value="reciente">Recién cargado</option>
+          <option value="cantidad">Cantidad</option>
+        </select>
+      </label>
       <div class="stock-list" id="insumos-list"></div>
     </section>
 
@@ -864,6 +820,80 @@
       </section>
     </section>
   </main>
+
+  <!-- Registrar insumo (compra/ajuste): overlay GLOBAL a proposito, fuera de
+       cualquier .view — se abre desde el aviso de "Falta stock" en
+       Produccion sin cambiar de pestaña, y tambien desde Gestion > Insumos.
+       Si viviera adentro de #view-gestion, el CSS de .view (display:none
+       si no esta .active) lo taparia aunque estuviera "abierto". -->
+  <section class="production-sheet-backdrop" id="insumos-ajuste-backdrop" hidden></section>
+
+  <section class="form-section stock-adjust-sheet" id="insumos-ajuste-sheet" aria-hidden="true">
+    <form id="insumos-ajuste-form" class="stock-form" novalidate>
+      <div class="production-sheet-header">
+        <div>
+          <h2>Registrar</h2>
+          <p>Compra recibida o ajuste manual de stock.</p>
+        </div>
+        <button type="button" class="ghost-button compact" id="close-insumos-ajuste" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="sheet-scroll-body">
+        <div class="production-selected-box" id="insumos-ajuste-selected">
+          <strong>Selecciona un insumo</strong>
+          <small>Stock actual: —</small>
+        </div>
+        <div class="insumo-tipo-switcher">
+          <button type="button" class="ghost-button compact active" id="insumo-tipo-compra">Compra</button>
+          <button type="button" class="ghost-button compact" id="insumo-tipo-ajuste">Ajuste manual</button>
+        </div>
+        <label class="quantity-field" id="insumos-compra-field">
+          <span id="insumos-compra-label">Cantidad recibida</span>
+          <input id="insumos-compra-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+        </label>
+        <div id="insumos-ajuste-field" hidden>
+          <div class="insumo-stepper">
+            <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-minus">−</button>
+            <div class="insumo-stepper-center">
+              <input id="insumos-ajuste-cantidad" type="number" min="0" step="any" inputmode="decimal">
+              <span class="insumo-stepper-unit" id="insumos-ajuste-unidad">g</span>
+            </div>
+            <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-plus">+</button>
+          </div>
+          <p class="insumo-stepper-hint" id="insumos-ajuste-delta-hint"></p>
+          <p class="insumo-motivos-label">Motivo del ajuste</p>
+          <div class="insumo-motivos" id="insumos-ajuste-motivos">
+            <label class="insumo-motivo">
+              <input type="radio" name="insumo-motivo" value="desperdicio">
+              <div class="insumo-motivo-body">
+                <strong>Baja por desperdicio</strong>
+                <span>Producto vencido, derrame o consumo fuera de producción.</span>
+                <span class="insumo-motivo-badge no-afecta">Se registra como pérdida</span>
+              </div>
+            </label>
+            <label class="insumo-motivo">
+              <input type="radio" name="insumo-motivo" value="no_recibido">
+              <div class="insumo-motivo-body">
+                <strong>Cantidad no recibida</strong>
+                <span>La compra llegó incompleta o se registró de más.</span>
+                <span class="insumo-motivo-badge no-afecta">Solo corrige el stock</span>
+              </div>
+            </label>
+            <label class="insumo-motivo">
+              <input type="radio" name="insumo-motivo" value="error_conteo">
+              <div class="insumo-motivo-body">
+                <strong>Error de conteo</strong>
+                <span>El stock registrado no coincidía con el real.</span>
+                <span class="insumo-motivo-badge no-afecta">Solo corrige el stock</span>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="sheet-footer">
+        <button class="primary-button" type="submit">Guardar</button>
+      </div>
+    </form>
+  </section>
 
   <script type="module" src="assets/js/main.js"></script>
 </body>

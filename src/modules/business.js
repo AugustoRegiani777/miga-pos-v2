@@ -1,13 +1,23 @@
-import { getAll, getOne, requestToPromise, withStores } from "../db/idb.js";
+import { getAll, countAll, requestToPromise, withStores } from "../db/idb.js";
 import { currentTime, todayISO } from "../utils/format.js";
 import { calculateCartPricing } from "./pricing.js";
 import { deductInsumosForProductionInTx, deductInsumosInTx, restoreInsumosInTx } from "./aprovisionamiento.js";
-import { fetchMovimientosStockCatalogo, fetchStockProductos, fetchVentasDelDia, fetchMovimientosStockDesde, fetchConfiguracionCompartida } from "../db/supabase.js";
-import { trySyncConfiguracionCompartida } from "./sync.js";
+import { fetchStockProductos, fetchVentasDelDia, fetchMovimientosStockDesde, fetchConfiguracionCompartida } from "../db/supabase.js";
+import { trySyncConfiguracionCompartida, getPendingSyncCount } from "./sync.js";
 
 const PRODUCTION_CATEGORIES = new Set(["sandwiches", "bolleria", "bebidas"]);
+
+// Una correccion de "Error de produccion" (alta o baja) ES parte del numero
+// producido del dia, no un ajuste externo: corrige lo que se cargo mal. Una
+// sola definicion para el camino local y el de modo consulta (Supabase) — antes
+// cada uno la tenia copiada y se separaron (bug del 25/09/2026: el resumen en
+// modo consulta mostraba 23 producidos cuando la correccion dejaba 21).
+// Sirve para filas locales y remotas: ambas usan los campos tipo y motivo.
+export function esCorreccionDeProduccion(m) {
+  return m.tipo === "ajuste_stock" && (m.motivo === "Error de produccion" || m.motivo === "Error");
+}
 export const TOGOO_FLAT_TOTAL_CENTAVOS = 300;
-const DECREASE_ONLY_MOTIVOS = new Set(["Consumo"]);
+const DECREASE_ONLY_MOTIVOS = new Set(["Consumo", "Baja por desperdicio"]);
 const productionCommentKey = (fecha) => `production-comment:${fecha}`;
 
 function normalizeProductionComments(rawValue) {
@@ -103,9 +113,13 @@ export async function productionSnapshot(fecha = todayISO()) {
   // registro fantasma en movimientos_stock hizo que el total mostrado no
   // coincidiera con la suma de sus propias lineas). Con una sola fuente, eso
   // ya no puede pasar — el total SIEMPRE es la suma de lo que se ve debajo.
+  // "Error de produccion" (alta o baja) es una CORRECCION del numero de
+  // producción cargado, no un ajuste externo — por eso se suma directo aca
+  // adentro, no aparte. Si cargaste 5 por error y corregis +2, lo real
+  // producido hoy es 7, no "5 producidos + un ajuste de +2 en otro lado".
   const producedByProduct = new Map();
   for (const movement of movimientosStockHoy) {
-    if (movement.tipo !== "produccion") continue;
+    if (movement.tipo !== "produccion" && !esCorreccionDeProduccion(movement)) continue;
     const cantidad = Number(movement.cantidad) || 0;
     producedByProduct.set(movement.productoId, (producedByProduct.get(movement.productoId) || 0) + cantidad);
   }
@@ -197,41 +211,6 @@ export async function saveProductionComment(comment, fecha = todayISO()) {
   trySyncConfiguracionCompartida(productionCommentKey(fecha), comentarios).catch(() => {});
 }
 
-export async function stockSnapshot(fecha = todayISO()) {
-  const products = await listProducts();
-  const stockMovements = (await getAll("movimientos_stock")).filter((row) => row.fecha === fecha);
-  const producedByProduct = new Map();
-  const soldByProduct = new Map();
-
-  for (const movement of stockMovements) {
-    if (movement.tipo === "produccion" || movement.tipo === "ajuste_manual") {
-      producedByProduct.set(
-        movement.productoId,
-        (producedByProduct.get(movement.productoId) || 0) + (Number(movement.cantidad) || 0)
-      );
-    }
-    if (movement.tipo === "venta") {
-      soldByProduct.set(
-        movement.productoId,
-        (soldByProduct.get(movement.productoId) || 0) + Math.abs(Number(movement.cantidad) || 0)
-      );
-    }
-  }
-
-  return products
-    .filter((product) => product.controlaStock)
-    .map((product) => ({
-      ...product,
-      cantidadProducida: producedByProduct.get(product.id) || 0,
-      cantidadVendida: soldByProduct.get(product.id) || 0
-    }));
-}
-
-// productos.stockActual es un valor EN VIVO (se pisa constantemente), no un
-// historial por dia. Para saber cuanto stock habia en una fecha pasada hay
-// que reconstruirlo: partir del stock de hoy y deshacer los movimientos
-// posteriores a esa fecha. movimientos_stock guarda cada cambio con signo
-// (cantidad ya incluye el +/-), asi que es una resta directa.
 export async function stockHistoricoPorFecha(fecha) {
   const [productos, movimientos] = await Promise.all([getAll("productos"), getAll("movimientos_stock")]);
 
@@ -262,7 +241,7 @@ export async function stockHistoricoPorFecha(fecha) {
   // recuento o una merma, es la correccion de un numero de produccion mal
   // cargado — mezclarlo con los ajustes reales confunde cuanto stock se movio
   // de verdad por causas externas.
-  const esErrorDeProduccion = (m) => m.tipo === "ajuste_stock" && (m.motivo === "Error de produccion" || m.motivo === "Error");
+  const esErrorDeProduccion = esCorreccionDeProduccion;
   const sumaAjustesDelDia = sumaPorProducto(
     movimientosDelDia.filter((m) => (m.tipo === "ajuste_manual" || m.tipo === "ajuste_stock") && !esErrorDeProduccion(m))
   );
@@ -280,83 +259,37 @@ export async function stockHistoricoPorFecha(fecha) {
   return resultado;
 }
 
-const CURSOR_MOVIMIENTOS_STOCK = "cursor_movimientos_stock_nube";
+// Alinea el stock de productos de este dispositivo con la nube (stock_productos,
+// derivado por trigger de movimientos_stock — migracion 004). Mismas reglas de
+// seguridad que reconciliarStockInsumosConNube (aprovisionamiento.js): no corre
+// con operaciones pendientes y aborta si aparecio un movimiento local mientras
+// esperaba la red. Reemplaza al viejo merge por deltas, que era el sospechoso
+// del salto de stock del 22/09.
+export async function reconciliarStockProductosConNube() {
+  if (getPendingSyncCount() > 0) return { omitido: "pendientes", corregidos: [] };
+  const movimientosAntes = await countAll("movimientos_stock");
+  const remotos = await fetchStockProductos();
 
-// Fusiona el stock de PRODUCTOS (sandwiches/bolleria) entre dispositivos por
-// DELTAS — mismo mecanismo exacto que sincronizarStockInsumosDesdeMovimientos
-// en aprovisionamiento.js, aplicado aca porque stockActual de un producto es
-// igual de derivado: parte de un valor base y se mueve solo a traves de
-// movimientos_stock (venta, produccion, ajuste_stock, devolucion — ver
-// confirmSale, undoSale, saveDailyProduction, adjustStockLevel).
-//
-// Hoy solo vende/produce una tablet, asi que esto no tiene nada que fusionar
-// en la practica (todo se genera en un solo lugar). Queda andando para el
-// dia que eso cambie: si dos dispositivos alguna vez tocaran el stock del
-// mismo producto, la suma de deltas da lo mismo sin importar el orden en que
-// lleguen — a diferencia de traer "el numero final" y pisar, que es
-// exactamente la falla de fondo que causo los incidentes del 13/15/19 de
-// septiembre en produccion_diaria (ver migracion 010).
-//
-// Idempotente por uuid, igual que el resto del sync (CLAUDE.md 8.7): un
-// movimiento ya aplicado localmente nunca se vuelve a sumar. El cursor por
-// fecha es pura optimizacion; el filtro por uuid es lo que garantiza
-// correctitud aunque el cursor fallara.
-export async function sincronizarStockProductosDesdeMovimientos() {
-  const cursor = await getOne("configuracion", CURSOR_MOVIMIENTOS_STOCK);
-  const desde = cursor?.valor || null;
-
-  const [remotos, locales] = await Promise.all([
-    fetchMovimientosStockCatalogo(desde),
-    getAll("movimientos_stock")
-  ]);
-
-  const uuidsLocales = new Set(locales.map((m) => m.uuid).filter(Boolean));
-  const nuevos = remotos.filter((r) => r.uuid && !uuidsLocales.has(r.uuid));
-  if (nuevos.length === 0) return { aplicados: 0, productosActualizados: 0 };
-
-  const deltaPorProducto = new Map();
-  for (const r of nuevos) {
-    if (!r.producto_id) continue;
-    const delta = Number(r.cantidad) || 0;
-    deltaPorProducto.set(r.producto_id, (deltaPorProducto.get(r.producto_id) || 0) + delta);
-  }
-
-  const now = new Date().toISOString();
-  let maxFecha = desde || "";
-  for (const r of nuevos) {
-    if (r.creado_en && r.creado_en > maxFecha) maxFecha = r.creado_en;
-  }
-
-  // El stockActual base se lee ACA DENTRO, recien al escribir — no antes, no
-  // desde un Map armado mientras se esperaba la red (mismo incidente real del
-  // 19/09/2026 en pullCatalogoDesdeNube: leer el local antes de esperar la
-  // red y escribir con ese dato ya viejo pisa cualquier venta/produccion que
-  // haya pasado mientras tanto en este dispositivo).
-  await withStores(["productos", "movimientos_stock", "configuracion"], "readwrite", async (stores) => {
-    for (const [productoId, delta] of deltaPorProducto) {
-      const producto = await requestToPromise(stores.productos.get(productoId));
-      if (!producto) continue; // producto nuevo del otro dispositivo: llega con el proximo pullCatalogoDesdeNube
-      const stockNuevo = (Number(producto.stockActual) || 0) + delta;
-      stores.productos.put({ ...producto, stockActual: stockNuevo, actualizadoEn: now });
+  const corregidos = [];
+  let abortado = null;
+  await withStores(["productos", "movimientos_stock"], "readwrite", async (stores) => {
+    const movimientosAhora = await requestToPromise(stores.movimientos_stock.count());
+    if (movimientosAhora !== movimientosAntes) { abortado = "actividad"; return; }
+    if (getPendingSyncCount() > 0) { abortado = "pendientes"; return; }
+    const now = new Date().toISOString();
+    for (const r of remotos) {
+      const nube = Number(r.stock_actual);
+      if (!Number.isFinite(nube)) continue;
+      const local = await requestToPromise(stores.productos.get(r.id));
+      if (!local || !local.controlaStock) continue;
+      const antes = Number(local.stockActual) || 0;
+      if (antes === nube) continue;
+      stores.productos.put({ ...local, stockActual: nube, actualizadoEn: now });
+      corregidos.push({ id: r.id, nombre: local.nombre, antes, despues: nube });
     }
-    for (const r of nuevos) {
-      stores.movimientos_stock.add({
-        uuid: r.uuid,
-        productoId: r.producto_id,
-        tipo: r.tipo,
-        cantidad: Number(r.cantidad) || 0,
-        stockAnterior: r.stock_anterior,
-        stockNuevo: r.stock_nuevo,
-        motivo: r.motivo || undefined,
-        referencia: r.referencia || undefined,
-        fecha: r.fecha,
-        creadoEn: r.creado_en
-      });
-    }
-    stores.configuracion.put({ id: CURSOR_MOVIMIENTOS_STOCK, valor: maxFecha, actualizadoEn: now });
   });
 
-  return { aplicados: nuevos.length, productosActualizados: deltaPorProducto.size };
+  return abortado ? { omitido: abortado, corregidos: [] } : { corregidos };
 }
 
 // Version remota de stockHistoricoPorFecha() — misma logica, pero sobre
@@ -375,7 +308,7 @@ export function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fec
   const sumaPosterior = sumaPorProducto(movimientosDesde.filter((m) => m.fecha > fecha));
   const movimientosDelDia = movimientosDesde.filter((m) => m.fecha === fecha);
   const sumaDelDia = sumaPorProducto(movimientosDelDia);
-  const esErrorDeProduccion = (m) => m.tipo === "ajuste_stock" && (m.motivo === "Error de produccion" || m.motivo === "Error");
+  const esErrorDeProduccion = esCorreccionDeProduccion;
   const sumaAjustesDelDia = sumaPorProducto(
     movimientosDelDia.filter((m) => (m.tipo === "ajuste_manual" || m.tipo === "ajuste_stock") && !esErrorDeProduccion(m))
   );
@@ -450,7 +383,7 @@ export async function datosRemotosDelDia(fecha) {
   const soldByProduct = new Map();
   const movementsByProduct = new Map();
   for (const m of movimientosDelDia) {
-    if (m.tipo === "produccion") {
+    if (m.tipo === "produccion" || esCorreccionDeProduccion(m)) {
       producedByProduct.set(m.producto_id, (producedByProduct.get(m.producto_id) || 0) + (Number(m.cantidad) || 0));
     }
     if (m.tipo === "venta") {
@@ -731,6 +664,7 @@ export async function confirmSale(items) {
           stockAnterior,
           stockNuevo,
           referencia: `Venta #${saleId}`,
+          ventaUuid,
           fecha,
           creadoEn: now
         };
@@ -747,7 +681,7 @@ export async function confirmSale(items) {
       .filter((line) => !line.product.controlaStock)
       .map((line) => ({ productId: line.product.id, quantity: line.quantity, opcionNombre: line.opcionNombre }));
     const movimientosInsumos = itemsParaInsumos.length > 0
-      ? await deductInsumosInTx(stores, itemsParaInsumos, saleId, fecha, now)
+      ? await deductInsumosInTx(stores, itemsParaInsumos, saleId, fecha, now, ventaUuid)
       : [];
 
     return {
@@ -817,6 +751,7 @@ export async function undoSale(ventaId) {
           stockAnterior,
           stockNuevo,
           referencia: `Venta #${ventaId} anulada`,
+          ventaUuid: venta.uuid || undefined,
           fecha,
           creadoEn: now
         };
@@ -828,7 +763,7 @@ export async function undoSale(ventaId) {
     }
 
     const movimientosInsumos = itemsParaRestituirInsumos.length > 0
-      ? await restoreInsumosInTx(stores, itemsParaRestituirInsumos, ventaId, fecha, now)
+      ? await restoreInsumosInTx(stores, itemsParaRestituirInsumos, ventaId, fecha, now, venta.uuid || undefined)
       : [];
 
     stores.ventas.put({ ...venta, anulada: true, anuladaEn: now });

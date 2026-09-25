@@ -24,7 +24,12 @@ export const STORE_NAMES = [
 // Basado en análisis de 18 días de ventas reales (mayo-junio 2026): ~113 sándwiches/día promedio.
 // stockMinimo = 3 días de consumo | stockCritico = 1.5 días de consumo
 // v7: borra el insumo obsoleto "Mezcla" (reemplazado por Mayonesa, nunca debio quedar activo)
-export const INSUMOS_SEED_VERSION = 8;
+// v9/v10: modo demo (branch arquitectura-productos-v2) — solo quedan activos
+// los insumos de los 7 productos de prueba, ver REVERTIR ANTES DE MERGEAR
+// abajo. v10 porque v9 ya habia quedado guardada localmente antes de que el
+// cambio de activo estuviera completo (savedVersion < version no volvia a
+// disparar la actualizacion).
+export const INSUMOS_SEED_VERSION = 10;
 
 // Nombres de insumos obsoletos que hay que borrar de instalaciones viejas (no deberian existir)
 export const INSUMOS_OBSOLETOS_NOMBRES = new Set(["Mezcla"]);
@@ -37,27 +42,27 @@ export const initialInsumos = [
   // (38+11.5) × 20g = ~990g/día
   { id: "jamon-york",       nombre: "Jamon york",          unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 3000, stockCritico: 1500, esEstimado: false, activo: true },
   // 13.1 × 20g = ~262g/día
-  { id: "jamon-serrano",    nombre: "Jamon serrano",       unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 800,  stockCritico: 400,  esEstimado: false, activo: true },
+  { id: "jamon-serrano",    nombre: "Jamon serrano",       unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 800,  stockCritico: 400,  esEstimado: false, activo: false },
   // 9 × 33g = ~297g/día
-  { id: "pasta-aceituna",   nombre: "Pasta de aceituna",   unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 900,  stockCritico: 450,  esEstimado: false, activo: true },
+  { id: "pasta-aceituna",   nombre: "Pasta de aceituna",   unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 900,  stockCritico: 450,  esEstimado: false, activo: false },
   // 8.7 × 33g = ~287g/día
-  { id: "pimientos-asados", nombre: "Pimientos asados",    unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 850,  stockCritico: 450,  esEstimado: false, activo: true },
+  { id: "pimientos-asados", nombre: "Pimientos asados",    unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 850,  stockCritico: 450,  esEstimado: false, activo: false },
   // 9.4 × 23g = ~216g/día
-  { id: "pesto",            nombre: "Pesto",               unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 650,  stockCritico: 325,  esEstimado: false, activo: true },
+  { id: "pesto",            nombre: "Pesto",               unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 650,  stockCritico: 325,  esEstimado: false, activo: false },
   // 9.4 × 30g = ~282g/día
-  { id: "tomate",           nombre: "Tomate",              unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 850,  stockCritico: 425,  esEstimado: true,  activo: true },
+  { id: "tomate",           nombre: "Tomate",              unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 850,  stockCritico: 425,  esEstimado: true,  activo: false },
   // 9.4 × 27g = ~254g/día
-  { id: "palta",            nombre: "Palta",               unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 750,  stockCritico: 400,  esEstimado: false, activo: true },
+  { id: "palta",            nombre: "Palta",               unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 750,  stockCritico: 400,  esEstimado: false, activo: false },
   // 9.4 × 33g = ~310g/día
-  { id: "atun",             nombre: "Atun",                unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 950,  stockCritico: 475,  esEstimado: false, activo: true },
+  { id: "atun",             nombre: "Atun",                unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 950,  stockCritico: 475,  esEstimado: false, activo: false },
   // 8.7 × 20g = ~174g/día
-  { id: "queso-crema",      nombre: "Queso crema",         unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 525,  stockCritico: 275,  esEstimado: false, activo: true },
+  { id: "queso-crema",      nombre: "Queso crema",         unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 525,  stockCritico: 275,  esEstimado: false, activo: false },
   // 13.1 × 10g = ~131g/día
-  { id: "rucula",           nombre: "Rucula",              unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 400,  stockCritico: 200,  esEstimado: false, activo: true },
+  { id: "rucula",           nombre: "Rucula",              unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 400,  stockCritico: 200,  esEstimado: false, activo: false },
   // 4.4 × 27g = ~119g/día
-  { id: "berenjena",        nombre: "Berenjena asada",     unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 350,  stockCritico: 175,  esEstimado: false, activo: true },
+  { id: "berenjena",        nombre: "Berenjena asada",     unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 350,  stockCritico: 175,  esEstimado: false, activo: false },
   // 4.4 × 20g = ~88g/día
-  { id: "queso-brie",       nombre: "Queso brie",          unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 275,  stockCritico: 150,  esEstimado: false, activo: true },
+  { id: "queso-brie",       nombre: "Queso brie",          unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 275,  stockCritico: 150,  esEstimado: false, activo: false },
   // ~104 sand × 5g = ~520g/día (mayonesa reemplaza mezcla)
   { id: "mayonesa",         nombre: "Mayonesa",            unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 1550, stockCritico: 800,  esEstimado: true,  activo: true },
   // (11.5+0.3) × 1 = ~12/día — paquete de 24 unidades
@@ -71,7 +76,7 @@ export const initialInsumos = [
   // Leche sin lactosa ~5 bebidas/día = 750ml/día estimado
   { id: "leche-sin-lactosa",nombre: "Leche sin lactosa",   unidad: "ml",       unidadCompra: "L",       factorConversion: 1000, stockActual: 0, stockMinimo: 2250, stockCritico: 1125, esEstimado: true,  activo: true },
   // Dulce de leche — mini-croissant-ddl ~15/día × 20g = 300g/día estimado
-  { id: "dulce-de-leche",   nombre: "Dulce de leche",      unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 900,  stockCritico: 450,  esEstimado: true,  activo: true }
+  { id: "dulce-de-leche",   nombre: "Dulce de leche",      unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 900,  stockCritico: 450,  esEstimado: true,  activo: false }
 ];
 
 export const initialRecetas = [
@@ -177,7 +182,7 @@ export const initialProducts = [
     umbralBajo: 15,
     controlaStock: true,
     orden: 2,
-    activo: true
+    activo: false
   },
   {
     id: "pimiento-gouda-philp",
@@ -189,7 +194,7 @@ export const initialProducts = [
     umbralBajo: 15,
     controlaStock: true,
     orden: 3,
-    activo: true
+    activo: false
   },
   {
     id: "pesto-tomate-queso",
@@ -201,7 +206,23 @@ export const initialProducts = [
     umbralBajo: 15,
     controlaStock: true,
     orden: 4,
-    activo: true
+    activo: false
+  },
+  // Producto real que hoy no se vende (activo: false) — pero tiene que existir en el
+  // catalogo porque su receta esta abajo en initialRecetas (sin este producto, esa
+  // receta apuntaba a un id inexistente y hacia fallar el envio de TODAS las recetas
+  // a Supabase con un 409). Valores copiados tal cual de produccion.
+  {
+    id: "berenjena-brie",
+    categoriaId: "sandwiches",
+    nombre: "Berenjena y queso brie",
+    precioCentavos: 350,
+    sandwichTipo: "basico",
+    stockActual: 0,
+    umbralBajo: 15,
+    controlaStock: true,
+    orden: 5,
+    activo: false
   },
   {
     id: "mortadela-pesto-queso",
@@ -213,7 +234,7 @@ export const initialProducts = [
     umbralBajo: 10,
     controlaStock: true,
     orden: 5,
-    activo: true
+    activo: false
   },
   {
     id: "jamon-serrano-rucula",
@@ -225,7 +246,7 @@ export const initialProducts = [
     umbralBajo: 10,
     controlaStock: true,
     orden: 6,
-    activo: true
+    activo: false
   },
   {
     id: "atun-palta-queso",
@@ -237,7 +258,7 @@ export const initialProducts = [
     umbralBajo: 10,
     controlaStock: true,
     orden: 7,
-    activo: true
+    activo: false
   },
   {
     id: "huevo-jamon",
@@ -261,7 +282,7 @@ export const initialProducts = [
     umbralBajo: 10,
     controlaStock: true,
     orden: 9,
-    activo: true
+    activo: false
   },
   {
     id: "especial-semanal",
@@ -273,7 +294,7 @@ export const initialProducts = [
     umbralBajo: 10,
     controlaStock: true,
     orden: 10,
-    activo: true
+    activo: false
   },
   {
     id: "promo-bebida",
@@ -285,7 +306,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 11,
-    activo: true
+    activo: false
   },
   {
     id: "croissant",
@@ -296,7 +317,7 @@ export const initialProducts = [
     umbralBajo: 4,
     controlaStock: true,
     orden: 1,
-    activo: true
+    activo: false
   },
   {
     id: "mini-croissant",
@@ -307,7 +328,7 @@ export const initialProducts = [
     umbralBajo: 4,
     controlaStock: true,
     orden: 2,
-    activo: true
+    activo: false
   },
   {
     id: "mini-croissant-ddl",
@@ -318,7 +339,7 @@ export const initialProducts = [
     umbralBajo: 4,
     controlaStock: true,
     orden: 3,
-    activo: true
+    activo: false
   },
   {
     id: "pain-au-chocolat",
@@ -329,7 +350,7 @@ export const initialProducts = [
     umbralBajo: 4,
     controlaStock: true,
     orden: 4,
-    activo: true
+    activo: false
   },
   {
     id: "chipa",
@@ -340,7 +361,7 @@ export const initialProducts = [
     umbralBajo: 4,
     controlaStock: true,
     orden: 5,
-    activo: true
+    activo: false
   },
   {
     id: "alfajor-havana",
@@ -351,7 +372,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 6,
-    activo: true
+    activo: false
   },
   {
     id: "cookies",
@@ -362,7 +383,7 @@ export const initialProducts = [
     umbralBajo: 4,
     controlaStock: true,
     orden: 7,
-    activo: true
+    activo: false
   },
   {
     id: "medialunas",
@@ -395,7 +416,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 1,
-    activo: true
+    activo: false
   },
   {
     id: "cortado",
@@ -406,7 +427,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 2,
-    activo: true
+    activo: false
   },
   {
     id: "latte",
@@ -439,7 +460,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 12,
-    activo: true
+    activo: false
   },
   {
     id: "capuccino",
@@ -450,7 +471,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 6,
-    activo: true
+    activo: false
   },
   {
     id: "americano",
@@ -461,7 +482,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 7,
-    activo: true
+    activo: false
   },
   {
     id: "flat-white",
@@ -472,7 +493,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 8,
-    activo: true
+    activo: false
   },
   {
     id: "ice-latte",
@@ -483,7 +504,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 9,
-    activo: true
+    activo: false
   },
   {
     id: "ice-caramel",
@@ -494,7 +515,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 10,
-    activo: true
+    activo: false
   },
   {
     id: "cerveza",
@@ -505,7 +526,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 1,
-    activo: true
+    activo: false
   },
   {
     id: "coca-cola",
@@ -527,7 +548,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 3,
-    activo: true
+    activo: false
   },
   {
     id: "nestea",
@@ -538,7 +559,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 4,
-    activo: true
+    activo: false
   },
   {
     id: "aquiaros",
@@ -549,7 +570,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 5,
-    activo: true
+    activo: false
   },
   {
     id: "jugo",
@@ -560,7 +581,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 6,
-    activo: true
+    activo: false
   },
   {
     id: "agua",
@@ -571,7 +592,7 @@ export const initialProducts = [
     umbralBajo: 0,
     controlaStock: false,
     orden: 7,
-    activo: true
+    activo: false
   }
 ];
 

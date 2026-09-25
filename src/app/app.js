@@ -1,6 +1,6 @@
-import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange } from "../modules/backup.js";
-import { signIn, signOut, restoreSession, fetchStockProductos, fetchVentasDelDia, fetchMovimientosStock } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, sincronizarStockInsumosDesdeMovimientos } from "../modules/aprovisionamiento.js";
+import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, buildSalesSummaryText } from "../modules/backup.js";
+import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, reconciliarStockInsumosConNube } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, pullCatalogoDesdeNube } from "../modules/menu.js";
@@ -19,6 +19,9 @@ import {
   trySyncVentaAnulada,
   setupAutoSync,
   getPendingSyncCount,
+  getPendingVentaUuids,
+  getSyncStatus,
+  subscribeSyncStatus,
   processSyncQueue
 } from "../modules/sync.js";
 import { renderInsumosList, renderInsumoAjusteSelected, renderCalibracionAlert, renderListaComprasSmart, renderCalibracionDashboard, renderCalibracionRecetaSettings, renderRecetasEditor, renderFacturaLineas } from "../ui/render-aprovisionamiento.js";
@@ -38,8 +41,8 @@ import {
   saveProductionComment,
   stockHistoricoPorFecha,
   undoSale,
+  reconciliarStockProductosConNube,
   TOGOO_FLAT_TOTAL_CENTAVOS,
-  sincronizarStockProductosDesdeMovimientos,
   datosRemotosDelDia
 } from "../modules/business.js";
 import { seedDatabase, getAll } from "../db/idb.js";
@@ -70,6 +73,9 @@ let selectedProductionProductId = "";
 let productionSheetOpen = false;
 let insumoWarningSheetOpen = false;
 let pendingProduction = null;
+// Cola de insumos faltantes por cargar, uno atras del otro (ver
+// dom.insumoWarningUpdate y el submit de insumosAjusteForm mas abajo).
+let colaFaltantesInsumos = [];
 let selectedStockAdjustProductId = "";
 let stockAdjustSheetOpen = false;
 let shouldClearProductionCommentInput = false;
@@ -110,11 +116,12 @@ async function refreshGruposVariantes() {
 }
 
 // Todo lo que trae "Actualizar catalogo" de la nube — categorias/productos/
-// recetas, insumos (definicion), proveedores, grupos de variante, y el
-// merge por deltas del stock de insumos Y productos (ver
-// sincronizarStockInsumosDesdeMovimientos en aprovisionamiento.js y
-// sincronizarStockProductosDesdeMovimientos en business.js). Un solo punto
-// para el boton manual Y para el auto-sync silencioso (ver
+// recetas, insumos (definicion), proveedores, grupos de variante, y el stock
+// en vivo de insumos y productos. El stock NO se fusiona ni se suma: la nube
+// lo deriva de los movimientos y es la verdad; este dispositivo alinea su
+// copia local con ella (ver reconciliarStock*ConNube), pero solo cuando no
+// tiene nada pendiente de subir — por eso primero se drena la cola. Un solo
+// punto para el boton manual Y para el auto-sync silencioso (ver
 // sincronizarCatalogoSilencioso), asi nunca se desalinean.
 async function pullCatalogoCompleto() {
   const [catalogo, insumosCount, proveedoresResult, variantesResult] = await Promise.all([
@@ -123,18 +130,14 @@ async function pullCatalogoCompleto() {
     pullProveedoresDesdeNube(),
     pullVariantesGruposDesdeNube()
   ]);
-  // sincronizarStockProductosDesdeMovimientos DESACTIVADA (22/09/2026): su
-  // primera corrida real produjo un salto de stock sin movimiento que lo
-  // explique (jamon-queso, +10 entre las 17:38 y las 18:20). Apagada hasta
-  // encontrar la causa exacta — sincronizarStockInsumosDesdeMovimientos no
-  // esta relacionada (es codigo mas viejo, no tocado hoy) y sigue activa.
-  const [stockResult, stockProductosResult] = await Promise.all([
-    sincronizarStockInsumosDesdeMovimientos(),
-    Promise.resolve({ aplicados: 0, productosActualizados: 0 })
+  await processSyncQueue().catch(() => {});
+  const [stockInsumos, stockProductos] = await Promise.all([
+    reconciliarStockInsumosConNube(),
+    reconciliarStockProductosConNube()
   ]);
   await refreshGruposVariantes();
   await loadProducts();
-  return { catalogo, insumosCount, proveedoresResult, variantesResult, stockResult, stockProductosResult };
+  return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };
 }
 
 let refrescarCatalogoStatusTimeout = null;
@@ -283,6 +286,7 @@ const dom = {
   logoutButton: document.querySelector("#logout-button"),
   appMessage: document.querySelector("#app-message"),
   syncStatusBadge: document.querySelector("#sync-status-badge"),
+  offlineBanner: document.querySelector("#offline-banner"),
   navLinks: document.querySelectorAll(".nav:not(.sub-nav) > .nav-link"),
   views: document.querySelectorAll(".view"),
   productCategories: document.querySelector("#product-categories"),
@@ -323,6 +327,7 @@ const dom = {
   productionGroups: document.querySelector("#production-groups"),
   produccionConsulta: document.querySelector("#produccion-consulta"),
   closePeriodButton: document.querySelector("#close-period-button"),
+  insumosOrden: document.querySelector("#insumos-orden"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
   relojSimulado: document.querySelector("#reloj-simulado"),
@@ -349,6 +354,10 @@ const dom = {
   historyList: document.querySelector("#history-list"),
   historialBackupPanel: document.querySelector("#historial-backup-panel"),
   exportSalesSummary: document.querySelector("#export-sales-summary"),
+  resumenPreview: document.querySelector("#resumen-preview"),
+  resumenPreviewText: document.querySelector("#resumen-preview-text"),
+  resumenPreviewDownload: document.querySelector("#resumen-preview-download"),
+  resumenPreviewClose: document.querySelector("#resumen-preview-close"),
   exportSalesJson: document.querySelector("#export-sales-json"),
   historialRangoForm: document.querySelector("#historial-rango-form"),
   historialRangoDesde: document.querySelector("#historial-rango-desde"),
@@ -523,36 +532,72 @@ function setFlash(text, type = "success") {
   }, 4200);
 }
 
-// Antes esto era invisible: si un push a Supabase fallaba por un motivo que
-// no fuera "sin conexion" (timeout, error puntual de wifi debil), la
-// operacion quedaba encolada para siempre sin que nadie se enterara — asi se
-// perdio produccion real que nunca llego a la nube. El badge muestra cuanto
-// hay pendiente y permite forzar un reintento con un tap.
-function updateSyncBadge() {
-  if (!dom.syncStatusBadge) return;
-  const pending = getPendingSyncCount();
-  if (pending === 0) {
-    dom.syncStatusBadge.hidden = true;
-    return;
+// Estado de sincronizacion siempre visible. Antes era invisible: si un push a
+// Supabase fallaba por un motivo que no fuera "sin conexion", la operacion
+// quedaba encolada para siempre sin que nadie se enterara — asi se perdio
+// produccion real que nunca llego a la nube. Ahora:
+//  - banner "Sin conexion" mientras no hay internet,
+//  - badge con lo pendiente (tocarlo fuerza un reintento inmediato),
+//  - badge rojo si algo esta trabado (error repetido, sesion vencida, memoria llena),
+//  - aviso "Todo sincronizado" cuando se vacia la cola tras haber tenido pendientes.
+let syncPendienteAnterior = 0;
+let syncPendienteDesde = 0;
+let syncRedibujoTimeout = null;
+// Una venta normal se sube en menos de un segundo: si el badge y el aviso
+// aparecieran en cada venta serian ruido. Solo se muestran cuando algo lleva
+// mas de esto pendiente (wifi lento, sin conexion, error).
+const SYNC_VISIBLE_TRAS_MS = 2500;
+
+function renderSyncStatus(status) {
+  if (dom.offlineBanner) dom.offlineBanner.hidden = status.online;
+
+  if (syncPendienteAnterior === 0 && status.pending > 0) syncPendienteDesde = Date.now();
+  const lleva = Date.now() - syncPendienteDesde;
+  const mostrar = status.pending > 0 && (lleva >= SYNC_VISIBLE_TRAS_MS || !status.online || status.lastError);
+  if (status.pending > 0 && !mostrar) {
+    window.clearTimeout(syncRedibujoTimeout);
+    syncRedibujoTimeout = window.setTimeout(() => renderSyncStatus(getSyncStatus()), SYNC_VISIBLE_TRAS_MS - lleva + 50);
   }
-  dom.syncStatusBadge.hidden = false;
-  dom.syncStatusBadge.textContent = `⚠ ${pending} sin sincronizar`;
+
+  const badge = dom.syncStatusBadge;
+  if (badge) {
+    const trabado = status.storageError || status.authBlocked || status.blocked > 0;
+    if ((status.pending === 0 || !mostrar) && !status.storageError) {
+      badge.hidden = true;
+    } else {
+      badge.hidden = false;
+      badge.classList.toggle("is-error", trabado);
+      if (status.storageError) badge.textContent = "⚠ Memoria llena: no se puede guardar mas";
+      else if (status.authBlocked) badge.textContent = `🔒 ${status.pending} sin sincronizar — volvé a iniciar sesión`;
+      else if (status.blocked > 0) badge.textContent = `⚠ ${status.pending} sin sincronizar (${status.blocked} con error)`;
+      else if (status.draining) badge.textContent = `⏳ Sincronizando ${status.pending}...`;
+      else badge.textContent = `⏳ ${status.pending} sin sincronizar`;
+    }
+  }
+
+  if (syncPendienteAnterior > 0 && status.pending === 0 && lleva >= SYNC_VISIBLE_TRAS_MS) {
+    setFlash("Todo sincronizado ✓", "success");
+    if (currentView === "historial" && !document.hidden) refreshView("historial").catch(() => {});
+  }
+  syncPendienteAnterior = status.pending;
 }
 
 function setupSyncBadge() {
-  updateSyncBadge();
-  window.setInterval(updateSyncBadge, 20000);
+  syncPendienteAnterior = getPendingSyncCount();
+  renderSyncStatus(getSyncStatus());
+  subscribeSyncStatus(renderSyncStatus);
+  window.addEventListener("online", () => renderSyncStatus(getSyncStatus()));
+  window.addEventListener("offline", () => renderSyncStatus(getSyncStatus()));
   dom.syncStatusBadge?.addEventListener("click", async () => {
     dom.syncStatusBadge.disabled = true;
-    const resultado = await processSyncQueue().catch((e) => ({ synced: 0, pending: getPendingSyncCount(), lastError: { type: "?", message: e.message } }));
+    const resultado = await processSyncQueue({ force: true }).catch((e) => ({ synced: 0, pending: getPendingSyncCount(), lastError: { type: "?", message: e.message } }));
     const { synced, pending, offline, lastError } = resultado;
     dom.syncStatusBadge.disabled = false;
-    updateSyncBadge();
-    if (synced > 0 && pending === 0) setFlash(`${synced} sincronizados. Todo al dia.`);
-    else if (synced > 0) setFlash(`${synced} sincronizados, ${pending} pendientes todavia.`, "warning");
+    renderSyncStatus(getSyncStatus());
+    if (pending === 0) return; // "Todo sincronizado" lo avisa renderSyncStatus
+    if (synced > 0) setFlash(`${synced} sincronizados, ${pending} pendientes todavia.`, "warning");
     else if (offline) setFlash("Sin conexion — se reintenta solo cuando vuelva el wifi.", "warning");
     else if (lastError) setFlash(`No se pudo sincronizar (${lastError.type}): ${lastError.message}`, "error");
-    else setFlash("No hay cambios pendientes.", "warning");
   });
 }
 
@@ -1153,15 +1198,6 @@ function markConsultaLoaded(container) {
   container.dataset.loaded = "1";
 }
 
-// produccion/ajuste_manual/ajuste_stock cuentan todos (recuento, consumo,
-// error, pedidos offline, cierre de periodo...) — venta/devolucion quedan
-// afuera a proposito, esas se resumen aparte en "Vendidos hoy". Igual filtro
-// que productionSnapshot() en business.js, aplicado aca sobre los
-// movimientos traidos de Supabase.
-function esMovimientoDeProduccion(row) {
-  return row.tipo === "produccion" || row.tipo === "ajuste_manual" || row.tipo === "ajuste_stock";
-}
-
 // "De ayer + Producido - Vendido + Ajustes = Quedan" — Ajustes junta todo lo
 // que mueve stock sin ser produccion ni venta (recuento, consumo, cierre de
 // periodo, alta/baja manual — "Error de produccion" queda afuera, ver
@@ -1206,50 +1242,15 @@ async function renderProductionView() {
     dom.closePeriodButton.hidden = true;
     showConsultaPlaceholder(dom.produccionConsulta, "Cargando...");
     try {
-      const fecha = todayISO();
-      const [catalogo, movimientosRemotos, ventasRemotas] = await Promise.all([
-        catalogoConStockRemoto(),
-        fetchMovimientosStock(fecha),
-        fetchVentasDelDia(fecha)
-      ]);
-      // "Producido hoy" sale de los mismos movimientos_stock que se listan
-      // abajo (tipo "produccion"), nunca de produccion_diaria por separado —
-      // mismo principio que productionSnapshot() en business.js, para que el
-      // total y sus propias lineas nunca puedan desalinearse (ver incidente
-      // del 19/09/2026).
-      const producidoPorProducto = new Map();
-      const movimientosPorProducto = new Map();
-      for (const row of movimientosRemotos.filter(esMovimientoDeProduccion)) {
-        const lista = movimientosPorProducto.get(row.producto_id) || [];
-        lista.push({ tipo: row.tipo, motivo: row.motivo, cantidad: row.cantidad, creadoEn: row.creado_en });
-        movimientosPorProducto.set(row.producto_id, lista);
-        if (row.tipo === "produccion") {
-          const cantidad = Number(row.cantidad) || 0;
-          producidoPorProducto.set(row.producto_id, (producidoPorProducto.get(row.producto_id) || 0) + cantidad);
-        }
-      }
-      const vendidoPorProducto = new Map();
-      for (const venta of ventasRemotas) {
-        for (const detalle of venta.detalle_venta || []) {
-          vendidoPorProducto.set(
-            detalle.producto_id,
-            (vendidoPorProducto.get(detalle.producto_id) || 0) + (Number(detalle.cantidad) || 0)
-          );
-        }
-      }
-      const productosProduccion = catalogo
-        .filter((p) => p.activo && p.controlaStock && (p.categoriaId === "sandwiches" || p.categoriaId === "bolleria"))
-        .map((p) => {
-          const cantidadProducida = producidoPorProducto.get(p.id) || 0;
-          const vendido = vendidoPorProducto.get(p.id) || 0;
-          return {
-            ...p,
-            cantidadProducida,
-            movimientosProduccion: movimientosPorProducto.get(p.id) || [],
-            cantidadAyer: (Number(p.stockActual) || 0) - cantidadProducida + vendido,
-            vendidoHoy: vendido
-          };
-        });
+      // Misma fuente que el Historial y el resumen (datosRemotosDelDia en
+      // business.js): producido = produccion + correcciones de error de
+      // produccion, vendido y "ayer quedaron" salen del ledger. Antes esta
+      // pantalla tenia su propia copia del calculo y se desalineaba (ayer =
+      // stock - producido + vendido ignoraba cualquier ajuste del dia).
+      const { snapshot, historico } = await datosRemotosDelDia(todayISO());
+      const productosProduccion = snapshot.productionProducts
+        .filter((p) => p.categoriaId === "sandwiches" || p.categoriaId === "bolleria")
+        .map((p) => ({ ...p, cantidadAyer: historico.get(p.id)?.stockAlInicio ?? 0 }));
       renderProduccionConsulta(dom.produccionConsulta, productosProduccion);
       markConsultaLoaded(dom.produccionConsulta);
     } catch (error) {
@@ -1369,6 +1370,9 @@ function nudgeStockAdjust(delta) {
 async function renderHistoryView() {
   const fecha = dom.historyDate.value || todayISO();
   dom.historyDate.value = fecha;
+  // La vista previa del resumen es de UNA fecha puntual — si se cambia de
+  // fecha o se recarga la vista, se cierra para no mostrar un dia viejo.
+  dom.resumenPreview.hidden = true;
 
   if (isModoConsulta()) {
     showConsultaPlaceholder(dom.historyList, "Cargando...");
@@ -1438,7 +1442,8 @@ async function renderHistoryView() {
   renderHistory(dom.historyList, sales, {
     onUndoSale: handleUndoSale,
     onShareSale: handleShareSale,
-    onPrintSale: handlePrintSale
+    onPrintSale: handlePrintSale,
+    pendingUuids: getPendingVentaUuids()
   });
 }
 
@@ -1520,13 +1525,21 @@ function updateAjusteDeltaHint(insumo) {
   }
 }
 
-function openInsumoAjusteSheet(insumo) {
+// deficitBase (opcional): cuanto faltaba en la unidad BASE del insumo (ej.
+// gramos), cuando se llega aca desde el aviso de "Falta stock de insumos"
+// en Produccion. Se convierte a la unidad de COMPRA tal cual (sin
+// redondear para arriba — el valor exacto que aviso "Falta stock", para que
+// coincida con lo que el usuario ya vio ahi) y se deja precargado pero
+// editable, por si lo que se compro en la realidad fue otra cantidad.
+function openInsumoAjusteSheet(insumo, deficitBase) {
   selectedInsumoId = insumo.id;
   selectedInsumo = insumo;
   renderInsumoAjusteSelected(dom.insumosAjusteSelected, insumo);
   setInsumosAjusteTipo("compra");
-  dom.insumosCompraLabel.textContent = `Cantidad recibida (${insumo.unidadCompra})`;
-  dom.insumosCompraCantidad.value = "";
+  dom.insumosCompraLabel.textContent = `Cantidad recibida (${insumo.unidadCompra} = ${insumo.factorConversion} ${insumo.unidad})`;
+  dom.insumosCompraCantidad.value = deficitBase > 0
+    ? String(parseFloat((deficitBase / (insumo.factorConversion || 1)).toFixed(3)))
+    : "";
   const stockVal = Number.isInteger(insumo.stockActual) ? insumo.stockActual : parseFloat(insumo.stockActual.toFixed(1));
   dom.insumosAjusteCantidad.value = String(stockVal);
   dom.insumosAjusteUnidad.textContent = insumo.unidad;
@@ -1536,7 +1549,32 @@ function openInsumoAjusteSheet(insumo) {
   dom.insumosCompraCantidad.focus();
 }
 
+// Abre el siguiente insumo de colaFaltantesInsumos (ver dom.insumoWarningUpdate
+// y el submit de insumosAjusteForm) — false si la cola ya esta vacia, para
+// que el que llama sepa si tiene que cerrar todo o dejar la hoja abierta
+// con el proximo insumo.
+async function abrirSiguienteFaltanteInsumo() {
+  if (colaFaltantesInsumos.length === 0) return false;
+  const restantes = colaFaltantesInsumos.length;
+  const faltante = colaFaltantesInsumos.shift();
+  const insumos = await listInsumos();
+  const insumo = insumos.find((i) => i.id === faltante.insumoId);
+  if (!insumo) return abrirSiguienteFaltanteInsumo();
+  openInsumoAjusteSheet(insumo, Math.abs(faltante.stockResultante));
+  if (restantes > 1) setFlash(`Cargá ${insumo.nombre} — quedan ${restantes - 1} más después de este.`, "warning");
+  return true;
+}
+
 function closeInsumoAjusteSheet() {
+  // Si se cierra a mitad de la cadena de faltantes (el usuario cancela en
+  // vez de guardar), se descarta el resto de la cola Y la produccion
+  // pendiente — sin esto, (a) abrir CUALQUIER otro insumo despues seguiria
+  // saltando a los que quedaron pendientes de esta corrida vieja, y (b) una
+  // compra de insumo futura sin ninguna relacion terminaria reintentando
+  // esta MISMA produccion vieja por error (ver el auto-reintento en el
+  // submit de insumosAjusteForm).
+  colaFaltantesInsumos = [];
+  pendingProduction = null;
   setInsumosAjusteSheetOpen(false);
   selectedInsumoId = "";
   selectedInsumo = null;
@@ -1573,9 +1611,24 @@ function closeCalibracionSheet() {
   dom.calibracionCantidad.value = "";
 }
 
+// listInsumos() ya devuelve ordenado por estado (critico/bajo/ok) — los
+// otros dos modos se aplican encima ac, sin tocar esa funcion (sigue
+// sirviendo tal cual para todo lo demas que la usa, ej. la cola de
+// faltantes de produccion).
+function ordenarInsumosParaVista(insumos, modo) {
+  if (modo === "reciente") {
+    return insumos.slice().sort((a, b) => String(b.actualizadoEn || "").localeCompare(String(a.actualizadoEn || "")));
+  }
+  if (modo === "cantidad") {
+    return insumos.slice().sort((a, b) => (Number(b.stockActual) || 0) - (Number(a.stockActual) || 0));
+  }
+  return insumos;
+}
+
 async function renderInsumosView() {
   const insumos = await listInsumos();
-  renderInsumosList(dom.insumosList, insumos, openInsumoAjusteSheet);
+  const ordenados = ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
+  renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet);
   renderCalibracionAlert(dom.calibracionAlert, insumos);
   if (insumosListaComprasVisible) {
     const smartData = await listaDeComprasSmart();
@@ -2294,8 +2347,8 @@ async function handleClosePeriod() {
     }
     setFlash(`Cierre de periodo: ${ajustados} productos puestos en 0${yaEnCero > 0 ? `, ${yaEnCero} ya estaban en 0` : ""}.`, "success");
     await renderProductionView();
-    await renderCashier();
   } catch (error) {
+    await renderCashier();
     setFlash(error.message || "No se pudo cerrar el periodo.", "error");
   } finally {
     closePeriodInProgress = false;
@@ -2380,6 +2433,11 @@ function bindEvents() {
   dom.insumoWarningContinue.addEventListener("click", async () => {
     if (!pendingProduction || productionInProgress) return;
     const { productId, quantityRaw } = pendingProduction;
+    // Se limpia YA, no al final — si no, una compra de insumo totalmente
+    // distinta y posterior (con la cola de faltantes vacia) dispararia por
+    // error esta MISMA produccion de nuevo (ver el auto-reintento agregado
+    // en el submit de insumosAjusteForm).
+    pendingProduction = null;
     closeInsumoWarningSheet();
     try {
       productionInProgress = true;
@@ -2392,15 +2450,22 @@ function bindEvents() {
   });
 
   dom.insumoWarningUpdate.addEventListener("click", async () => {
+    // OJO: closeInsumoWarningSheet() pone pendingProduction en null por su
+    // cuenta (codigo viejo) — hay que guardarlo ANTES de llamarla, no
+    // despues, o siempre se lee null y no se abre nada.
     const pending = pendingProduction;
+    // A proposito NO navega a Gestion — la hoja de "Registrar" es un overlay
+    // global (ver index.html), se abre encima de Produccion sin cambiar de
+    // pestaña. pendingProduction se vuelve a guardar aca (closeInsumoWarningSheet
+    // ya lo limpio): una vez que se termine de cargar toda la cola de
+    // faltantes, el submit de insumosAjusteForm reintenta esta MISMA
+    // produccion sola, sin que el usuario tenga que volver a tocar nada.
     closeInsumoWarningSheet();
     closeProductionSheet();
-    showView("gestion");
-    showGestionSubView("insumos");
     if (pending && pending.faltantes.length > 0) {
-      const insumos = await listInsumos();
-      const insumo = insumos.find((i) => i.id === pending.faltantes[0].insumoId);
-      if (insumo) openInsumoAjusteSheet(insumo);
+      pendingProduction = pending;
+      colaFaltantesInsumos = pending.faltantes.slice();
+      await abrirSiguienteFaltanteInsumo();
     }
   });
 
@@ -2456,9 +2521,27 @@ function bindEvents() {
     renderHistoryView();
   });
 
+  // "Ver resumen": muestra el cierre en pantalla en vez de descargar directo
+  // — la descarga queda como boton aparte adentro del panel.
   dom.exportSalesSummary.addEventListener("click", async () => {
+    const fecha = dom.historyDate.value || todayISO();
+    dom.resumenPreviewText.textContent = "Cargando...";
+    dom.resumenPreview.hidden = false;
+    try {
+      const texto = await buildSalesSummaryText(fecha);
+      dom.resumenPreviewText.textContent = texto.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+    } catch (error) {
+      dom.resumenPreviewText.textContent = `No se pudo armar el resumen: ${error.message || error}`;
+    }
+  });
+
+  dom.resumenPreviewDownload.addEventListener("click", async () => {
     await exportSalesSummary(dom.historyDate.value || todayISO());
     setFlash("Resumen TXT exportado.", "success");
+  });
+
+  dom.resumenPreviewClose.addEventListener("click", () => {
+    dom.resumenPreview.hidden = true;
   });
 
   dom.exportSalesJson.addEventListener("click", async () => {
@@ -2488,6 +2571,7 @@ function bindEvents() {
     }
   });
 
+  dom.insumosOrden?.addEventListener("change", () => { renderInsumosView(); });
   dom.closeInsumosAjuste.addEventListener("click", closeInsumoAjusteSheet);
   dom.insumosAjusteBackdrop.addEventListener("click", closeInsumoAjusteSheet);
   dom.closeCalibracion.addEventListener("click", closeCalibracionSheet);
@@ -2546,8 +2630,29 @@ function bindEvents() {
       await ajustarStockInsumo(selectedInsumoId, delta, tipoGuardar);
       const msgs = { compra: "Compra registrada", desperdicio: "Baja registrada", no_recibido: "Corrección registrada", error_conteo: "Corrección registrada" };
       setFlash(`${msgs[tipoGuardar] ?? "Ajuste registrado"}: ${insumo.nombre}.`, "success");
-      closeInsumoAjusteSheet();
-      await renderInsumosView();
+      // Si viniamos de "Falta stock de insumos" con mas de uno faltante, no
+      // se cierra la hoja — se abre directo el siguiente de la cola, para
+      // cargarlos todos seguidos sin volver a buscar cada uno en el menu.
+      const huboSiguiente = await abrirSiguienteFaltanteInsumo();
+      if (!huboSiguiente) {
+        // OJO: closeInsumoAjusteSheet() pone pendingProduction en null por
+        // su cuenta (para el caso "cancelar a mitad de camino") — hay que
+        // guardarlo ANTES de llamarla, no despues, o siempre se lee null.
+        const pending = pendingProduction;
+        closeInsumoAjusteSheet();
+        // Se termino de cargar toda la cola de faltantes — si esto arranco
+        // desde "Falta stock de insumos" en Produccion, reintenta esa MISMA
+        // produccion sola, sin que el usuario tenga que volver a tocar nada
+        // ni cambiar de pestaña (ver dom.insumoWarningUpdate).
+        if (pending) {
+          try {
+            await commitProduction(pending.productId, pending.quantityRaw);
+          } catch (error) {
+            setFlash(error.message, "error");
+          }
+        }
+        await renderInsumosView();
+      }
     } catch (error) {
       setFlash(error.message || "No se pudo guardar.", "error");
     } finally {
@@ -2903,8 +3008,9 @@ function bindEvents() {
       setRefrescarCatalogoEstado(
         "success",
         `Catalogo actualizado: ${resultado.catalogo.productos} productos, ${resultado.insumosCount} insumos, ${resultado.proveedoresResult.proveedores} proveedores` +
-        (resultado.stockResult.insumosActualizados > 0 ? `, stock actualizado en ${resultado.stockResult.insumosActualizados} insumo${resultado.stockResult.insumosActualizados === 1 ? "" : "s"}` : "") +
-        (resultado.stockProductosResult.productosActualizados > 0 ? `, stock actualizado en ${resultado.stockProductosResult.productosActualizados} producto${resultado.stockProductosResult.productosActualizados === 1 ? "" : "s"}` : "") +
+        (resultado.stockInsumos.corregidos.length > 0 ? `, stock alineado con la nube en ${resultado.stockInsumos.corregidos.length} insumo${resultado.stockInsumos.corregidos.length === 1 ? "" : "s"}` : "") +
+        (resultado.stockProductos.corregidos.length > 0 ? `, ${resultado.stockProductos.corregidos.length} producto${resultado.stockProductos.corregidos.length === 1 ? "" : "s"}` : "") +
+        (resultado.stockInsumos.omitido === "pendientes" ? " (stock sin alinear: hay operaciones sin sincronizar)" : "") +
         (resultado.variantesResult.aplicado ? `, ${resultado.variantesResult.grupos} grupo${resultado.variantesResult.grupos === 1 ? "" : "s"} de variante` : "") +
         "."
       );
@@ -3007,29 +3113,56 @@ async function bootApp() {
   await refreshGruposVariantes();
   setupAutoSync();
   setupSyncBadge();
-  // Subir insumos, recetas, proveedores y proveedor_insumos a Supabase al
-  // arrancar (upsert idempotente) — la lectura de facturas necesita esto del
-  // lado del servidor, no solo la tablet lo usa mas.
-  Promise.all([getAll("insumos"), getAll("recetas"), getAll("proveedores"), getAll("proveedor_insumos")])
-    .then(([insumos, recetas, proveedores, proveedorInsumos]) => {
-      trySyncInsumosSnapshot(insumos).catch(() => {});
-      trySyncRecetasSnapshot(recetas).catch(() => {});
-      trySyncProveedoresSnapshot(proveedores).catch(() => {});
-      trySyncProveedorInsumosSnapshot(proveedorInsumos).catch(() => {});
-    }).catch(() => {});
-  // Catalogo (categorias/productos): ademas de lo que trae el seed, se edita
-  // desde Gestion > Menu (ver menu.js) y se espeja a Supabase al arrancar
-  // para que el dashboard lea el real en vez de mantener su propia copia.
-  Promise.all([getAll("categorias"), getAll("productos")])
-    .then(([categorias, productos]) => {
-      trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
-    }).catch(() => {});
+  // Subir catalogo/insumos/recetas/proveedores a Supabase al arrancar
+  // (upsert idempotente) — la lectura de facturas necesita esto del lado
+  // del servidor, no solo la tablet lo usa mas.
+  //
+  // El ORDEN importa y hay que respetarlo: recetas tiene FK a productos, y
+  // proveedor_insumos tiene FK a insumos Y a proveedores — pushear todo en
+  // paralelo sin esperar arriesga un 409 (la fila con la que se relaciona
+  // todavia no llego del otro lado) en cualquier base que arranque vacia,
+  // como la de staging (confirmado 23/09/2026). En produccion nunca se
+  // noto porque productos/insumos/proveedores ya existian ahi desde antes
+  // de que este codigo se escribiera — nunca se dio la carrera de verdad.
+  //
+  // Un dispositivo en modo consulta NO sube nada al arrancar: solo mira. Si
+  // subiera su copia local (vieja, o vacia si es nuevo) pisaria definiciones
+  // de insumos/recetas editadas desde otro lado.
+  const subidaDeArranque = (async () => {
+    if (isModoConsulta()) return;
+    try {
+      const [categorias, productos] = await Promise.all([getAll("categorias"), getAll("productos")]);
+      await trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
+
+      const [insumos, proveedores] = await Promise.all([getAll("insumos"), getAll("proveedores")]);
+      await Promise.all([
+        trySyncInsumosSnapshot(insumos).catch(() => {}),
+        trySyncProveedoresSnapshot(proveedores).catch(() => {})
+      ]);
+
+      const [recetasLocales, proveedorInsumos] = await Promise.all([getAll("recetas"), getAll("proveedor_insumos")]);
+      // Las recetas se mandan en UN solo lote: una sola que apunte a un
+      // producto que no existe (ej. una receta huerfana del seed) hace fallar
+      // el lote entero con un 409 y NINGUNA receta llega a Supabase. Solo se
+      // suben las que apuntan a un producto real.
+      const idsProductos = new Set(productos.map((p) => p.id));
+      const recetas = recetasLocales.filter((r) => idsProductos.has(r.productoId));
+      await Promise.all([
+        trySyncRecetasSnapshot(recetas).catch(() => {}),
+        trySyncProveedorInsumosSnapshot(proveedorInsumos).catch(() => {})
+      ]);
+    } catch { /* fire-and-forget: nunca bloquea el arranque de la app */ }
+  })();
   // Auto-sync silencioso al abrir la app (ver sincronizarCatalogoSilencioso).
   // Sin await a proposito: no puede demorar el primer render (offline-first).
   // El carrito de Caja siempre arranca vacio en este momento, asi que no
   // existe el riesgo de precio-visto-vs-precio-cobrado que si aplicaria si
   // esto corriera con una venta ya empezada.
-  if (!isModoConsulta()) sincronizarCatalogoSilencioso();
+  // Corre DESPUES de la subida de arranque: mientras haya operaciones sin
+  // subir, la alineacion del stock con la nube se salta a proposito (nunca
+  // pisar algo que la nube todavia no vio) y el dispositivo quedaria con el
+  // stock viejo hasta la proxima vez que se abra Gestion.
+  subidaDeArranque.then(() => sincronizarCatalogoSilencioso());
   dom.historyDate.value = todayISO();
   bindEvents();
   const initialView = window.location.hash.replace("#", "") || "caja";

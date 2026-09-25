@@ -320,7 +320,10 @@ export function renderProduccionConsulta(container, products) {
   }
 }
 
-export function renderHistory(container, sales, { onUndoSale, onShareSale, onPrintSale } = {}) {
+// pendingUuids (opcional): uuids de ventas todavia sin subir a la nube. Sin el,
+// no se muestra el estado de sincronizacion (ej. modo consulta, donde todo
+// lo que se ve ya viene de la nube).
+export function renderHistory(container, sales, { onUndoSale, onShareSale, onPrintSale, pendingUuids } = {}) {
   container.innerHTML = "";
   if (sales.length === 0) {
     container.appendChild(el("p", "empty-state", "No hay ventas registradas para esta fecha."));
@@ -345,6 +348,11 @@ export function renderHistory(container, sales, { onUndoSale, onShareSale, onPri
       </div>
     `;
     row.querySelector("h2").textContent = saleTitle(sale);
+    if (pendingUuids && sale.uuid) {
+      const pendiente = pendingUuids.has(sale.uuid);
+      const badge = el("span", `sale-sync ${pendiente ? "is-pending" : "is-synced"}`, pendiente ? "⏳ sin sincronizar" : "✓");
+      row.querySelector("h2").appendChild(badge);
+    }
     row.querySelector("p").textContent = `${sale.fecha} - ${sale.hora}`;
     row.querySelector("strong").textContent = centsToMoney(sale.totalCentavos);
     const list = row.querySelector("ul");

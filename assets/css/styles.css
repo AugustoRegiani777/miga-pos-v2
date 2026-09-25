@@ -1,9 +1,14 @@
 :root {
-  --ink: #17202a;
-  --muted: #607080;
-  --surface: #ffffff;
-  --page: #f4f7f6;
-  --line: #d8e0e0;
+  /* Modo nocturno (23/09/2026) — 5 tokens de fondo/texto; el resto de la
+     paleta (--primary, --accent, --ok, --low, --out) ya tiene contraste
+     suficiente sobre fondo oscuro. Los botones/tarjetas que antes tenian
+     blanco escrito a mano (#ffffff, #eef3f3) ahora usan var(--surface) —
+     por eso el modo oscuro se ve bien en TODAS las vistas, no solo en Caja. */
+  --ink: #e8edf2;
+  --muted: #8b98a5;
+  --surface: #1c242c;
+  --page: #10151a;
+  --line: #2c3640;
   --primary: #17324d;
   --brand: #17324d;
   --primary-2: #1f6f78;
@@ -98,6 +103,42 @@ button {
 
 .sync-status-badge:active {
   opacity: 0.85;
+}
+
+.sync-status-badge.is-error {
+  background: var(--out);
+}
+
+.offline-banner {
+  position: sticky;
+  top: 0;
+  z-index: 998;
+  padding: 10px 16px;
+  background: var(--low);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.sale-sync {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.sale-sync.is-synced {
+  color: var(--ok);
+  border: 1px solid var(--ok);
+}
+
+.sale-sync.is-pending {
+  color: #ffffff;
+  background: var(--low);
 }
 
 .login-screen {
@@ -210,7 +251,7 @@ button {
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #eef3f3;
+  background: var(--surface);
   font-weight: 800;
 }
 
@@ -471,7 +512,7 @@ button {
   min-height: 46px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #eef3f3;
+  background: var(--surface);
   color: var(--ink);
   font-weight: 900;
   cursor: pointer;
@@ -726,7 +767,7 @@ button {
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .production-selected-box strong {
@@ -759,7 +800,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 12px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--ink);
   font-size: 1.15rem;
 }
@@ -868,7 +909,7 @@ button {
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--muted);
   cursor: pointer;
 }
@@ -1006,7 +1047,7 @@ button {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--surface);
   text-align: left;
   padding: 14px;
 }
@@ -1233,7 +1274,7 @@ button {
   min-height: 56px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #eef3f3;
+  background: var(--surface);
   color: var(--primary);
   font-size: 1.8rem;
   font-weight: 900;
@@ -1338,7 +1379,7 @@ button {
   left: 3px;
   width: 20px;
   height: 20px;
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 50%;
   transition: transform 150ms ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -1866,7 +1907,7 @@ button {
   padding: 0.25rem 0.65rem;
   border: 2px solid #d1d5db;
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: #374151;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
@@ -2036,7 +2077,7 @@ button {
   padding: 28px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   text-align: center;
 }
 
@@ -2049,7 +2090,7 @@ button {
 .factura-linea {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   padding: 12px 14px;
   display: grid;
   gap: 10px;
@@ -2145,7 +2186,7 @@ button {
   min-height: 58px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #eef3f3;
+  background: var(--surface);
   color: var(--ink);
   font-weight: 900;
   font-size: 1rem;
@@ -2363,7 +2404,7 @@ details[open] > .prov-summary::before {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
 }
@@ -2395,7 +2436,7 @@ details[open] > .prov-summary::before {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
 }
@@ -2424,7 +2465,7 @@ details[open] > .prov-summary::before {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 8px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
 }
@@ -2550,11 +2591,6 @@ details[open] > .prov-summary::before {
 /* Reloj simulado (solo staging/local) — franja fija arriba de todo, para
    que sea imposible confundirla con la app real. */
 .reloj-simulado {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2566,11 +2602,40 @@ details[open] > .prov-summary::before {
   font-weight: 600;
 }
 
+.resumen-preview {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.resumen-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.resumen-preview-text {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--page);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: ui-monospace, "Courier New", monospace;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  white-space: pre;
+}
+
 .reloj-simulado button {
   border: none;
   border-radius: 999px;
   padding: 0.25rem 0.75rem;
-  background: #fff;
+  background: var(--surface);
   color: var(--accent);
   font-weight: 700;
   cursor: pointer;

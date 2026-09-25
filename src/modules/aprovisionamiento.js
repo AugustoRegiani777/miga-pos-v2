@@ -1,8 +1,8 @@
-import { getAll, getOne, withStores, requestToPromise } from "../db/idb.js";
+import { getAll, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta } from "./sync.js";
-import { fetchInsumosCatalogo, fetchMovimientosInsumosCatalogo } from "../db/supabase.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, getPendingSyncCount } from "./sync.js";
+import { fetchInsumosCatalogo, fetchStockInsumos } from "../db/supabase.js";
 
 // Punto unico para "armar un insumo nuevo" — antes esta misma logica estaba
 // copiada en menu.js, proveedores.js y facturas.js, cada una con su propia
@@ -96,86 +96,52 @@ export async function pullInsumosDesdeNube() {
   return remotos.length;
 }
 
-const CURSOR_MOVIMIENTOS_INSUMOS = "cursor_movimientos_insumos_nube";
-
-// Fusiona el stock de insumos entre dispositivos por DELTAS, no por snapshot.
+// Reconciliacion del stock de insumos con la nube.
 //
-// stockActual de un insumo es un numero DERIVADO: parte de un valor base y se
-// mueve solo a traves de movimientos_insumos (venta, produccion, compra por
-// factura, devolucion, calibracion — ver deductInsumosInTx, restoreInsumosInTx,
-// confirmarFactura, calibrarInsumo). Por eso pullInsumosDesdeNube nunca toca
-// este campo: si trajera un numero final de la nube, pisaria sin darse cuenta
-// la actividad que este mismo dispositivo todavia no llego a empujar.
+// El stock en vivo de un insumo es un valor DERIVADO: la nube lo calcula como
+// la suma de todos sus movimientos (trigger, migracion 012) y es la unica
+// verdad. Este dispositivo guarda una copia local para poder operar sin
+// internet; cuando hay conexion y NO tiene nada pendiente de subir, esa copia
+// se alinea con la nube. Si dos dispositivos operaron (ej. el celu escaneo una
+// factura mientras la tablet vendia lattes), ambos convergen al mismo numero.
 //
-// La forma segura de fusionar un valor derivado entre dos dispositivos que
-// pueden estar offline en cualquier momento es aplicar los EVENTOS que faltan,
-// no reemplazar el resultado — la suma de deltas da lo mismo sin importar en
-// que orden lleguen los movimientos de cada dispositivo. Ejemplo real: el celu
-// escanea una factura y suma 9000ml de leche de avena; mientras tanto la
-// tablet vendio 3 lattes y resto 3x210ml. Cualquiera de los dos que haga
-// "Actualizar catalogo" primero, termina en el mismo numero.
+// Por que asi y no aplicando deltas: sumar "lo que falta" a un valor local
+// depende de que el local ya estuviera perfectamente al dia; un solo desvio
+// (un paso perdido, una tablet vieja) se arrastraba para siempre. Copiar la
+// suma de la nube no tiene memoria: cualquier desvio se cura en la proxima
+// corrida.
 //
-// Idempotente por uuid (igual que el resto del sync, ver CLAUDE.md 8.7): un
-// movimiento ya aplicado localmente — sea porque se creo en ESTE dispositivo,
-// sea porque ya se trajo en un pull anterior — nunca se vuelve a sumar. El
-// cursor por fecha en "configuracion" es pura optimizacion (no traer TODO el
-// historial en cada pull); si algo saliera mal con el cursor, el filtro por
-// uuid sigue garantizando que nunca se aplique un movimiento dos veces.
-export async function sincronizarStockInsumosDesdeMovimientos() {
-  const cursor = await getOne("configuracion", CURSOR_MOVIMIENTOS_INSUMOS);
-  const desde = cursor?.valor || null;
+// Seguridad ante actividad concurrente (nunca pisar algo que la nube todavia
+// no vio):
+//  - no corre si hay operaciones sin subir (getPendingSyncCount),
+//  - y aborta si, mientras esperaba la respuesta de la red, aparecio un
+//    movimiento local nuevo (se compara la cantidad de movimientos antes y
+//    dentro de la transaccion de escritura). Se reintenta en la proxima.
+export async function reconciliarStockInsumosConNube() {
+  if (getPendingSyncCount() > 0) return { omitido: "pendientes", corregidos: [] };
+  const movimientosAntes = await countAll("movimientos_insumos");
+  const remotos = await fetchStockInsumos();
 
-  const [remotos, locales] = await Promise.all([
-    fetchMovimientosInsumosCatalogo(desde),
-    getAll("movimientos_insumos")
-  ]);
-
-  const uuidsLocales = new Set(locales.map((m) => m.uuid).filter(Boolean));
-  const nuevos = remotos.filter((r) => r.uuid && !uuidsLocales.has(r.uuid));
-  if (nuevos.length === 0) return { aplicados: 0, insumosActualizados: 0 };
-
-  const deltaPorInsumo = new Map();
-  for (const r of nuevos) {
-    const delta = Number(r.cantidad) || 0;
-    deltaPorInsumo.set(r.insumo_id, (deltaPorInsumo.get(r.insumo_id) || 0) + delta);
-  }
-
-  const now = new Date().toISOString();
-  let maxFecha = desde || "";
-  for (const r of nuevos) {
-    if (r.creado_en && r.creado_en > maxFecha) maxFecha = r.creado_en;
-  }
-
-  // El stockActual base se lee ACA DENTRO, recien al escribir — no antes,
-  // no desde un Map armado mientras se esperaba la red (mismo incidente real
-  // del 19/09/2026 que en pullCatalogoDesdeNube/menu.js: leer el local antes
-  // de esperar la red y escribir con ese dato ya viejo pisa cualquier
-  // venta/produccion que haya pasado mientras tanto en este dispositivo).
-  await withStores(["insumos", "movimientos_insumos", "configuracion"], "readwrite", async (stores) => {
-    for (const [insumoId, delta] of deltaPorInsumo) {
-      const insumo = await requestToPromise(stores.insumos.get(insumoId));
-      if (!insumo) continue; // insumo nuevo del otro dispositivo: llega con el proximo pullInsumosDesdeNube
-      const stockNuevo = (insumo.stockActual || 0) + delta;
-      stores.insumos.put({ ...insumo, stockActual: stockNuevo, actualizadoEn: now });
+  const corregidos = [];
+  let abortado = null;
+  await withStores(["insumos", "movimientos_insumos"], "readwrite", async (stores) => {
+    const movimientosAhora = await requestToPromise(stores.movimientos_insumos.count());
+    if (movimientosAhora !== movimientosAntes) { abortado = "actividad"; return; }
+    if (getPendingSyncCount() > 0) { abortado = "pendientes"; return; }
+    const now = new Date().toISOString();
+    for (const r of remotos) {
+      const nube = Number(r.stock_actual);
+      if (!Number.isFinite(nube)) continue;
+      const local = await requestToPromise(stores.insumos.get(r.id));
+      if (!local) continue; // insumo que este dispositivo todavia no conoce: llega con pullInsumosDesdeNube
+      const antes = Number(local.stockActual) || 0;
+      if (Math.abs(antes - nube) < 1e-9) continue;
+      stores.insumos.put({ ...local, stockActual: nube, actualizadoEn: now });
+      corregidos.push({ id: r.id, nombre: local.nombre, unidad: local.unidad, antes, despues: nube });
     }
-    for (const r of nuevos) {
-      stores.movimientos_insumos.add({
-        uuid: r.uuid,
-        insumoId: r.insumo_id,
-        tipo: r.tipo,
-        cantidad: Number(r.cantidad) || 0,
-        stockAnterior: r.stock_anterior,
-        stockNuevo: r.stock_nuevo,
-        productoId: r.producto_id || undefined,
-        ventaId: r.venta_id_local || undefined,
-        fecha: r.fecha,
-        creadoEn: r.creado_en
-      });
-    }
-    stores.configuracion.put({ id: CURSOR_MOVIMIENTOS_INSUMOS, valor: maxFecha, actualizadoEn: now });
   });
 
-  return { aplicados: nuevos.length, insumosActualizados: deltaPorInsumo.size };
+  return abortado ? { omitido: abortado, corregidos: [] } : { corregidos };
 }
 
 const SEED_VERSION_KEY = "insumos_seed_version";
@@ -224,7 +190,7 @@ export async function seedInsumos() {
       for (const seedInsumo of initialInsumos) {
         if (existingInsumoIds.has(seedInsumo.id)) {
           const existing = existingInsumos.find(i => i.id === seedInsumo.id);
-          stores.insumos.put({ ...existing, stockMinimo: seedInsumo.stockMinimo, stockCritico: seedInsumo.stockCritico, factorConversion: seedInsumo.factorConversion, unidadCompra: seedInsumo.unidadCompra, actualizadoEn: now });
+          stores.insumos.put({ ...existing, stockMinimo: seedInsumo.stockMinimo, stockCritico: seedInsumo.stockCritico, factorConversion: seedInsumo.factorConversion, unidadCompra: seedInsumo.unidadCompra, activo: seedInsumo.activo, actualizadoEn: now });
         }
       }
       // Borra insumos obsoletos que no deberian existir (ej. "Mezcla", reemplazado por Mayonesa)
@@ -274,17 +240,6 @@ export async function listInsumos() {
     .sort((a, b) => {
       const order = { critico: 0, bajo: 1, ok: 2 };
       return (order[a.estadoStock] - order[b.estadoStock]) || a.nombre.localeCompare(b.nombre);
-    });
-}
-
-export async function listaDeCompras() {
-  const insumos = await listInsumos();
-  return insumos
-    .filter(i => i.estadoStock !== "ok")
-    .map(i => {
-      const target = Math.ceil(i.stockMinimo * 1.5);
-      const deficit = Math.max(0, target - i.stockActual);
-      return { ...i, deficit, enCompraOrden: Math.ceil(deficit / i.factorConversion) };
     });
 }
 
@@ -911,7 +866,7 @@ function calcularConsumoInsumos(todasLasRecetas, saleItems, grupos) {
 
 // Called within confirmSale's transaction. Returns the movimientos created (for sync).
 // saleItems: [{ productId, quantity, opcionNombre }]
-export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) {
+export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now, ventaUuid) {
   const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
   if (todasLasRecetas.length === 0) return [];
   const grupos = await cargarGruposVariantes(stores);
@@ -922,7 +877,10 @@ export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) 
     const insumo = await requestToPromise(stores.insumos.get(insumoId));
     if (!insumo || !insumo.activo) continue;
     const stockAnterior = insumo.stockActual;
-    const stockNuevo = Math.max(0, stockAnterior - total);
+    // Sin piso en 0: el movimiento registra -total y la nube suma exactamente
+    // eso, asi que el stock local tiene que moverse igual. Un negativo es la
+    // señal buscada de "falta cargar una factura", no un error a esconder.
+    const stockNuevo = stockAnterior - total;
     const cal = insumo.ultimaCalibracion
       ? { ...insumo.ultimaCalibracion, ventasPorProducto: { ...insumo.ultimaCalibracion.ventasPorProducto } }
       : { fecha: now, stockEnCalibracion: stockAnterior, ventasPorProducto: {} };
@@ -937,7 +895,7 @@ export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) 
       ultimaCalibracion: cal,
       actualizadoEn: now
     });
-    const mov = { uuid: crypto.randomUUID(), insumoId, tipo: "venta", cantidad: -total, stockAnterior, stockNuevo, ventaId, fecha, creadoEn: now };
+    const mov = { uuid: crypto.randomUUID(), insumoId, tipo: "venta", cantidad: -total, stockAnterior, stockNuevo, ventaId, ventaUuid, fecha, creadoEn: now };
     stores.movimientos_insumos.add(mov);
     movimientosCreados.push(mov);
   }
@@ -948,7 +906,7 @@ export async function deductInsumosInTx(stores, saleItems, ventaId, fecha, now) 
 // business.js) para reponer lo que se habia descontado. No toca la
 // calibracion (una anulacion es una correccion, no un nuevo patron de
 // consumo real).
-export async function restoreInsumosInTx(stores, saleItems, ventaId, fecha, now) {
+export async function restoreInsumosInTx(stores, saleItems, ventaId, fecha, now, ventaUuid) {
   const todasLasRecetas = await requestToPromise(stores.recetas.getAll());
   if (todasLasRecetas.length === 0) return [];
   const grupos = await cargarGruposVariantes(stores);
@@ -961,7 +919,7 @@ export async function restoreInsumosInTx(stores, saleItems, ventaId, fecha, now)
     const stockAnterior = insumo.stockActual;
     const stockNuevo = stockAnterior + total;
     stores.insumos.put({ ...insumo, stockActual: stockNuevo, actualizadoEn: now });
-    const mov = { uuid: crypto.randomUUID(), insumoId, tipo: "devolucion", cantidad: total, stockAnterior, stockNuevo, ventaId, fecha, creadoEn: now };
+    const mov = { uuid: crypto.randomUUID(), insumoId, tipo: "devolucion", cantidad: total, stockAnterior, stockNuevo, ventaId, ventaUuid, fecha, creadoEn: now };
     stores.movimientos_insumos.add(mov);
     movimientosCreados.push(mov);
   }

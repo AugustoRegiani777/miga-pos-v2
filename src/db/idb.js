@@ -178,6 +178,12 @@ export async function getAll(storeName) {
   return requestToPromise(db.transaction(storeName, "readonly").objectStore(storeName).getAll());
 }
 
+// Cantidad de filas sin traerlas a memoria (getAll + .length carga TODO el store).
+export async function countAll(storeName) {
+  const db = await openDatabase();
+  return requestToPromise(db.transaction(storeName, "readonly").objectStore(storeName).count());
+}
+
 export async function getOne(storeName, key) {
   const db = await openDatabase();
   return requestToPromise(db.transaction(storeName, "readonly").objectStore(storeName).get(key));

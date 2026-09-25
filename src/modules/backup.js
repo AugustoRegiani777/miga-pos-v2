@@ -29,6 +29,7 @@ async function obtenerDatosDelDia(fecha) {
       .filter((m) => m.tipo === "ajuste_stock")
       .map((m) => ({
         productoId: m.producto_id,
+        cantidad: m.cantidad,
         stockAnterior: m.stock_anterior,
         stockNuevo: m.stock_nuevo,
         motivo: m.motivo,
@@ -126,103 +127,122 @@ function padL(str, width) {
   return String(str).padStart(width, " ").slice(-width);
 }
 
+const CATEGORY_ORDER = ["Sandwiches", "Bolleria", "Cafe", "Bebidas", "Otros"];
+const MOTIVOS_SALIDA = ["Baja por desperdicio", "Consumo"];
+
+function esMotivoErrorProduccion(motivo) {
+  return motivo === "Error de produccion" || motivo === "Error";
+}
+
+// Cierre del dia, ordenado de arriba hacia abajo:
+//   1. Resumen (plata): ventas + paquetes Too Good To Go = total general
+//   2. Ventas por categoria (Sandwiches / Bolleria / Cafe / Bebidas)
+//   3. Too Good To Go: cuantos paquetes se vendieron y que salio adentro
+//   4. Stock de productos terminados: de ayer + producido - salidas = quedan
+//   5. Salidas sin venta (perdida): desperdicio y consumo, valuadas
+//   6. Detalle venta a venta
 export async function buildSalesSummaryText(fecha) {
   const { sales, products, snapshot, historico, stockAdjustments } = await obtenerDatosDelDia(fecha);
   const productsById = new Map(products.map((p) => [p.id, p]));
   const productsByName = new Map(products.map((p) => [normalizeText(p.nombre), p]));
 
-  const salesSummary = new Map();
-  const toGooByProduct = new Map();
-  const bajaByProduct = new Map();
-  let totalVentaCentavos = 0;
-  let totalToGooCentavos = 0;
-  let totalBajaCentavos = 0;
-  let totalToGooUnidades = 0;
-  let totalBajaUnidades = 0;
+  const ventasPorProducto = new Map();
+  const toGooPorProducto = new Map();
+  const bajaVentaPorProducto = new Map();
+  let descuentosCentavos = 0;
+  let paquetesToGoo = 0;
+  let ingresoToGooCentavos = 0;
+
+  const resolver = (detail, nombreLimpio) => {
+    const product = productsById.get(detail.productoId) || productsByName.get(normalizeText(nombreLimpio));
+    return {
+      key: product?.id || detail.productoId || normalizeText(nombreLimpio),
+      nombre: product?.nombre || nombreLimpio,
+      categoria: product?.categoria || inferCategory(nombreLimpio)
+    };
+  };
+  const acumular = (mapa, info, detail) => {
+    const row = mapa.get(info.key) || { nombre: info.nombre, categoria: info.categoria, cantidad: 0, totalCentavos: 0 };
+    row.cantidad += detail.cantidad;
+    row.totalCentavos += detail.subtotalCentavos;
+    mapa.set(info.key, row);
+  };
 
   for (const sale of sales) {
     for (const detail of sale.detalles) {
       if (isDiscountDetail(detail)) {
-        totalVentaCentavos += detail.subtotalCentavos;
+        descuentosCentavos += detail.subtotalCentavos;
         continue;
       }
-
       if (isToGooDetail(detail)) {
-        totalToGooCentavos += detail.subtotalCentavos;
-        totalToGooUnidades += detail.cantidad;
-        const cleanName = cleanToGooName(detail.productoNombre);
-        const key = detail.productoId || normalizeText(cleanName);
-        const row = toGooByProduct.get(key) || { nombre: cleanName, cantidad: 0, totalCentavos: 0 };
-        row.cantidad += detail.cantidad;
-        row.totalCentavos += detail.subtotalCentavos;
-        toGooByProduct.set(key, row);
+        // La "Tarifa ToGoo" es lo que se cobra por el paquete (una por
+        // paquete); las demas lineas son lo que salio adentro, a valor 0.
+        if (detail.productoId === "togoo-fee") {
+          paquetesToGoo += detail.cantidad;
+          ingresoToGooCentavos += detail.subtotalCentavos;
+        } else {
+          acumular(toGooPorProducto, resolver(detail, cleanToGooName(detail.productoNombre)), detail);
+        }
         continue;
       }
-
       if (isBajaDetail(detail)) {
-        totalBajaCentavos += detail.subtotalCentavos;
-        totalBajaUnidades += detail.cantidad;
-        const cleanName = cleanBajaName(detail.productoNombre);
-        const key = detail.productoId || normalizeText(cleanName);
-        const row = bajaByProduct.get(key) || { nombre: cleanName, cantidad: 0 };
-        row.cantidad += detail.cantidad;
-        bajaByProduct.set(key, row);
+        acumular(bajaVentaPorProducto, resolver(detail, cleanBajaName(detail.productoNombre)), detail);
         continue;
       }
-
-      totalVentaCentavos += detail.subtotalCentavos;
-
-      const product = productsById.get(detail.productoId) || productsByName.get(normalizeText(detail.productoNombre));
-      const key = product?.id || normalizeText(detail.productoNombre);
-      const row = salesSummary.get(key) || {
-        nombre: product?.nombre || detail.productoNombre,
-        categoria: product?.categoria || inferCategory(detail.productoNombre),
-        cantidad: 0,
-        totalCentavos: 0,
-        primeraVenta: sale.hora,
-        ultimaVenta: sale.hora
-      };
-      row.cantidad += detail.cantidad;
-      row.totalCentavos += detail.subtotalCentavos;
-      row.primeraVenta = row.primeraVenta < sale.hora ? row.primeraVenta : sale.hora;
-      row.ultimaVenta = row.ultimaVenta > sale.hora ? row.ultimaVenta : sale.hora;
-      salesSummary.set(key, row);
+      acumular(ventasPorProducto, resolver(detail, detail.productoNombre), detail);
     }
   }
 
-  const totalSandwichesProduced = snapshot.sandwiches.reduce(
-    (sum, p) => sum + (Number(p.cantidadProducida) || 0), 0
-  );
-  const totalBolleriaProduced = snapshot.bolleria.reduce(
-    (sum, p) => sum + (Number(p.cantidadProducida) || 0), 0
-  );
-  const totalSandwichesVendidos = Array.from(salesSummary.entries())
-    .filter(([key]) => {
-      const p = productsById.get(key);
-      return p?.categoriaId === "sandwiches" && p?.controlaStock;
+  const sumar = (mapa, campo) => Array.from(mapa.values()).reduce((s, r) => s + r[campo], 0);
+  const ventasBrutoCentavos = sumar(ventasPorProducto, "totalCentavos");
+  const ingresosVentasCentavos = ventasBrutoCentavos + descuentosCentavos;
+  const totalGeneralCentavos = ingresosVentasCentavos + ingresoToGooCentavos;
+  const unidadesVendidas = sumar(ventasPorProducto, "cantidad");
+  const unidadesToGoo = sumar(toGooPorProducto, "cantidad");
+
+  // ---- Salidas sin venta: desperdicio, consumo (valuadas) ----
+  const salidas = new Map(); // motivo -> Map(key -> { nombre, unidades, valorCentavos })
+  const addSalida = (motivo, key, nombre, unidades) => {
+    const porProducto = salidas.get(motivo) || new Map();
+    const fila = porProducto.get(key) || { nombre, unidades: 0, valorCentavos: 0 };
+    fila.unidades += unidades;
+    fila.valorCentavos += unidades * (Number(productsById.get(key)?.precioCentavos) || 0);
+    porProducto.set(key, fila);
+    salidas.set(motivo, porProducto);
+  };
+  for (const [key, row] of bajaVentaPorProducto) addSalida("Baja por desperdicio", key, row.nombre, row.cantidad);
+
+  const correcciones = [];
+  const otrosAjustes = [];
+  for (const m of stockAdjustments) {
+    const delta = Number.isFinite(Number(m.cantidad)) && m.cantidad != null
+      ? Number(m.cantidad)
+      : (Number(m.stockNuevo) || 0) - (Number(m.stockAnterior) || 0);
+    const nombre = productsById.get(m.productoId)?.nombre || m.productoId;
+    const motivo = m.motivo || m.referencia || "Sin motivo";
+    if (esMotivoErrorProduccion(motivo)) correcciones.push({ nombre, delta });
+    else if (MOTIVOS_SALIDA.includes(motivo)) addSalida(motivo, m.productoId, nombre, -delta);
+    else otrosAjustes.push({ nombre, motivo, delta });
+  }
+
+  // ---- Stock de productos terminados: cierra o avisa ----
+  const filasStock = (lista) => lista
+    .filter((p) => p.controlaStock)
+    .map((p) => {
+      const h = historico.get(p.id);
+      const ayer = h?.stockAlInicio ?? 0;
+      const prod = Number(p.cantidadProducida) || 0;
+      const vend = ventasPorProducto.get(p.id)?.cantidad || 0;
+      const tgtg = toGooPorProducto.get(p.id)?.cantidad || 0;
+      const baja = bajaVentaPorProducto.get(p.id)?.cantidad || 0;
+      const ajuste = h?.ajuste ?? 0;
+      const quedan = h?.stockAlFinal ?? (Number(p.stockActual) || 0);
+      const esperado = ayer + prod - vend - tgtg - baja + ajuste;
+      return { nombre: p.nombre, ayer, prod, vend, tgtg, baja, ajuste, quedan, esperado };
     })
-    .reduce((sum, [, row]) => sum + row.cantidad, 0);
-
-  const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
-    (sum, p) => sum + (historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)), 0
-  );
-  const totalStockAyer = snapshot.sandwiches.reduce(
-    (sum, p) => sum + (historico.get(p.id)?.stockAlInicio ?? 0), 0
-  );
-
-  let totalBebidasVendidas = 0;
-  for (const [key, row] of salesSummary) {
-    const prod = productsById.get(key);
-    if (prod?.categoriaId === "bebidas" || prod?.categoriaId === "cafe") {
-      totalBebidasVendidas += row.cantidad;
-    }
-    if (key === "promo-bebida" || key === "promo-cafe-con-leche") {
-      totalBebidasVendidas += row.cantidad;
-    }
-  }
+    .filter((r) => r.ayer || r.prod || r.vend || r.tgtg || r.baja || r.ajuste || r.quedan);
 
   const horaGenerado = new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
-
   const lines = [
     "MIGA POS — CIERRE DEL DÍA",
     "=".repeat(50),
@@ -230,171 +250,150 @@ export async function buildSalesSummaryText(fecha) {
     `Generado: ${horaGenerado}`
   ];
 
-  // Resumen ejecutivo
-  lines.push(...section("RESUMEN EJECUTIVO"));
-  lines.push(`${padR("Transacciones registradas:", 34)} ${padL(sales.length, 5)}`);
-  lines.push(`${padR("Sandwiches de ayer (arrastre):", 34)} ${padL(totalStockAyer, 5)}`);
-  lines.push(`${padR("Sandwiches producidos hoy:", 34)} ${padL(totalSandwichesProduced, 5)}`);
-  lines.push(`${padR("Total sandwiches disponibles hoy:", 34)} ${padL(totalStockAyer + totalSandwichesProduced, 5)}`);
-  lines.push(SEP_THIN.slice(0, 40));
-  lines.push(`${padR("Sandwiches vendidos:", 34)} ${padL(totalSandwichesVendidos, 5)}`);
-  lines.push(`${padR("Sandwiches quedan:", 34)} ${padL(totalSandwichesDisponibles, 5)}`);
-  lines.push(`${padR("Bebidas vendidas:", 34)} ${padL(totalBebidasVendidas, 5)}`);
-  lines.push(`${padR("Salidas ToGoo (unidades):", 34)} ${padL(totalToGooUnidades, 5)}`);
+  // 1. RESUMEN
+  lines.push(...section("RESUMEN DEL DÍA"));
+  lines.push(`${padR("Transacciones:", 34)} ${padL(sales.length, 5)}`);
+  lines.push(`${padR("Unidades vendidas:", 34)} ${padL(unidadesVendidas, 5)}`);
+  lines.push(`${padR("Paquetes Too Good To Go:", 34)} ${padL(paquetesToGoo, 5)}`);
   lines.push("");
-  lines.push(`${padR("Ingresos ventas:", 34)} ${padL(centsToMoney(totalVentaCentavos), 12)}`);
-  lines.push(`${padR("Ingresos ToGoo:", 34)} ${padL(centsToMoney(totalToGooCentavos), 12)}`);
-  lines.push(`${padR("TOTAL GENERAL:", 34)} ${padL(centsToMoney(totalVentaCentavos + totalToGooCentavos), 12)}`);
-
-  // Producción del día
-  lines.push(...section("PRODUCCIÓN DEL DÍA"));
-
-  const sandwichesConProd = snapshot.sandwiches.filter((p) => p.cantidadProducida > 0);
-  const sandwichesSinProd = snapshot.sandwiches.filter((p) => p.cantidadProducida === 0);
-  lines.push(`SANDWICHES — total producido: ${totalSandwichesProduced}`);
-  if (sandwichesConProd.length > 0) {
-    for (const p of sandwichesConProd) {
-      lines.push(`  ${padR(p.nombre, 34)} ${padL(p.cantidadProducida, 4)}`);
-    }
-  } else {
-    lines.push("  (sin produccion registrada)");
+  lines.push(`${padR("Ventas:", 34)} ${padL(centsToMoney(ventasBrutoCentavos), 12)}`);
+  if (descuentosCentavos !== 0) {
+    lines.push(`${padR("Descuentos de combo:", 34)} ${padL(centsToMoney(descuentosCentavos), 12)}`);
   }
-  if (sandwichesSinProd.length > 0) {
-    lines.push("  — no producidos hoy:");
-    for (const p of sandwichesSinProd) {
-      lines.push(`  ${padR(p.nombre, 34)}    0`);
-    }
+  lines.push(`${padR("Ingresos por ventas:", 34)} ${padL(centsToMoney(ingresosVentasCentavos), 12)}`);
+  lines.push(`${padR(`Ingresos Too Good To Go (${paquetesToGoo} paq.):`, 34)} ${padL(centsToMoney(ingresoToGooCentavos), 12)}`);
+  lines.push(`${padR("TOTAL GENERAL:", 34)} ${padL(centsToMoney(totalGeneralCentavos), 12)}`);
+
+  // 2. VENTAS POR CATEGORIA
+  lines.push(...section("VENTAS POR CATEGORÍA"));
+  const porCategoria = new Map(CATEGORY_ORDER.map((c) => [c, []]));
+  for (const row of ventasPorProducto.values()) {
+    porCategoria.get(porCategoria.has(row.categoria) ? row.categoria : "Otros").push(row);
   }
-  lines.push("");
-
-  const bolleriaConProd = snapshot.bolleria.filter((p) => p.cantidadProducida > 0);
-  const bolleriaSinProd = snapshot.bolleria.filter((p) => p.controlaStock && p.cantidadProducida === 0);
-  lines.push(`BOLLERIA — total producido: ${totalBolleriaProduced}`);
-  if (bolleriaConProd.length > 0) {
-    for (const p of bolleriaConProd) {
-      lines.push(`  ${padR(p.nombre, 34)} ${padL(p.cantidadProducida, 4)}`);
-    }
-  } else {
-    lines.push("  (sin produccion registrada)");
-  }
-  if (bolleriaSinProd.length > 0) {
-    lines.push("  — no producidos hoy:");
-    for (const p of bolleriaSinProd) {
-      lines.push(`  ${padR(p.nombre, 34)}    0`);
-    }
-  }
-
-  if (snapshot.comentarios.length > 0) {
-    lines.push("");
-    lines.push("COMENTARIOS DEL DÍA:");
-    for (const comment of snapshot.comentarios) {
-      lines.push(`  · ${comment}`);
-    }
-  }
-
-  // Ranking de ventas
-  lines.push(...section("VENTAS POR PRODUCTO — RANKING"));
-
-  const rankingRows = Array.from(salesSummary.values())
-    .sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre));
-
-  if (rankingRows.length === 0) {
+  if (ventasPorProducto.size === 0) {
     lines.push("  (sin ventas registradas)");
   } else {
-    const CATEGORY_ORDER = ["Sandwiches", "Bolleria", "Cafe", "Bebidas", "Otros"];
-    const byCategory = new Map(CATEGORY_ORDER.map((cat) => [cat, []]));
-    for (const row of rankingRows) {
-      const cat = byCategory.has(row.categoria) ? row.categoria : "Otros";
-      byCategory.get(cat).push(row);
-    }
-    const header = `  ${padL("#", 3)}  ${padR("Producto", 28)}  ${padL("Cant", 5)}  ${padL("Monto", 12)}`;
-    let rank = 1;
-    let firstCat = true;
+    let primera = true;
     for (const cat of CATEGORY_ORDER) {
-      const rows = byCategory.get(cat);
+      const rows = porCategoria.get(cat).sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre));
       if (!rows.length) continue;
-      if (!firstCat) lines.push("");
-      firstCat = false;
+      if (!primera) lines.push("");
+      primera = false;
       lines.push(`  — ${cat.toUpperCase()} —`);
-      lines.push(header);
-      lines.push(`  ${SEP_THIN.slice(0, 54)}`);
-      let catCantidad = 0;
-      let catCentavos = 0;
+      lines.push(`  ${padR("Producto", 30)}  ${padL("Cant", 5)}  ${padL("Monto", 12)}`);
+      lines.push(`  ${SEP_THIN.slice(0, 51)}`);
       for (const row of rows) {
-        lines.push(`  ${padL(rank++, 3)}  ${padR(row.nombre, 28)}  ${padL(row.cantidad, 5)}  ${padL(centsToMoney(row.totalCentavos), 12)}`);
-        catCantidad += row.cantidad;
-        catCentavos += row.totalCentavos;
+        lines.push(`  ${padR(row.nombre, 30)}  ${padL(row.cantidad, 5)}  ${padL(centsToMoney(row.totalCentavos), 12)}`);
       }
-      lines.push(`       ${padR("SUBTOTAL", 28)}  ${padL(catCantidad, 5)}  ${padL(centsToMoney(catCentavos), 12)}`);
+      const cant = rows.reduce((s, r) => s + r.cantidad, 0);
+      const monto = rows.reduce((s, r) => s + r.totalCentavos, 0);
+      lines.push(`  ${padR("SUBTOTAL " + cat.toUpperCase(), 30)}  ${padL(cant, 5)}  ${padL(centsToMoney(monto), 12)}`);
+    }
+    if (descuentosCentavos !== 0) {
+      lines.push("");
+      lines.push(`  ${padR("Descuentos de combo", 30)}  ${padL("", 5)}  ${padL(centsToMoney(descuentosCentavos), 12)}`);
     }
   }
 
-  // Producción vs ventas (sandwiches)
-  lines.push(...section("SANDWICHES: PRODUCCIÓN vs VENTAS"));
-
-  lines.push(`  ${padR("Sandwich", 28)}  ${padL("Ayer", 5)}  ${padL("Hoy", 5)}  ${padL("Vend", 5)}  ${padL("Quedan", 6)}`);
-  lines.push(`  ${SEP_THIN.slice(0, 56)}`);
-  for (const p of snapshot.sandwiches) {
-    const vendido = salesSummary.get(p.id)?.cantidad || 0;
-    const stockFinal = historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0);
-    const ayer = historico.get(p.id)?.stockAlInicio ?? 0;
-    lines.push(`  ${padR(p.nombre, 28)}  ${padL(ayer, 5)}  ${padL(p.cantidadProducida, 5)}  ${padL(vendido, 5)}  ${padL(stockFinal, 6)}`);
-  }
-
-  // ToGoo
-  lines.push(...section("SALIDAS TOGOO"));
-
-  if (toGooByProduct.size === 0) {
-    lines.push("  (sin salidas ToGoo)");
+  // 3. TOO GOOD TO GO
+  lines.push(...section("TOO GOOD TO GO"));
+  if (paquetesToGoo === 0 && unidadesToGoo === 0) {
+    lines.push("  (sin paquetes hoy)");
   } else {
-    lines.push(`  ${padR("Producto", 30)}  ${padL("Cant", 5)}  ${padL("Monto", 12)}`);
-    lines.push(`  ${SEP_THIN.slice(0, 50)}`);
-    for (const row of toGooByProduct.values()) {
-      lines.push(`  ${padR(row.nombre, 30)}  ${padL(row.cantidad, 5)}  ${padL(centsToMoney(row.totalCentavos), 12)}`);
+    lines.push(`${padR("Paquetes vendidos:", 34)} ${padL(paquetesToGoo, 5)}`);
+    lines.push(`${padR("Ingreso (3 € por paquete):", 34)} ${padL(centsToMoney(ingresoToGooCentavos), 12)}`);
+    lines.push(`${padR("Unidades que salieron adentro:", 34)} ${padL(unidadesToGoo, 5)}  (a valor 0)`);
+    lines.push("");
+    lines.push("  Qué salió en los paquetes:");
+    const filas = Array.from(toGooPorProducto.values()).sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre));
+    for (const row of filas) {
+      lines.push(`  ${padR(row.nombre, 34)} ${padL(row.cantidad, 5)}`);
     }
-    lines.push(`  ${padR("TOTAL", 30)}  ${padL(totalToGooUnidades, 5)}  ${padL(centsToMoney(totalToGooCentavos), 12)}`);
   }
 
-  // Baja
-  lines.push(...section("SALIDAS BAJA"));
-
-  if (bajaByProduct.size === 0) {
-    lines.push("  (sin salidas por baja)");
+  // 4. STOCK DE PRODUCTOS TERMINADOS
+  lines.push(...section("STOCK: DE AYER + PRODUCIDO − SALIDAS = QUEDAN"));
+  const encabezado = `  ${padR("Producto", 24)} ${padL("Ayer", 5)} ${padL("Prod", 5)} ${padL("Vend", 5)} ${padL("TGTG", 5)} ${padL("Baja", 5)} ${padL("Ajus", 5)} ${padL("Quedan", 6)}`;
+  const grupos = [
+    ["SANDWICHES", snapshot.sandwiches],
+    ["BOLLERÍA", snapshot.bolleria],
+    ["BEBIDAS", snapshot.bebidas]
+  ];
+  const noCierran = [];
+  let hayStock = false;
+  for (const [titulo, lista] of grupos) {
+    const filas = filasStock(lista);
+    if (!filas.length) continue;
+    if (hayStock) lines.push("");
+    hayStock = true;
+    lines.push(`  — ${titulo} —`);
+    lines.push(encabezado);
+    lines.push(`  ${"─".repeat(encabezado.length - 2)}`);
+    const tot = { ayer: 0, prod: 0, vend: 0, tgtg: 0, baja: 0, ajuste: 0, quedan: 0 };
+    for (const f of filas) {
+      const marca = f.esperado === f.quedan ? "" : " ≠";
+      lines.push(`  ${padR(f.nombre, 24)} ${padL(f.ayer, 5)} ${padL(f.prod, 5)} ${padL(f.vend, 5)} ${padL(f.tgtg, 5)} ${padL(f.baja, 5)} ${padL(f.ajuste, 5)} ${padL(f.quedan, 6)}${marca}`);
+      if (f.esperado !== f.quedan) noCierran.push(f);
+      for (const k of Object.keys(tot)) tot[k] += f[k];
+    }
+    lines.push(`  ${padR("TOTAL", 24)} ${padL(tot.ayer, 5)} ${padL(tot.prod, 5)} ${padL(tot.vend, 5)} ${padL(tot.tgtg, 5)} ${padL(tot.baja, 5)} ${padL(tot.ajuste, 5)} ${padL(tot.quedan, 6)}`);
+  }
+  if (!hayStock) {
+    lines.push("  (sin movimiento de stock)");
   } else {
-    lines.push(`  ${padR("Producto", 30)}  ${padL("Cant", 5)}`);
-    lines.push(`  ${SEP_THIN.slice(0, 37)}`);
-    for (const row of bajaByProduct.values()) {
-      lines.push(`  ${padR(row.nombre, 30)}  ${padL(row.cantidad, 5)}`);
+    lines.push("");
+    lines.push("  TGTG = salió en paquete Too Good To Go (valor 0). Baja/Ajus = salidas sin venta.");
+    if (correcciones.length > 0) {
+      lines.push("  Correcciones por error de producción (ya incluidas en Prod):");
+      for (const c of correcciones) lines.push(`    ${padR(c.nombre, 30)} ${c.delta > 0 ? "+" : ""}${c.delta}`);
     }
-    lines.push(`  ${padR("TOTAL", 30)}  ${padL(totalBajaUnidades, 5)}`);
+    for (const f of noCierran) {
+      lines.push(`  ⚠ ${f.nombre}: la cuenta da ${f.esperado} pero el sistema dice ${f.quedan} — falta cargar una salida o una venta.`);
+    }
+  }
+  if (snapshot.comentarios.length > 0) {
+    lines.push("");
+    lines.push("  COMENTARIOS DEL DÍA:");
+    for (const comment of snapshot.comentarios) lines.push(`    · ${comment}`);
   }
 
-  // Ajustes de stock
-  lines.push(...section("AJUSTES DE STOCK"));
-
-  if (stockAdjustments.length === 0) {
-    lines.push("  (sin ajustes de stock)");
+  // 5. SALIDAS SIN VENTA (perdida)
+  lines.push(...section("SALIDAS SIN VENTA (PÉRDIDA A PRECIO DE VENTA)"));
+  if (salidas.size === 0) {
+    lines.push("  (sin bajas por desperdicio ni consumo)");
   } else {
-    lines.push(`  ${padR("Producto", 28)}  ${padL("Antes", 5)} → ${padL("Desp.", 5)}  Motivo`);
-    lines.push(`  ${SEP_THIN.slice(0, 50)}`);
-    for (const m of stockAdjustments) {
-      const product = productsById.get(m.productoId);
-      const nombre = product?.nombre || m.productoId;
-      const motivo = m.motivo || m.referencia || "Sin motivo";
-      lines.push(`  ${padR(nombre, 28)}  ${padL(m.stockAnterior, 5)} → ${padL(m.stockNuevo, 5)}  ${motivo}`);
+    let totalUnidades = 0;
+    let totalValor = 0;
+    for (const motivo of MOTIVOS_SALIDA) {
+      const porProducto = salidas.get(motivo);
+      if (!porProducto) continue;
+      const filas = Array.from(porProducto.values()).sort((a, b) => b.unidades - a.unidades);
+      const unidades = filas.reduce((s, f) => s + f.unidades, 0);
+      const valor = filas.reduce((s, f) => s + f.valorCentavos, 0);
+      totalUnidades += unidades;
+      totalValor += valor;
+      lines.push(`  — ${motivo.toUpperCase()} —`);
+      lines.push(`  ${padR("Producto", 30)}  ${padL("Unid", 5)}  ${padL("Valor", 12)}`);
+      lines.push(`  ${SEP_THIN.slice(0, 51)}`);
+      for (const f of filas) lines.push(`  ${padR(f.nombre, 30)}  ${padL(f.unidades, 5)}  ${padL(centsToMoney(f.valorCentavos), 12)}`);
+      lines.push(`  ${padR("SUBTOTAL", 30)}  ${padL(unidades, 5)}  ${padL(centsToMoney(valor), 12)}`);
+      lines.push("");
     }
+    lines.push(`  ${padR("TOTAL PÉRDIDA", 30)}  ${padL(totalUnidades, 5)}  ${padL(centsToMoney(totalValor), 12)}`);
+  }
+  if (otrosAjustes.length > 0) {
+    lines.push("");
+    lines.push("  OTROS AJUSTES DE STOCK:");
+    for (const a of otrosAjustes) lines.push(`    ${padR(a.nombre, 26)} ${padL(a.delta > 0 ? "+" + a.delta : a.delta, 5)}  ${a.motivo}`);
   }
 
-  // Detalle venta a venta
+  // 6. DETALLE VENTA A VENTA
   lines.push(...section("DETALLE VENTA A VENTA"));
-
   const sortedSales = sales.slice().sort((a, b) => a.id - b.id);
   for (const sale of sortedSales) {
-    const pureDetails = sale.detalles.filter((d) => !isToGooDetail(d) && !isBajaDetail(d));
-    if (pureDetails.length === 0) continue;
-    const saleTotal = pureDetails.reduce((sum, d) => sum + d.subtotalCentavos, 0);
-    lines.push(`Venta #${sale.id}  ·  ${sale.hora}  ·  ${centsToMoney(saleTotal)}`);
-    for (const detail of pureDetails) {
+    const esPaquete = sale.detalles.some((d) => d.productoId === "togoo-fee");
+    lines.push(`Venta #${sale.id}  ·  ${sale.hora}  ·  ${centsToMoney(sale.totalCentavos)}${esPaquete ? "  ·  Too Good To Go" : ""}`);
+    for (const detail of sale.detalles) {
       lines.push(`  ${detail.cantidad} x ${padR(detail.productoNombre, 30)} ${padL(centsToMoney(detail.subtotalCentavos), 12)}`);
     }
     lines.push("");

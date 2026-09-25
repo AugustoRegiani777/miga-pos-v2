@@ -4,8 +4,8 @@ const PROD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 // Proyecto de staging — se completa una vez creado desde el dashboard de
 // Supabase (branch arquitectura-productos-v2). Hasta que estos dos campos
 // tengan valor, correr local sigue apuntando a produccion sin romper nada.
-const STAGING_URL = "";
-const STAGING_ANON_KEY = "";
+const STAGING_URL = "https://yfveeikzckvqlndmhwut.supabase.co";
+const STAGING_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlmdmVlaWt6Y2t2cWxuZG1od3V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNTkxODEsImV4cCI6MjEwNTczNTE4MX0.NXywXQHsFzoa_OH4DR0Ei5nMyio-vk4ar50_ajtF2Wg";
 
 // Solo se usa staging si el codigo corre local (tu compu, localhost) Y ya
 // existe la config de arriba. En Netlify (produccion real) esto siempre da
@@ -24,6 +24,25 @@ if (usarStaging) {
 const BASE = `${SUPABASE_URL}/rest/v1`;
 const AUTH_BASE = `${SUPABASE_URL}/auth/v1`;
 const SESSION_KEY = "miga_auth_session";
+
+// Sin timeout, un fetch colgado (wifi "conectado" pero sin salida) deja el
+// drenado de la cola esperando para siempre. Se corta a los 25 s y se marca
+// como fallo de red para que sync.js sepa que no fue un rechazo del servidor.
+const REQUEST_TIMEOUT_MS = 25000;
+
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (cause) {
+    const error = new Error(cause?.name === "AbortError" ? `Sin respuesta en ${REQUEST_TIMEOUT_MS / 1000}s` : `Sin conexión (${cause?.message || "red"})`);
+    error.network = true;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // --- Sesion (login con usuario/contraseña, Supabase Auth) ---
 
@@ -52,7 +71,7 @@ function sessionFromAuthResponse(data) {
 async function authFetch(path, body) {
   let res;
   try {
-    res = await fetch(`${AUTH_BASE}${path}`, {
+    res = await fetchWithTimeout(`${AUTH_BASE}${path}`, {
       method: "POST",
       headers: { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
       body: JSON.stringify(body)
@@ -83,11 +102,20 @@ export function signOut() {
   clearSession();
 }
 
-async function refreshSession(session) {
-  const data = await authFetch("/token?grant_type=refresh_token", { refresh_token: session.refreshToken });
-  const newSession = sessionFromAuthResponse(data);
-  saveSession(newSession);
-  return newSession;
+// Un solo refresh a la vez: los refresh tokens rotan, y dos renovaciones
+// simultaneas (ej. dos pushes que reciben 401 a la vez) se pisarian entre si.
+let refreshEnCurso = null;
+
+function refreshSession(session) {
+  if (!refreshEnCurso) {
+    refreshEnCurso = (async () => {
+      const data = await authFetch("/token?grant_type=refresh_token", { refresh_token: session.refreshToken });
+      const newSession = sessionFromAuthResponse(data);
+      saveSession(newSession);
+      return newSession;
+    })().finally(() => { refreshEnCurso = null; });
+  }
+  return refreshEnCurso;
 }
 
 // Se llama al arrancar la app: si hay sesion guardada, la refresca para
@@ -120,7 +148,7 @@ function authHeaders(accessToken) {
 
 async function sbFetch(path, method = "GET", body = null, extra = {}) {
   let session = loadSession();
-  const doFetch = (accessToken) => fetch(`${BASE}${path}`, {
+  const doFetch = (accessToken) => fetchWithTimeout(`${BASE}${path}`, {
     method,
     headers: { ...authHeaders(accessToken), ...extra },
     body: body != null ? JSON.stringify(body) : undefined
@@ -132,7 +160,14 @@ async function sbFetch(path, method = "GET", body = null, extra = {}) {
     try {
       session = await refreshSession(session);
       res = await doFetch(session.accessToken);
-    } catch {
+    } catch (refreshError) {
+      // Sin red NO es sesion invalida: cerrar sesion aca dejaria a la tablet
+      // sin poder sincronizar apenas vuelva el wifi. Solo un rechazo real.
+      if (refreshError.isNetworkError || refreshError.network) {
+        const error = new Error(refreshError.message);
+        error.network = true;
+        throw error;
+      }
       clearSession();
     }
   }
@@ -170,16 +205,6 @@ function upsertOnConflict(table, data, conflictColumn) {
   return sbFetch(`/${table}?on_conflict=${conflictColumn}`, "POST", rows, {
     "Prefer": "resolution=merge-duplicates,return=representation"
   });
-}
-
-export async function testConnection() {
-  try {
-    const session = loadSession();
-    const res = await fetch(`${BASE}/ventas?select=id&limit=1`, { headers: authHeaders(session?.accessToken) });
-    return res.ok;
-  } catch {
-    return false;
-  }
 }
 
 // Cada insert de abajo resuelve por "uuid" (generado en la tablet al crear
@@ -260,6 +285,7 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
       stock_nuevo: m.stockNuevo,
       motivo: m.motivo || null,
       referencia: m.referencia || null,
+      venta_uuid: m.ventaUuid || null,
       fecha: m.fecha,
       creado_en: m.creadoEn
     })), "uuid");
@@ -320,13 +346,30 @@ export async function fetchProveedorInsumosCatalogo() {
   return sbFetch("/proveedor_insumos?select=*");
 }
 
-// Para fusionar stock de insumos entre dispositivos por DELTAS (ver
-// sincronizarStockInsumosDesdeMovimientos en aprovisionamiento.js) en vez de
-// por snapshot — `desde` es opcional, filtra a movimientos mas nuevos que el
-// cursor guardado localmente (evita traer el historial completo en cada pull).
-export async function fetchMovimientosInsumosCatalogo(desde) {
-  const filtro = desde ? `&creado_en=gt.${encodeURIComponent(desde)}` : "";
-  return sbFetch(`/movimientos_insumos?select=*${filtro}`);
+// PostgREST corta cada respuesta a 1000 filas sin avisar: un dispositivo nuevo
+// que baja el historial completo se quedaria con una parte y creeria tener
+// todo. Se pagina por CURSOR DE ID (keyset): estable aunque entren filas
+// nuevas mientras se baja, a diferencia de un offset.
+async function fetchAllPorId(tabla, { desdeId = 0, filtro = "", pageSize = 1000 } = {}) {
+  const out = [];
+  let ultimo = Number(desdeId) || 0;
+  for (;;) {
+    const page = await sbFetch(`/${tabla}?select=*&id=gt.${ultimo}${filtro}&order=id.asc&limit=${pageSize}`);
+    if (!page || page.length === 0) break;
+    out.push(...page);
+    ultimo = page[page.length - 1].id;
+    // Se corta solo con una pagina VACIA, no con una "corta": el servidor
+    // puede tener un tope de filas por respuesta mas chico que pageSize, y
+    // una pagina corta no significa que ya no haya mas.
+  }
+  return out;
+}
+
+// Stock en vivo de insumos y productos: derivado en la nube por triggers sobre
+// los movimientos (migraciones 004 y 012). Es la verdad; los dispositivos solo
+// lo espejan (ver reconciliarStock* en aprovisionamiento.js y business.js).
+export async function fetchStockInsumos() {
+  return sbFetch("/stock_insumos?select=id,stock_actual,actualizado_en");
 }
 
 export async function pushCatalogoSnapshot(categorias, productos) {
@@ -398,7 +441,7 @@ export async function pushRecetasSnapshot(recetas) {
 // Punto generico para cualquier config de baja frecuencia que deba viajar
 // entre dispositivos sin ameritar su propia tabla — un id fijo (o, para
 // datos por fecha, "algo:fecha") + un blob JSON. Ver configuracion_compartida
-// en supabase-schema.sql.
+// en sql/produccion/supabase-schema.sql.
 export async function pushConfiguracionCompartida(id, valor) {
   return upsert("configuracion_compartida", [{ id, valor, actualizado_en: new Date().toISOString() }]);
 }
@@ -458,6 +501,7 @@ export async function pushMovimientosInsumos(movimientos) {
     stock_nuevo: m.stockNuevo,
     producto_id: m.productoId || null,
     venta_id_local: m.ventaId || null,
+    venta_uuid: m.ventaUuid || null,
     fecha: m.fecha,
     creado_en: m.creadoEn
   })), "uuid");
@@ -510,18 +554,21 @@ export async function updateVentaAnulada({ uuid, fecha, creadoEn }) {
   const filtro = uuid
     ? `uuid=eq.${encodeURIComponent(uuid)}`
     : `fecha=eq.${fecha}&creado_en=eq.${encodeURIComponent(creadoEn)}`;
-  return sbFetch(`/ventas?${filtro}`, "PATCH", {
+  const filas = await sbFetch(`/ventas?${filtro}`, "PATCH", {
     anulada: true,
     anulada_en: new Date().toISOString()
-  });
+  }, { "Prefer": "return=representation" });
+  // PATCH sobre cero filas responde 200 igual. Si la venta todavia no llego a
+  // la nube (su push esta pendiente) la anulacion no hizo nada: hay que
+  // reintentar despues, no darla por sincronizada.
+  if (!Array.isArray(filas) || filas.length === 0) {
+    throw new Error("La venta a anular todavia no esta en la nube");
+  }
+  return filas;
 }
 
 export async function fetchStockProductos() {
   return sbFetch("/stock_productos?select=id,stock_actual,actualizado_en");
-}
-
-export async function fetchProduccionDiaria(fecha) {
-  return sbFetch(`/produccion_diaria?fecha=eq.${fecha}`);
 }
 
 export async function pushMovimientoStock(m) {
@@ -534,16 +581,10 @@ export async function pushMovimientoStock(m) {
     stock_nuevo: m.stockNuevo,
     motivo: m.motivo || null,
     referencia: m.referencia || null,
+    venta_uuid: m.ventaUuid || null,
     fecha: m.fecha,
     creado_en: m.creadoEn
   }, "uuid");
-}
-
-// Trae todos los movimientos del dia; el filtro de cuales son "de produccion"
-// (tipo produccion/ajuste_manual, o ajuste_stock por error) se hace en el cliente,
-// igual que productionSnapshot() en business.js.
-export async function fetchMovimientosStock(fecha) {
-  return sbFetch(`/movimientos_stock?fecha=eq.${fecha}&order=creado_en.asc`);
 }
 
 // Trae los movimientos DESDE una fecha en adelante (inclusive) — sirve para
@@ -553,16 +594,9 @@ export async function fetchMovimientosStock(fecha) {
 // historial de cambios) — para fechas muy anteriores a eso, la reconstruccion
 // puede no ser exacta hasta que se acumule mas historial en Supabase.
 export async function fetchMovimientosStockDesde(fecha) {
-  return sbFetch(`/movimientos_stock?fecha=gte.${fecha}&order=fecha.asc`);
-}
-
-// Para fusionar stock de PRODUCTOS entre dispositivos por DELTAS (mismo
-// mecanismo que fetchMovimientosInsumosCatalogo para insumos) — `desde` es
-// opcional, filtra a movimientos mas nuevos que el cursor guardado
-// localmente en vez de traer todo el historial en cada pull.
-export async function fetchMovimientosStockCatalogo(desde) {
-  const filtro = desde ? `&creado_en=gt.${encodeURIComponent(desde)}` : "";
-  return sbFetch(`/movimientos_stock?select=*${filtro}`);
+  // Paginado: con "fecha=gte" el rango crece cada dia y PostgREST corta en
+  // 1000 filas sin avisar — el historico quedaria calculado con datos partidos.
+  return fetchAllPorId("movimientos_stock", { filtro: `&fecha=gte.${fecha}` });
 }
 
 export async function fetchVentasDelDia(fecha) {
