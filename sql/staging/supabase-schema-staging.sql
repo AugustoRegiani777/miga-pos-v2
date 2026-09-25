@@ -6,7 +6,7 @@
 -- Este archivo es la version rediseñada de la parte de PRODUCTOS (el ciclo
 -- prioritario: produccion -> venta/baja/consumo/devolucion -> stock), a
 -- partir de todo lo charlado el 23/09/2026. Insumos, recetas, proveedores y
--- pedidos quedan IGUAL que en supabase-schema.sql (produccion real) — esa
+-- pedidos quedan IGUAL que en sql/produccion/supabase-schema.sql (produccion real) — esa
 -- parte no se toco en este rediseño, sigue siendo secundaria por ahora.
 -- =========================================
 
@@ -79,13 +79,26 @@ CREATE TABLE movimientos_stock (
     'baja',                -- sale, desperdicio — YA NO es una venta
     'consumo',              -- sale, interno — YA NO es una venta
     'devolucion',            -- entra, deshace una venta
-    'error_produccion'        -- correccion fuerte del mismo dia, unico ajuste que existe
-    -- 'ajuste_stock' / 'ajuste_manual' (recuento generico): NO EXISTE MAS
+    'error_produccion',       -- correccion fuerte del mismo dia, unico ajuste que existe
+    -- TRANSITORIO: el codigo actual (business.js adjustStockLevel) todavia
+    -- escribe "Modificar stock" (Consumo / Baja por desperdicio / Error de
+    -- produccion / Cierre de periodo) como tipo 'ajuste_stock' + motivo, y
+    -- los reportes lo leen asi. Sin esto, esos pushes fallan con un 23514.
+    -- Se saca cuando business.js se reescriba a los tipos de arriba.
+    'ajuste_stock',
+    'ajuste_manual'
   )),
   cantidad       INTEGER NOT NULL,
   stock_anterior INTEGER,  -- informativo/auditoria, igual que en movimientos_insumos
   stock_nuevo    INTEGER,  -- informativo/auditoria — el trigger de abajo NO confia en esto
   motivo         TEXT,
+  -- El codigo actual (business.js) todavia no se reescribio a la
+  -- arquitectura nueva — sigue mandando este campo en cada push, igual que
+  -- en produccion. Se deja aca para que la app de hoy funcione contra esta
+  -- base; cuando se reescriba business.js a los tipos nuevos, se decide si
+  -- sigue haciendo falta.
+  referencia     TEXT,
+  venta_uuid     TEXT,           -- vinculo a ventas.uuid (mig. 014)
   venta_id       BIGINT REFERENCES ventas(id),  -- solo tiene sentido para tipo IN ('venta','devolucion')
   fecha          TEXT NOT NULL,
   creado_en      TIMESTAMPTZ DEFAULT NOW()
@@ -137,6 +150,11 @@ CREATE TRIGGER trg_stock_productos_desde_movimiento
 
 -- produccion_diaria ya NO es una tabla — es una vista, imposible de
 -- desalinear del ledger porque no guarda nada aparte, solo lo resume.
+-- Cuenta produccion + las correcciones de "Error de produccion" (alta o baja):
+-- una correccion ES parte del numero producido del dia. Sin esto, un dia con
+-- correccion mostraba (ej. 23) lo que se habia tipeado en vez de lo real (21).
+-- (revision del dataset, 25/09/2026). Incluye tambien el tipo nuevo
+-- error_produccion, para cuando business.js escriba los tipos nuevos.
 CREATE VIEW produccion_diaria AS
 SELECT
   fecha || ':' || producto_id AS id,
@@ -145,6 +163,8 @@ SELECT
   SUM(cantidad) AS cantidad
 FROM movimientos_stock
 WHERE tipo = 'produccion'
+   OR tipo = 'error_produccion'
+   OR (tipo = 'ajuste_stock' AND motivo IN ('Error de produccion', 'Error'))
 GROUP BY fecha, producto_id;
 
 -- ============ INSUMOS Y RECETAS (sin cambios respecto a produccion) ============
@@ -184,6 +204,7 @@ CREATE TABLE movimientos_insumos (
   stock_nuevo     NUMERIC,
   producto_id     TEXT REFERENCES productos(id),
   venta_id_local  INTEGER,
+  venta_uuid      TEXT,           -- vinculo a ventas.uuid (mig. 014)
   fecha           TEXT,
   creado_en       TIMESTAMPTZ DEFAULT NOW()
 );

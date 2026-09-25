@@ -294,8 +294,8 @@ Todo botón que no sea submit dentro de un `<form>` DEBE tener `type="button"`. 
 **Reglas que salen de esto, para cualquier código nuevo que escriba filas para sincronizar a Supabase:**
 
 1. **Toda fila que se sincronice necesita `uuid: crypto.randomUUID()` generado en el momento de crearla, sin excepción.** No hay atajos — ni "totales que no importan", ni "esto no se va a reintentar nunca". `upsertOnConflict` (en `supabase.js`) depende 100% del uuid para no duplicar.
-2. **Cuando una relación tiene una clave natural que NUNCA debería repetirse** (ej: un `pedido_id` solo puede tener una venta, porque `marcarPedidoListo` exige que el pedido esté en estado "pendiente"), agregar además una restricción única a nivel de base de datos (ver `supabase-migration-003-unique-pedido-venta.sql` en `miga-pos-v2` — el chequeo "leer si existe, después insertar" en el código de la app **tiene una carrera** entre dos reintentos casi simultáneos; el índice único a nivel de Postgres es lo único que lo hace imposible de verdad, no solo improbable). `pushVenta` en `supabase.js` ya sabe recuperarse de ese conflicto (código `23505`) devolviendo el id existente en vez de fallar.
-3. **`sync.js` reintenta la cola cada 90 segundos** (además del evento `online`) — el badge visible en la topbar (`#sync-status-badge`) muestra cuánto queda pendiente, tocarlo fuerza un reintento inmediato. Si algo queda pendiente por mucho tiempo, es una señal real de que algo se está rompiendo repetidamente, no ruido.
+2. **Cuando una relación tiene una clave natural que NUNCA debería repetirse** (ej: un `pedido_id` solo puede tener una venta, porque `marcarPedidoListo` exige que el pedido esté en estado "pendiente"), agregar además una restricción única a nivel de base de datos (ver `sql/produccion/supabase-migration-003-unique-pedido-venta.sql` en `miga-pos-v2` — el chequeo "leer si existe, después insertar" en el código de la app **tiene una carrera** entre dos reintentos casi simultáneos; el índice único a nivel de Postgres es lo único que lo hace imposible de verdad, no solo improbable). `pushVenta` en `supabase.js` ya sabe recuperarse de ese conflicto (código `23505`) devolviendo el id existente en vez de fallar.
+3. **`sync.js` guarda cada operación en la cola ANTES de enviarla** (así un cierre de pestaña no la pierde) y la reintenta al volver la conexión, al volver a la pestaña y cada 30 segundos, con backoff por operación. Un solo drenado a la vez (también entre pestañas), en orden (catálogo antes que lo que lo referencia, venta antes de su anulación). Un error permanente NUNCA descarta la operación: queda en la cola, visible en el badge de la topbar (`#sync-status-badge`, rojo si hay algo trabado; tocarlo fuerza un reintento inmediato). Arriba aparece el cartel "Sin conexión" cuando no hay internet, y el Historial marca cada venta ⏳/✓. Si algo queda pendiente por mucho tiempo, es una señal real de que algo se está rompiendo repetidamente, no ruido.
 4. **Después de cualquier fix de sync, avisar que hay que cerrar y reabrir la pestaña/app del todo en la tablet** — un simple cambio de vista no alcanza para que la SPA cargue el código nuevo.
 
 ---
@@ -341,7 +341,7 @@ La función `listaDeComprasSmart()` en `aprovisionamiento.js`:
 - Dataset real: insumos, proveedores, versiones de seed (sección 7)
 - Patrón `withStores` — nunca await dentro (sección 8.1)
 - Seed no-destructivo y IDs obsoletos (secciones 8.2, 8.3)
-- Supabase schema (supabase-schema.sql en raíz del proyecto)
+- Supabase schema (`sql/produccion/supabase-schema.sql`; staging en `sql/staging/`, ver `sql/README.md`)
 
 **Responsabilidades:**
 - Agregar/modificar insumos o proveedores en `seed.js` (siempre bumping la version)
