@@ -174,12 +174,20 @@ Stores:
 | mayonesa | Mayonesa | g | kg | 1000 |
 | huevo | Huevo | unidad | paquete | 24 |
 | cafe | Cafe | g | bolsa | 1000 |
-| leche-normal | Leche entera | ml | L | 1000 |
-| leche-avena | Leche de avena | ml | L | 1000 |
-| leche-sin-lactosa | Leche sin lactosa | ml | L | 1000 |
+| leche-normal | Leche entera | ml | botella | 1000 |
+| leche-avena | Leche de avena | ml | botella | 1000 |
+| leche-sin-lactosa | Leche sin lactosa | ml | botella | 1000 |
 | dulce-de-leche | Dulce de leche | g | kg | 1000 |
 
-**Nota unidades:** Las unidades son libres, el sistema NO convierte. `factorConversion` es cuántas unidades base hay en una unidad de compra. Para la miga: 1 paquete = 12 rebanadas, entonces `factorConversion = 12`.
+**Nota unidades — tres niveles distintos, no confundirlos:**
+
+1. **Unidad de consumo** (`insumos.unidad`): en la que está escrita la receta y en la que se guarda SIEMPRE el stock. g, ml, unidad, rebanada.
+2. **Envase** (`insumos.unidadCompra` + `factorConversion`): cómo lo cuenta la persona cuando mira la estantería. La leche se consume en ml pero se cuentan **botellas**; el café se gasta en g pero se cuentan **bolsas**. `factorConversion` es cuántas unidades base trae un envase (1 paquete de miga = 12 rebanadas → 12).
+3. **Cómo lo vende el proveedor** (`proveedor_insumos.unidadCompra` + `cantidadPorUnidad`): una caja con 6 botellas. Esto NO es el envase del insumo y no se mezcla con él — vive solo en el módulo de proveedores y la lectura de facturas lo convierte antes de llegar al stock.
+
+El motor único de conversión es `src/utils/unidades.js`: convierte entre la unidad base, los múltiplos de su familia (g↔kg, ml↔L) y el envase. **No escribir conversiones a mano en ningún render ni handler** — hubo cinco implementaciones duplicadas y cada una se olvidaba de un caso distinto (el volumen, el plural, el punto decimal). `formatearConEnvase` da las dos lecturas juntas, que es como se piensa el stock: `5,93 L · 5,9 botellas`.
+
+Ojo con un caso que parece envase y no lo es: un insumo con `unidadCompra: "kg"` y base `g` no tiene envase, tiene un múltiplo. El motor lo detecta y lo descarta solo (si no, mostraba "3,45 kg · 3,5 kgs" y duplicaba la opción en el selector).
 
 ### Proveedores (8 activos)
 
@@ -200,7 +208,7 @@ Stores:
 
 ```js
 DB_VERSION = 10              // versión del schema IDB — incrementar solo si cambia estructura de stores
-INSUMOS_SEED_VERSION = 6     // incrementar si cambian insumos, stockMinimo, factorConversion
+INSUMOS_SEED_VERSION = 11    // incrementar si cambian insumos, stockMinimo, factorConversion
 PROVEEDORES_SEED_VERSION = 5 // incrementar si cambian proveedores o proveedor_insumos
 ```
 
@@ -242,6 +250,14 @@ stores.insumos.put({
   unidadCompra: seedInsumo.unidadCompra
 });
 ```
+
+### 8.2.1 Corregir insumos que el usuario creó (no vienen del seed)
+
+`seedInsumos()` corre al arrancar, cuando lo único que hay en la base son los insumos del seed. Los que creó el usuario desde la app (crema, salmón, leche de soja) **todavía no existen en ese momento**: llegan después, con `pullInsumosDesdeNube()`. Una migración escrita dentro del seed no los ve nunca, y encima deja marcada la versión, así que tampoco reintenta.
+
+Para corregirlos va una pasada aparte **después** de bajar el catálogo, con su propia marca en `configuracion` (ver `normalizarEnvasesInsumos()` en `aprovisionamiento.js`, llamada desde `app.js` entre el pull y la reconciliación de stock). Al terminar sube el resultado, así la nube queda corregida sin tocarla a mano y los demás dispositivos ya se lo bajan bien.
+
+Importante: **no cambiar la unidad base de un insumo que ya tiene movimientos cargados.** El ledger quedaría escrito en la unidad vieja y el stock en la nueva, y el stock se deriva del ledger. `normalizarEnvasesInsumos()` saltea esos casos a propósito antes que reescribir números a ciegas.
 
 ### 8.3 IDs de seed obsoletos
 

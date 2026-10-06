@@ -5,7 +5,11 @@ import { slugify } from "../utils/format.js";
 import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
 import { construirInsumoNuevo } from "./aprovisionamiento.js";
 
-export async function createProveedor({ nombre, tel, email, notas, diasCiclo }) {
+// `leadTimeDias` y `diasEntrega` son opcionales: hasta que la pantalla de
+// proveedores tenga donde cargarlos, un proveedor nuevo arranca en "lo tengo
+// el mismo dia, cualquier dia de la semana", que es el supuesto que menos
+// cambia lo que la app venia pidiendo.
+export async function createProveedor({ nombre, tel, email, notas, diasCiclo, leadTimeDias, diasEntrega }) {
   const nombreLimpio = String(nombre || "").trim();
   if (!nombreLimpio) throw new Error("El nombre del proveedor es obligatorio.");
 
@@ -53,6 +57,8 @@ export async function pullProveedoresDesdeNube() {
         email: p.email || "",
         notas: p.notas || "",
         diasCiclo: p.dias_ciclo,
+        leadTimeDias: p.lead_time_dias ?? 0,
+        diasEntrega: Array.isArray(p.dias_entrega) && p.dias_entrega.length > 0 ? p.dias_entrega : null,
         activo: p.activo
       });
     }
@@ -85,6 +91,7 @@ export async function seedProveedores() {
 
   // Solo inserta registros nuevos — no sobreescribe ediciones del usuario
   const provIds = new Set(existingProv.map(p => p.id));
+  const seedPorId = new Map(initialProveedores.map(p => [p.id, p]));
   const piIds = new Set(existingPI.map(pi => pi.id));
 
   // IDs de seed obsoletos que deben eliminarse (renombrados o corregidos)
@@ -93,6 +100,19 @@ export async function seedProveedores() {
   await withStores(["proveedores", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
     for (const p of initialProveedores) {
       if (!provIds.has(p.id)) stores.proveedores.put(p);
+    }
+    // Migracion de la v6: leadTimeDias y diasEntrega son campos nuevos, asi que
+    // en los proveedores que ya existian vienen en undefined. Se rellenan con
+    // el valor del seed SOLO si siguen sin definir — si el dueño ya los
+    // corrigio, se respeta lo suyo (seccion 8.2 del CLAUDE.md).
+    for (const existing of existingProv) {
+      if (existing.leadTimeDias !== undefined && existing.diasEntrega !== undefined) continue;
+      const seedProv = seedPorId.get(existing.id);
+      stores.proveedores.put({
+        ...existing,
+        leadTimeDias: existing.leadTimeDias ?? seedProv?.leadTimeDias ?? 0,
+        diasEntrega: existing.diasEntrega ?? seedProv?.diasEntrega ?? null
+      });
     }
     for (const id of piObsoletos) {
       stores.proveedor_insumos.delete(id);
@@ -108,6 +128,13 @@ export async function updateProveedor(id, changes) {
   const current = await getOne("proveedores", id);
   if (!current) throw new Error("Proveedor no encontrado.");
   await putOne("proveedores", { ...current, ...changes });
+
+  // Sin esto la edicion vivia solo en este dispositivo, y el proximo
+  // "Actualizar catalogo" la BORRABA, porque pullProveedoresDesdeNube
+  // reemplaza lo local con lo de la nube. Se perdia hasta diasCiclo, que es
+  // de donde sale cuanto pedir.
+  const proveedoresFinal = await getAll("proveedores");
+  trySyncProveedoresSnapshot(proveedoresFinal).catch(() => {});
 }
 
 // data.insumoId === "__nuevo__" crea el insumo ahi mismo (mismo mecanismo de

@@ -1,3 +1,5 @@
+import { formatearCantidad, formatearConEnvase, desdeBase, tieneConversion, etiquetaUnidadPlural, formatearNumero } from "../utils/unidades.js";
+
 function timeAgo(isoString) {
   if (!isoString) return "Nunca calibrado";
   const days = Math.floor((Date.now() - new Date(isoString).getTime()) / 86400000);
@@ -17,30 +19,42 @@ function fmtFecha(isoString) {
 // si fuera la parte decimal — con miga (factor 12), 6 rebanadas daba
 // "0.6 paquetes" en vez de la division real, 6/12 = 0.5. Ahora es la
 // division de verdad, igual que la otra rama de abajo (kg/L).
-function fmtPaquetes(amount, insumo) {
-  return `${(amount / insumo.factorConversion).toFixed(2)} paquetes`;
+// El envase de un insumo, para el motor de unidades.
+const envaseDe = (insumo) => ({ nombre: insumo.unidadCompra, equivale: insumo.factorConversion });
+
+// Insumos que se cuentan de a envases enteros y cuya unidad base no tiene
+// multiplos (la miga en paquetes de 12 rebanadas, el huevo en paquetes de 24):
+// una cantidad grande se lee mejor en envases, "7,5 paquetes" antes que "90
+// rebanadas". Los metricos no entran aca: formatearCantidad ya los sube a kg o
+// L por su cuenta.
+//
+// Antes esto decia "paquetes" literal — funcionaba solo para ese nombre y
+// escribia "7.50" con punto. Ahora sale del envase que tenga el insumo y se
+// pluraliza con el mismo criterio que el resto de la app.
+function seLeeMejorEnEnvases(amount, insumo) {
+  return insumo.factorConversion > 1
+    && amount >= insumo.factorConversion
+    && !tieneConversion(insumo.unidad);
 }
 
+function fmtEnvases(amount, insumo) {
+  const envase = envaseDe(insumo);
+  const cuantos = desdeBase(amount, envase.nombre, insumo.unidad, envase);
+  return `${formatearNumero(cuantos, 2)} ${etiquetaUnidadPlural(envase.nombre, cuantos)}`;
+}
+
+// Las dos funciones de abajo convertian a mano g -> kg y se olvidaban del
+// volumen: 20000 ml se leian como "20000 ml" en vez de "20 L". Ahora las dos
+// delegan en utils/unidades.js, que es el mismo motor que usan los campos
+// donde se escribe — asi lo que se lee y lo que se escribe hablan igual.
 function displayAmount(amount, insumo) {
-  if (insumo.unidad === "g") {
-    return amount >= 1000 ? `${(amount / 1000).toFixed(2)} kg` : `${Math.round(amount)} g`;
-  }
-  if (insumo.unidadCompra === "paquete" && amount >= insumo.factorConversion) {
-    return fmtPaquetes(amount, insumo);
-  }
-  const val = Number.isInteger(amount) ? amount : amount.toFixed(1);
-  return `${val} ${insumo.unidad}`;
+  if (seLeeMejorEnEnvases(amount, insumo)) return fmtEnvases(amount, insumo);
+  return formatearCantidad(amount, insumo.unidad);
 }
 
 function fmtGramos(g, unidad, insumo = null) {
-  if (unidad === "g") {
-    if (g >= 1000) return `${parseFloat((g/1000).toFixed(3))} kg`;
-    return `${parseFloat(g.toFixed(1))} g`;
-  }
-  if (insumo && insumo.unidadCompra === "paquete" && g >= insumo.factorConversion) {
-    return fmtPaquetes(g, insumo);
-  }
-  return `${parseFloat(g.toFixed(2))} ${unidad}`;
+  if (insumo && seLeeMejorEnEnvases(g, insumo)) return fmtEnvases(g, insumo);
+  return formatearCantidad(g, unidad);
 }
 
 function fmtGramosCalib(g, unidad) {
@@ -60,14 +74,11 @@ function statusPill(estadoStock) {
   return `<span class="stock-pill ok">OK</span>`;
 }
 
+// Las dos lecturas juntas: la medida y los envases ("5,93 L · 5,9 botellas").
+// Asi se piensa el stock — por un lado cuanto hay, por el otro cuantos
+// envases vas a ver en la heladera.
 function stockBaseText(insumo) {
-  const raw = Math.round(insumo.stockActual * 10) / 10;
-  const rawStr = Number.isInteger(raw) ? raw : raw.toFixed(1);
-  if (insumo.unidadCompra === "paquete") {
-    return `${rawStr} ${insumo.unidad} / ${fmtPaquetes(insumo.stockActual, insumo)}`;
-  }
-  const enCompra = (insumo.stockActual / insumo.factorConversion).toFixed(2);
-  return `${rawStr} ${insumo.unidad} / ${enCompra} ${insumo.unidadCompra}`;
+  return formatearConEnvase(insumo.stockActual, insumo.unidad, envaseDe(insumo));
 }
 
 export function renderInsumosList(container, insumos, onSelect) {
@@ -317,11 +328,7 @@ export function renderListaComprasSmart(container, { items, byProveedor }) {
     return;
   }
 
-  function stockStr(item) {
-    if (item.unidad === "g") return item.stockActual >= 1000 ? `${(item.stockActual/1000).toFixed(2)} kg` : `${Math.round(item.stockActual)} g`;
-    const v = Number.isInteger(item.stockActual) ? item.stockActual : item.stockActual.toFixed(1);
-    return `${v} ${item.unidad}`;
-  }
+  const stockStr = (item) => formatearConEnvase(item.stockActual, item.unidad, { nombre: item.unidadCompra, equivale: item.factorConversion });
 
   function urgBadge(urgencia) {
     if (urgencia === "urgente") return `<span class="ldc-badge ldc-urgente">Urgente</span>`;
@@ -329,9 +336,15 @@ export function renderListaComprasSmart(container, { items, byProveedor }) {
     return `<span class="ldc-badge ldc-ok">OK</span>`;
   }
 
+  // "4 dias" solo era un numero suelto: no se entendia si eran los dias que
+  // faltan para pedir, los que tarda en llegar o los que dura. Es lo que dura.
   function diasSpan(item) {
-    if (item.diasRestantes === null) return `<span class="ldc-dias ldc-dias-nd">sin datos</span>`;
-    return `<span class="ldc-dias">${item.diasRestantes} día${item.diasRestantes !== 1 ? "s" : ""}</span>`;
+    if (item.diasRestantes === null) return `<span class="ldc-dias ldc-dias-nd">sin datos de consumo</span>`;
+    const dias = item.diasRestantes;
+    const texto = dias < 1 ? "se termina hoy"
+      : dias === 1 ? "alcanza para 1 día"
+      : `alcanza para ${dias} días`;
+    return `<span class="ldc-dias">${texto}</span>`;
   }
 
   function rowHtml(item, showSupplier = true) {
@@ -404,9 +417,11 @@ export function renderListaComprasSmart(container, { items, byProveedor }) {
 }
 
 // Pantalla de revision de "Cargar por factura": una tarjeta editable por
-// linea detectada. El selector de insumo trae "+ Crear insumo nuevo" como
-// primera opcion; si se elige, se revela el mini-formulario para dar de
-// alta el insumo (con lo que la IA ya detecto, prellenado).
+// linea detectada. El selector de insumo lista PRIMERO los insumos que ya
+// existen y deja "crear uno nuevo" al final: la mayoria de las lineas que la
+// IA no reconoce son insumos que ya estan cargados pero escritos distinto en
+// la factura ("Pimiento asado entero bolsa 4kg" = "Pimientos asados"), y
+// crear sin mirar la lista es como se fabrican los duplicados.
 export function renderFacturaLineas(container, lineas, insumos) {
   const insumosOrdenados = [...insumos].sort((a, b) => a.nombre.localeCompare(b.nombre));
 
@@ -442,14 +457,16 @@ export function renderFacturaLineas(container, lineas, insumos) {
             <input type="number" step="any" class="factura-precio" value="${Number(linea.precio) || 0}">
           </label>
         </div>
+        ${insumoDetectado ? `<p class="campo-equivale">Entran ${formatearCantidad((Number(linea.cantidad) || 0) * contenidoDefault, insumoDetectado.unidad)} al stock de ${insumoDetectado.nombre}</p>` : ""}
         <label class="quantity-field">
-          Insumo
+          ¿Qué insumo es? <span class="cal-muted">(buscá en la lista antes de crear uno nuevo)</span>
           <select class="factura-insumo-select">
-            <option value="__nuevo__" ${insumoSeleccionado === "__nuevo__" ? "selected" : ""}>+ Crear insumo nuevo</option>
             ${opcionesInsumos(insumoSeleccionado)}
+            <option value="__nuevo__" ${insumoSeleccionado === "__nuevo__" ? "selected" : ""}>— No está en la lista: crear uno nuevo —</option>
           </select>
         </label>
         <div class="factura-linea-nuevo" ${insumoSeleccionado === "__nuevo__" ? "" : "hidden"}>
+          <p class="form-instruccion">Se crea el insumo y queda asociado a este proveedor, así la próxima factura lo reconoce solo. La receta se define después, desde Menú.</p>
           <label class="quantity-field">Nombre del insumo nuevo
             <input type="text" class="factura-nuevo-nombre" value="${linea.nombreDetectado || ""}">
           </label>

@@ -1,4 +1,6 @@
-import { DB_NAME, DB_VERSION, STORE_NAMES, initialCategories, initialProducts } from "../modules/seed.js";
+import { DB_NAME, DB_VERSION, STORE_NAMES, initialCategories, initialProducts, PRODUCTOS_SEED_VERSION } from "../modules/seed.js";
+
+const PRODUCTOS_SEED_VERSION_KEY = "productos_seed_version";
 
 let dbPromise;
 let dbInstance;
@@ -123,11 +125,32 @@ export function resetDatabaseConnection() {
   dbPromise = undefined;
 }
 
+// Siembra el catalogo inicial. "Sembrar" = crear lo que falta, NUNCA pisar lo
+// que ya esta.
+//
+// INCIDENTE (encontrado 04/10/2026, afectaba produccion): esta funcion volvia
+// a aplicar en CADA arranque el precio, el nombre y el "se muestra en caja"
+// escritos en seed.js, encima de lo que el usuario hubiera editado desde
+// Gestion > Menu. El sintoma: cambiabas un precio u ocultabas un producto, se
+// guardaba bien, y al refrescar la tablet volvia todo atras. Peor: justo
+// despues del seed la app sube el catalogo a Supabase, asi que el arranque
+// tambien pisaba el valor correcto en la nube y el cambio se perdia para
+// todos los dispositivos, no solo para el que lo edito.
+//
+// Regla a partir de aca (CLAUDE.md 12.5, "los datos del usuario son
+// sagrados"): si el producto YA EXISTE en este dispositivo, no se toca ni un
+// campo. Para empujar un cambio desde el codigo a dispositivos que ya tienen
+// el producto hay que subir PRODUCTOS_SEED_VERSION y escribir la migracion
+// explicita abajo — el mismo mecanismo que ya usa seedInsumos.
 export async function seedDatabase() {
   const db = await openDatabase();
-  const currentProducts = await requestToPromise(
-    db.transaction("productos", "readonly").objectStore("productos").getAll()
-  );
+  const [currentProducts, config] = await Promise.all([
+    requestToPromise(db.transaction("productos", "readonly").objectStore("productos").getAll()),
+    requestToPromise(db.transaction("configuracion", "readonly").objectStore("configuracion").get(PRODUCTOS_SEED_VERSION_KEY))
+  ]);
+  const versionGuardada = Number(config?.valor) || 0;
+  const versionDesactualizada = versionGuardada < PRODUCTOS_SEED_VERSION;
+
   const tx = db.transaction(["categorias", "productos", "configuracion"], "readwrite");
   const now = new Date().toISOString();
   const categoryStore = tx.objectStore("categorias");
@@ -135,32 +158,37 @@ export async function seedDatabase() {
   const currentById = new Map(currentProducts.map((product) => [product.id, product]));
   const catalogIds = new Set(initialProducts.map((product) => product.id));
 
+  // Las categorias no se editan desde la app, asi que se refrescan siempre.
   for (const category of initialCategories) {
     categoryStore.put({ ...category, creadoEn: now });
   }
 
   for (const product of initialProducts) {
     const current = currentById.get(product.id);
-    productStore.put({
-      ...product,
-      ...current,
-      categoriaId: product.categoriaId,
-      nombre: product.nombre,
-      precioCentavos: product.precioCentavos,
-      umbralBajo: product.umbralBajo,
-      controlaStock: product.controlaStock,
-      orden: product.orden,
-      activo: product.activo,
-      sandwichTipo: product.sandwichTipo,
-      stockActual: current?.stockActual ?? product.stockActual,
-      creadoEn: current?.creadoEn ?? now,
-      actualizadoEn: now,
-      // Marca que este producto lo administra el seed — asi la limpieza de
-      // abajo (sacar de circulacion lo que se borro de initialProducts) NUNCA
-      // toca un producto creado a mano desde Gestion > Menu, que no tiene
-      // esta marca.
-      origenSeed: true
-    });
+
+    if (!current) {
+      // No existe todavia en este dispositivo: se crea tal cual lo define el codigo.
+      productStore.put({
+        ...product,
+        creadoEn: now,
+        actualizadoEn: now,
+        // Marca que este producto lo administra el seed — asi la limpieza de
+        // abajo (sacar de circulacion lo que se borro de initialProducts)
+        // NUNCA toca un producto creado a mano desde Gestion > Menu.
+        origenSeed: true
+      });
+      continue;
+    }
+
+    if (versionDesactualizada) {
+      // Migracion controlada: aca van SOLO los campos que una version nueva
+      // necesite forzar, y con un comentario que diga por que. Hoy no hay
+      // ninguno — la version 1 es simplemente "respetar lo que hay".
+      productStore.put({ ...current, actualizadoEn: now, origenSeed: current.origenSeed !== false });
+      continue;
+    }
+
+    // Ya existe y la version esta al dia: no se toca. Lo que el usuario edito manda.
   }
 
   for (const current of currentProducts) {
@@ -170,6 +198,7 @@ export async function seedDatabase() {
   }
 
   tx.objectStore("configuracion").put({ id: "seeded_v2", valor: true, actualizadoEn: now });
+  tx.objectStore("configuracion").put({ id: PRODUCTOS_SEED_VERSION_KEY, valor: PRODUCTOS_SEED_VERSION, actualizadoEn: now });
   await transactionDone(tx);
 }
 

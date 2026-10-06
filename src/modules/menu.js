@@ -1,9 +1,15 @@
 import { getAll, getOne, putOne, withStores, requestToPromise } from "../db/idb.js";
 import { slugify } from "../utils/format.js";
-import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot } from "./sync.js";
-import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo } from "../db/supabase.js";
+import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot, trySyncProductoEliminado, hayPendientesDeTipo } from "./sync.js";
+import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo, contarReferenciasProducto, deleteProductoRemoto } from "../db/supabase.js";
 import { construirInsumoNuevo } from "./aprovisionamiento.js";
-import { getInsumoAGrupoVariante } from "./variantes.js";
+import { getInsumoAGrupoVariante, setProductoGrupoVariante } from "./variantes.js";
+import { clasificarBloqueosEliminacion, mensajeBloqueoEliminacion } from "./menu-calculos.js";
+
+// Se reexporta para que app.js siga pidiendole todo lo del Menu a un solo
+// modulo (los calculos puros viven aparte solo para poder probarlos sin
+// navegador, no para que la pantalla tenga que saber de dos archivos).
+export { mensajeBloqueoEliminacion };
 
 export async function getMenuDashboardData() {
   const [categorias, productos, recetas, insumos, insumoAGrupo] = await Promise.all([
@@ -122,20 +128,41 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
     });
 
   const recetasDelProducto = recetasActuales.filter(r => r.productoId === productoId);
+  const recetaPorId = new Map(recetasDelProducto.map(r => [r.id, r]));
+  const idsFinales = new Set(lineasFinales.map(l => `${productoId}:${l.insumoId}`));
 
   await withStores(["productos", "insumos", "recetas"], "readwrite", (stores) => {
     stores.productos.put(producto);
     for (const insumo of insumosNuevos) stores.insumos.put(insumo);
-    for (const receta of recetasDelProducto) stores.recetas.delete(receta.id);
+    // Solo se borran las lineas que el usuario saco del formulario. Antes se
+    // borraban TODAS y se recreaban de cero, y eso se llevaba puesto los
+    // campos que esta pantalla no maneja — sobre todo recetaFija, la marca
+    // que dice "esta receta es exacta, no la aprendas" (la miga: siempre 0,5
+    // rebanadas, ver CLAUDE.md 9). Resultado: tocar el precio de un sandwich
+    // aca desactivaba en silencio la receta fija de su miga y la metia en el
+    // modelo de calibracion. Ahora cada linea se FUSIONA con la que ya
+    // existia y solo se pisa lo que este formulario realmente edita.
+    for (const receta of recetasDelProducto) {
+      if (!idsFinales.has(receta.id)) stores.recetas.delete(receta.id);
+    }
     for (const linea of lineasFinales) {
+      const id = `${productoId}:${linea.insumoId}`;
+      const existente = recetaPorId.get(id);
+      const cantidadCambio = !existente || existente.cantidadPorUnidad !== linea.cantidadPorUnidad;
       stores.recetas.put({
-        id: `${productoId}:${linea.insumoId}`,
+        ...(existente || {}),
+        id,
         productoId,
         insumoId: linea.insumoId,
         cantidadPorUnidad: linea.cantidadPorUnidad,
-        ...(Object.keys(linea.variantesCantidad || {}).length ? { variantesCantidad: linea.variantesCantidad } : {}),
-        esEstimado: true,
-        creadoEn: now,
+        ...(Object.keys(linea.variantesCantidad || {}).length
+          ? { variantesCantidad: linea.variantesCantidad }
+          : existente ? { variantesCantidad: undefined } : {}),
+        // Una cantidad escrita a mano deja de ser estimacion (mismo criterio
+        // que actualizarReceta en aprovisionamiento.js). Si no se toco, se
+        // respeta lo que ya decia.
+        esEstimado: cantidadCambio ? !existente : existente.esEstimado === true,
+        creadoEn: existente?.creadoEn || now,
         actualizadoEn: now
       });
     }
@@ -176,6 +203,11 @@ export async function pullCatalogoDesdeNube() {
     fetchRecetasCatalogo()
   ]);
 
+  // Se lee ANTES de abrir la transaccion: adentro no se puede await nada que
+  // no sea requestToPromise sobre la propia transaccion (CLAUDE.md 8.1).
+  const pendienteCatalogo = hayPendientesDeTipo("catalogo_snapshot");
+  let podados = [];
+
   await withStores(["categorias", "productos", "recetas"], "readwrite", async (stores) => {
     for (const c of categoriasRemotas) {
       const local = await requestToPromise(stores.categorias.get(c.id));
@@ -214,9 +246,156 @@ export async function pullCatalogoDesdeNube() {
         actualizadoEn: r.actualizado_en || new Date().toISOString()
       });
     }
+
+    // Y lo que este pull NO hacia hasta ahora: borrar de la copia local los
+    // productos que ya no estan en la nube. Un pull que solo hace put() es,
+    // igual que un snapshot, un upsert — nunca saca nada. Resultado: un
+    // producto eliminado desde otro dispositivo seguia apareciendo en el Menu
+    // y en Caja de este para siempre, y encima su snapshot de arranque lo
+    // reinsertaba en Supabase (lo revivia para todos).
+    //
+    // Dos guardas antes de borrar nada, porque esto es destructivo:
+    //  - una respuesta vacia no habilita a vaciar el catalogo local (seria un
+    //    error de red leido como "el dueño borro todo");
+    //  - si hay un snapshot de catalogo sin subir, este dispositivo puede
+    //    tener un producto que la nube todavia no vio (creado sin internet):
+    //    podarlo lo perderia. Se saltea y se poda en el proximo pull.
+    if (productosRemotos.length > 0 && !pendienteCatalogo) {
+      const idsRemotos = new Set(productosRemotos.map((p) => p.id));
+      const productosLocales = await requestToPromise(stores.productos.getAll());
+      const aBorrar = new Set(productosLocales.filter((p) => !idsRemotos.has(p.id)).map((p) => p.id));
+      podados = [...aBorrar];
+      for (const id of aBorrar) stores.productos.delete(id);
+      // Las recetas del producto podado se van con el: una receta huerfana
+      // (apuntando a un producto que no existe) hace fallar el push del lote
+      // ENTERO de recetas por la FK, o sea deja de sincronizar todas.
+      const recetasLocales = await requestToPromise(stores.recetas.getAll());
+      for (const r of recetasLocales) {
+        if (aBorrar.has(r.productoId)) stores.recetas.delete(r.id);
+      }
+    }
   });
 
-  return { categorias: categoriasRemotas.length, productos: productosRemotos.length, recetas: recetasRemotas.length };
+  return {
+    categorias: categoriasRemotas.length,
+    productos: productosRemotos.length,
+    recetas: recetasRemotas.length,
+    podados
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Eliminar un producto — DEFINITIVO, sin papelera
+// ---------------------------------------------------------------------------
+//
+// Lo que pidio el dueño: "borrara el producto, y si lo quiere volver a tener
+// debe crearlo de nuevo, con su receta y asignacion de insumos". No hay
+// soft-delete: para eso ya esta "Mostrar en caja" (setProductoActivo).
+//
+// Pero hay un limite duro que NO es negociable: los registros financieros son
+// append-only y auditables (viene la conexion con Hacienda, ver CLAUDE.md).
+// Una venta ya cargada nombra a su producto, y el dashboard reconstruye
+// facturacion y produccion leyendo detalle_venta / movimientos_stock. Ademas
+// el schema de Supabase tiene FK sin cascada desde movimientos_stock,
+// movimientos_insumos y detalle_pedido hacia productos(id): el DELETE remoto
+// fallaria con 23503 y el producto reviviria en el proximo "Actualizar
+// catalogo". Asi que un producto con historial NO se borra: se oculta, y se
+// dice por que.
+
+// Se pregunta a la nube, no a la IDB local: los pedidos solo existen en
+// Supabase, y las ventas cargadas en OTRO dispositivo no estan en la copia
+// local de este. Sin conexion no se puede responder, y adivinar aca seria
+// borrar un producto que quiza tiene ventas en otro lado — asi que se corta.
+// Esta pantalla es Gestion, no la caja: esperar la red aca esta permitido (lo
+// que nunca puede esperar a la nube es confirmar una venta).
+export async function verificarEliminacionProducto(id) {
+  const producto = await getOne("productos", id);
+  if (!producto) throw new Error("Producto no encontrado.");
+
+  let referencias;
+  try {
+    referencias = await contarReferenciasProducto(id);
+  } catch (error) {
+    throw new Error(
+      "Para eliminar hace falta conexion: hay que revisar en la nube si el producto tiene ventas o pedidos. Proba cuando vuelva el wifi."
+    );
+  }
+
+  const bloqueos = clasificarBloqueosEliminacion(referencias);
+
+  const recetas = (await getAll("recetas")).filter((r) => r.productoId === id);
+
+  return {
+    producto,
+    nombre: producto.nombre,
+    puede: bloqueos.length === 0,
+    bloqueos,
+    referencias,
+    lineasReceta: recetas.length,
+    stockActual: Number(producto.stockActual) || 0
+  };
+}
+
+// Borra el producto y SUS LINEAS DE RECETA en la misma transaccion. Separarlo
+// en dos pasos dejaba, si el segundo fallaba, una receta huerfana apuntando a
+// un producto inexistente — y eso hace fallar el push del snapshot ENTERO de
+// recetas (FK recetas.producto_id), o sea: deja de sincronizar TODAS las
+// recetas, no solo la de este producto.
+export async function eliminarProducto(id) {
+  const verificacion = await verificarEliminacionProducto(id);
+  if (!verificacion.puede) {
+    const error = new Error(mensajeBloqueoEliminacion(verificacion));
+    error.bloqueado = true;
+    error.verificacion = verificacion;
+    throw error;
+  }
+
+  const recetasDelProducto = (await getAll("recetas")).filter((r) => r.productoId === id);
+  const idsReceta = new Set(recetasDelProducto.map((r) => r.id));
+  const historial = (await getAll("historial_recetas")).filter(
+    (h) => h.productoId === id || idsReceta.has(h.recetaId)
+  );
+
+  // LA NUBE PRIMERO, y recien despues lo local. Al reves (lo que parecia
+  // natural: borrar local y dejar que la cola se encargue) el fallo es el peor
+  // posible: el producto desaparece de la tablet, el borrado remoto no entra,
+  // y el proximo "Actualizar catalogo" lo vuelve a bajar como si nada. El
+  // usuario ve un producto resucitar sin explicacion.
+  // Asi, si la nube no deja borrar, no se borro nada en ningun lado y el
+  // mensaje de error lo dice. Esta accion ya necesita conexion de todas formas
+  // (verificarEliminacionProducto pregunta por los pedidos, que viven solo en
+  // Supabase), asi que no se pierde nada por exigirla. Nada de esto esta en el
+  // camino de confirmar una venta — eso sigue sin esperar a la nube nunca.
+  await deleteProductoRemoto(id);
+
+  // Si el producto estaba asignado a un grupo de variante (ej. "Tipo de
+  // leche"), sacarlo de ahi: el grupo guarda una lista de productoIds y
+  // quedaria apuntando a un producto que ya no existe.
+  await setProductoGrupoVariante(id, null);
+
+  await withStores(["productos", "recetas", "historial_recetas"], "readwrite", (stores) => {
+    for (const receta of recetasDelProducto) stores.recetas.delete(receta.id);
+    for (const h of historial) stores.historial_recetas.delete(h.id);
+    stores.productos.delete(id);
+  });
+
+  const [categorias, productosFinal, recetasFinal] = await Promise.all([
+    getAll("categorias"),
+    getAll("productos"),
+    getAll("recetas")
+  ]);
+  // Los snapshots ya no contienen el producto, asi que solo alinean al resto.
+  // El borrado remoto se vuelve a encolar DESPUES de ellos a proposito: si en
+  // la cola quedaba un snapshot viejo de antes del borrado, ese snapshot
+  // todavia incluye el producto y lo reinserta (un snapshot es un upsert: no
+  // borra nada). Encolado ultimo, y como el drenado respeta el orden, el
+  // borrado tiene siempre la ultima palabra. Es idempotente, repetirlo no
+  // cuesta nada.
+  trySyncCatalogoSnapshot(categorias, productosFinal).catch(() => {});
+  trySyncRecetasSnapshot(recetasFinal).catch(() => {});
+  trySyncProductoEliminado(id).catch(() => {});
+
+  return { nombre: verificacion.producto.nombre, lineasReceta: recetasDelProducto.length };
 }
 
 export async function setProductoActivo(id, activo) {
@@ -225,6 +404,31 @@ export async function setProductoActivo(id, activo) {
   await putOne("productos", { ...producto, activo, actualizadoEn: new Date().toISOString() });
   const [categorias, productos] = await Promise.all([getAll("categorias"), getAll("productos")]);
   trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
+}
+
+// Guarda de una sola vez el orden completo de una categoria — lo que hace
+// falta al reordenar arrastrando (moverProductoOrden, mas abajo, mueve de a
+// un lugar y sirve para los botones de flecha).
+export async function reordenarProductos(categoriaId, idsEnOrden) {
+  const productos = await getAll("productos");
+  const delaCategoria = productos.filter((p) => p.categoriaId === categoriaId);
+  const porId = new Map(delaCategoria.map((p) => [p.id, p]));
+  // Solo se acepta un orden que contenga exactamente los mismos productos que
+  // la categoria: si llegara una lista incompleta (ej. una pantalla vieja),
+  // reordenar con ella dejaria productos sueltos al final sin que se note.
+  if (idsEnOrden.length !== delaCategoria.length || idsEnOrden.some((id) => !porId.has(id))) {
+    throw new Error("El orden recibido no coincide con los productos de la categoria.");
+  }
+
+  const now = new Date().toISOString();
+  await withStores(["productos"], "readwrite", (stores) => {
+    idsEnOrden.forEach((id, indice) => {
+      stores.productos.put({ ...porId.get(id), orden: indice + 1, actualizadoEn: now });
+    });
+  });
+
+  const [categorias, productosFinal] = await Promise.all([getAll("categorias"), getAll("productos")]);
+  trySyncCatalogoSnapshot(categorias, productosFinal).catch(() => {});
 }
 
 export async function moverProductoOrden(id, direccion) {

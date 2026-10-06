@@ -1,11 +1,24 @@
-import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, buildSalesSummaryText } from "../modules/backup.js";
+import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, buildSalesSummaryText, exportFullBackup } from "../modules/backup.js";
+import { cargarPanel } from "../modules/panel.js";
+import { cargarCierre, guardarCierre } from "../modules/cierre.js";
+import { renderCierre, calcularDesdeFormulario } from "../ui/render-cierre.js";
+import { renderPanel } from "../ui/render-panel.js";
+import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, reconciliarStockInsumosConNube } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, reconciliarStockInsumosConNube, normalizarEnvasesInsumos } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
-import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, pullCatalogoDesdeNube } from "../modules/menu.js";
+import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto } from "../modules/menu.js";
+import { habilitarArrastre } from "../ui/arrastrar-filas.js";
+import { revisarCicloInsumos, pendientesDelCiclo, resumenPendientes } from "../modules/ciclo-insumos.js";
+import { renderPendientesCiclo, leerPendiente } from "../ui/render-ciclo.js";
+import { cargarCombosConfigLocal, getCombosConfigActual, guardarCombosConfig, pullCombosConfigDesdeNube } from "../modules/combos.js";
+import { revisarNovedades, marcarNovedadesTraidas, inicializarNovedadesSiHaceFalta } from "../modules/novedades.js";
+import { resumenDelDia as resumenPedidosDelDia, pedidosPorEntregar, textoPorEntregar } from "../modules/avisos-pedidos.js";
+import { unidadesDisponibles, tieneConversion, aBase, desdeBase, mejorUnidad, formatearCantidad, formatearConEnvase, etiquetaUnidad, formatearNumero, paraInput } from "../utils/unidades.js";
 import { getGruposVariantes, saveGrupoVariante, deleteGrupoVariante, getGrupoDeProducto, setProductoGrupoVariante, pullVariantesGruposDesdeNube } from "../modules/variantes.js";
 import { renderVariantesOpcionesRows, renderVariantesProductosChecklist, renderVariantesGruposList } from "../ui/render-variantes.js";
+import { mensajeConfirmacionEliminacion } from "../modules/menu-calculos.js";
 import { renderMenuList, renderMenuRecetaRows } from "../ui/render-menu.js";
 import {
   trySyncVenta,
@@ -65,6 +78,7 @@ let cartTotalCentavosActual = 0;
 let currentView = "caja";
 let saleInProgress = false;
 let cartMode = "normal";
+let formaPagoActual = "efectivo"; // "efectivo" | "tarjeta" — se pide al cobrar, se resetea a efectivo (la mas comun) despues de cada venta.
 let productionInProgress = false;
 let productionCommentInProgress = false;
 let stockAdjustInProgress = false;
@@ -124,13 +138,22 @@ async function refreshGruposVariantes() {
 // punto para el boton manual Y para el auto-sync silencioso (ver
 // sincronizarCatalogoSilencioso), asi nunca se desalinean.
 async function pullCatalogoCompleto() {
+  // PRIMERO subir lo propio, DESPUES bajar lo de los demas. Al reves, un
+  // cambio hecho sin internet (ej. un precio nuevo todavia en la cola) se
+  // pisaba con el valor viejo de la nube antes de haber llegado a subir, y
+  // el cambio se perdia sin aviso.
+  await processSyncQueue().catch(() => {});
   const [catalogo, insumosCount, proveedoresResult, variantesResult] = await Promise.all([
     pullCatalogoDesdeNube(),
     pullInsumosDesdeNube(),
     pullProveedoresDesdeNube(),
-    pullVariantesGruposDesdeNube()
+    pullVariantesGruposDesdeNube(),
+    pullCombosConfigDesdeNube()
   ]);
-  await processSyncQueue().catch(() => {});
+  // Antes de reconciliar el stock: corrige envases mal puestos (una sola vez)
+  // sobre lo que acabo de bajar la nube, porque algunos insumos no vienen del
+  // seed y recien existen aca despues del pull.
+  await normalizarEnvasesInsumos().catch(() => ({ corregidos: [] }));
   const [stockInsumos, stockProductos] = await Promise.all([
     reconciliarStockInsumosConNube(),
     reconciliarStockProductosConNube()
@@ -163,7 +186,7 @@ function setRefrescarCatalogoEstado(estado, mensaje = "") {
   }
   if (estado === "success") {
     boton.disabled = false;
-    boton.textContent = "Actualizar catalogo";
+    setRefrescarCatalogoTextoNovedades();
     status.hidden = false;
     status.className = "refrescar-catalogo-status success";
     status.textContent = `✓ ${mensaje}`;
@@ -208,6 +231,8 @@ async function sincronizarCatalogoSilencioso() {
 // carrito, con las opciones reales de la categoria Bebidas.
 const PRODUCTOS_CON_BEBIDA_A_ELEGIR = new Set(["promo-bebida"]);
 let recetaEditInProgress = false;
+let recetaEditUnidadBase = "g";
+let recetaEditEnvase = null;
 let selectedRecetaId = "";
 let recetaEditSheetOpen = false;
 let calibracionAlphaReceta = null;
@@ -227,6 +252,8 @@ let historialRangoInProgress = false;
 let selectedMenuProductoId = "";
 let menuProductoMode = "add";
 let menuEditSheetOpen = false;
+let menuProductoEditando = null;
+let menuEliminarInProgress = false;
 let menuRecetaLineas = [];
 let menuInsumosDisponibles = [];
 let menuGruposVarianteDisponibles = [];
@@ -287,6 +314,11 @@ const dom = {
   appMessage: document.querySelector("#app-message"),
   syncStatusBadge: document.querySelector("#sync-status-badge"),
   offlineBanner: document.querySelector("#offline-banner"),
+  novedadesBadge: document.querySelector("#novedades-badge"),
+  avisoPedidos: document.querySelector("#aviso-pedidos"),
+  avisoPedidosTexto: document.querySelector("#aviso-pedidos-texto"),
+  avisoPedidosVer: document.querySelector("#aviso-pedidos-ver"),
+  avisoPedidosCerrar: document.querySelector("#aviso-pedidos-cerrar"),
   navLinks: document.querySelectorAll(".nav:not(.sub-nav) > .nav-link"),
   views: document.querySelectorAll(".view"),
   productCategories: document.querySelector("#product-categories"),
@@ -311,6 +343,9 @@ const dom = {
   clearCart: document.querySelector("#clear-cart"),
   saleMessage: document.querySelector("#sale-message"),
   cartModeTogooToggle: document.querySelector("#cart-mode-togoo"),
+  pagoFormaEfectivo: document.querySelector("#pago-forma-efectivo"),
+  pagoFormaTarjeta: document.querySelector("#pago-forma-tarjeta"),
+  cartVuelto: document.querySelector("#cart-vuelto"),
   productionDateText: document.querySelector("#production-date-text"),
   productionCommentText: document.querySelector("#production-comment-text"),
   productionForm: document.querySelector("#production-form"),
@@ -350,15 +385,26 @@ const dom = {
   stockAdjustPlus: document.querySelector("#stock-adjust-plus"),
   historyFilter: document.querySelector("#history-filter"),
   historyDate: document.querySelector("#history-date"),
+  cierreRoot: document.querySelector("#cierre-root"),
+  cierreDate: document.querySelector("#cierre-date"),
+  cierrePrev: document.querySelector("#cierre-prev"),
+  cierreNext: document.querySelector("#cierre-next"),
+  cierreHoy: document.querySelector("#cierre-hoy"),
+  panelRoot: document.querySelector("#panel-root"),
+  panelDate: document.querySelector("#panel-date"),
+  panelPrev: document.querySelector("#panel-prev"),
+  panelNext: document.querySelector("#panel-next"),
+  panelHoy: document.querySelector("#panel-hoy"),
+  panelRefresh: document.querySelector("#panel-refresh"),
   historyProductionText: document.querySelector("#history-production-text"),
   historyList: document.querySelector("#history-list"),
-  historialBackupPanel: document.querySelector("#historial-backup-panel"),
   exportSalesSummary: document.querySelector("#export-sales-summary"),
   resumenPreview: document.querySelector("#resumen-preview"),
   resumenPreviewText: document.querySelector("#resumen-preview-text"),
   resumenPreviewDownload: document.querySelector("#resumen-preview-download"),
   resumenPreviewClose: document.querySelector("#resumen-preview-close"),
   exportSalesJson: document.querySelector("#export-sales-json"),
+  exportBackupCompleto: document.querySelector("#export-backup-completo"),
   historialRangoForm: document.querySelector("#historial-rango-form"),
   historialRangoDesde: document.querySelector("#historial-rango-desde"),
   historialRangoHasta: document.querySelector("#historial-rango-hasta"),
@@ -372,6 +418,8 @@ const dom = {
   insumosCompraCantidad: document.querySelector("#insumos-compra-cantidad"),
   insumosCompraCampo: document.querySelector("#insumos-compra-field"),
   insumosCompraLabel: document.querySelector("#insumos-compra-label"),
+  insumosCompraEquivale: document.querySelector("#insumos-compra-equivale"),
+  insumosAjusteInstruccion: document.querySelector("#insumos-ajuste-instruccion"),
   insumosAjusteCantidad: document.querySelector("#insumos-ajuste-cantidad"),
   insumosAjusteCampo: document.querySelector("#insumos-ajuste-field"),
   insumosAjusteMinus: document.querySelector("#insumos-ajuste-minus"),
@@ -388,6 +436,8 @@ const dom = {
   confirmDialogAccept: document.querySelector("#confirm-dialog-accept"),
   confirmDialogCancel: document.querySelector("#confirm-dialog-cancel"),
   calibracionSheet: document.querySelector("#calibracion-sheet"),
+  calibracionUnidad: document.querySelector("#calibracion-unidad"),
+  calibracionEquivale: document.querySelector("#calibracion-equivale"),
   calibracionBackdrop: document.querySelector("#calibracion-backdrop"),
   closeCalibracion: document.querySelector("#close-calibracion"),
   calibracionForm: document.querySelector("#calibracion-form"),
@@ -405,6 +455,8 @@ const dom = {
   recetaEditContext: document.querySelector("#receta-edit-context"),
   recetaEditLabel: document.querySelector("#receta-edit-label"),
   recetaEditCantidad: document.querySelector("#receta-edit-cantidad"),
+  recetaEditUnidad: document.querySelector("#receta-edit-unidad"),
+  recetaEditEquivale: document.querySelector("#receta-edit-equivale"),
   recetaEditMotivo: document.querySelector("#receta-edit-motivo"),
   verListaCompras: document.querySelector("#ver-lista-compras"),
   listaComprasSection: document.querySelector("#lista-compras-section"),
@@ -418,6 +470,8 @@ const dom = {
   crearInsumoForm: document.querySelector("#crear-insumo-form"),
   crearInsumoNombre: document.querySelector("#crear-insumo-nombre"),
   crearInsumoUnidad: document.querySelector("#crear-insumo-unidad"),
+  crearInsumoEnvase: document.querySelector("#crear-insumo-envase"),
+  crearInsumoEnvaseTrae: document.querySelector("#crear-insumo-envase-trae"),
   crearInsumoMin: document.querySelector("#crear-insumo-min"),
   crearInsumoCrit: document.querySelector("#crear-insumo-crit"),
   facturaBackdrop: document.querySelector("#factura-backdrop"),
@@ -453,6 +507,8 @@ const dom = {
   provEditEmail: document.querySelector("#prov-edit-email"),
   provEditNotas: document.querySelector("#prov-edit-notas"),
   provEditDias: document.querySelector("#prov-edit-dias"),
+  provEditLead: document.querySelector("#prov-edit-lead"),
+  provEditEntrega: document.querySelector("#prov-edit-entrega"),
   provProdSheet: document.querySelector("#prov-prod-sheet"),
   provProdBackdrop: document.querySelector("#prov-prod-backdrop"),
   closeProvProd: document.querySelector("#close-prov-prod"),
@@ -477,10 +533,21 @@ const dom = {
   menuEditBackdrop: document.querySelector("#menu-edit-backdrop"),
   closeMenuEdit: document.querySelector("#close-menu-edit"),
   menuEditForm: document.querySelector("#menu-edit-form"),
+  menuEditEliminar: document.querySelector("#menu-edit-eliminar"),
+  menuEditEliminarWrap: document.querySelector("#menu-edit-eliminar-wrap"),
   menuEditTitle: document.querySelector("#menu-edit-title"),
   menuEditNombre: document.querySelector("#menu-edit-nombre"),
   menuEditCategoria: document.querySelector("#menu-edit-categoria"),
   menuEditPrecio: document.querySelector("#menu-edit-precio"),
+  menuComboDocena: document.querySelector("#menu-combo-docena"),
+  menuComboMedia: document.querySelector("#menu-combo-media"),
+  menuComboPremium: document.querySelector("#menu-combo-premium"),
+  menuCombosGuardar: document.querySelector("#menu-combos-guardar"),
+  irARecetas: document.querySelector("#ir-a-recetas"),
+  irAInsumosDesdeVariantes: document.querySelector("#ir-a-insumos-desde-variantes"),
+  menuCombosStatus: document.querySelector("#menu-combos-status"),
+  avisoCiclo: document.querySelector("#aviso-ciclo"),
+  seccionCalibracion: document.querySelector("#seccion-calibracion"),
   menuEditTipoWrap: document.querySelector("#menu-edit-tipo-wrap"),
   menuEditSandwichTipo: document.querySelector("#menu-edit-sandwich-tipo"),
   menuEditControlaStock: document.querySelector("#menu-edit-controla-stock"),
@@ -530,6 +597,146 @@ function setFlash(text, type = "success") {
   setFlash.timeout = window.setTimeout(() => {
     dom.appMessage.hidden = true;
   }, 4200);
+}
+
+// --- Avisos de pedidos ---
+//
+// Dos avisos, los dos dentro de la app (sin permisos ni notificaciones del
+// sistema): el resumen del dia la primera vez que se abre, y "falta una hora"
+// antes de cada entrega. Se revisa cada 5 minutos: la ventana de aviso es de
+// una hora, asi que no hace falta mas seguido.
+const AVISO_PEDIDOS_CADA_MS = 5 * 60 * 1000;
+let avisoPedidosTimer = null;
+let resumenDiaMostrado = null;      // fecha del dia cuyo resumen ya se mostro
+const pedidosYaAvisados = new Set(); // ids avisados de "falta una hora"
+
+function mostrarAvisoPedidos(texto) {
+  if (!dom.avisoPedidos) return;
+  dom.avisoPedidosTexto.textContent = texto;
+  dom.avisoPedidos.hidden = false;
+}
+
+function ocultarAvisoPedidos() {
+  if (dom.avisoPedidos) dom.avisoPedidos.hidden = true;
+}
+
+async function revisarAvisosPedidos() {
+  if (document.hidden) return;
+  let pedidos;
+  try {
+    pedidos = await fetchPedidosDelDia();
+  } catch {
+    return; // sin conexion no se avisa nada; se reintenta en la proxima vuelta
+  }
+  const hoy = todayISO();
+
+  // 1) Lo mas urgente primero: una entrega dentro de la proxima hora.
+  const porEntregar = pedidosPorEntregar(pedidos, new Date(), pedidosYaAvisados);
+  if (porEntregar.length > 0) {
+    const proximo = porEntregar[0];
+    pedidosYaAvisados.add(String(proximo.id));
+    mostrarAvisoPedidos(textoPorEntregar(proximo));
+    return;
+  }
+
+  // 2) Y si no hay nada inminente, el resumen del dia (una vez por dia).
+  if (resumenDiaMostrado !== hoy) {
+    resumenDiaMostrado = hoy;
+    const resumen = resumenPedidosDelDia(pedidos, hoy);
+    if (resumen) mostrarAvisoPedidos(resumen.texto);
+  }
+}
+
+function setupAvisosPedidos() {
+  dom.avisoPedidosCerrar?.addEventListener("click", ocultarAvisoPedidos);
+  dom.avisoPedidosVer?.addEventListener("click", () => {
+    ocultarAvisoPedidos();
+    showView("pedidos");
+  });
+  if (avisoPedidosTimer) window.clearInterval(avisoPedidosTimer);
+  avisoPedidosTimer = window.setInterval(revisarAvisosPedidos, AVISO_PEDIDOS_CADA_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") revisarAvisosPedidos();
+  });
+}
+
+// --- Cambios ENTRANTES (lo que hizo otro dispositivo y falta bajar) ---
+//
+// Es el espejo del badge de sincronizacion: aquel cuenta lo que falta SUBIR,
+// este lo que falta BAJAR. No baja nada solo a proposito — en la tablet el
+// catalogo no puede cambiar a mitad de una venta (ver
+// sincronizarCatalogoSilencioso). Solo avisa; traerlo es un toque.
+let novedadesUltimo = { total: 0, texto: "", cursoresNuevos: null };
+let novedadesTimer = null;
+let novedadesEnCurso = false;
+
+function renderNovedadesBadge() {
+  if (!dom.novedadesBadge) return;
+  if (novedadesUltimo.total === 0) {
+    dom.novedadesBadge.hidden = true;
+    return;
+  }
+  dom.novedadesBadge.hidden = false;
+  dom.novedadesBadge.textContent = `⬇ ${novedadesUltimo.texto}`;
+}
+
+async function revisarNovedadesAhora() {
+  if (novedadesEnCurso || !navigator.onLine || document.hidden) return;
+  novedadesEnCurso = true;
+  try {
+    novedadesUltimo = await revisarNovedades();
+    renderNovedadesBadge();
+    if (currentView === "gestion") setRefrescarCatalogoTextoNovedades();
+  } catch {
+    // silencioso: quedarse sin avisar es mejor que molestar con un error de red
+  } finally {
+    novedadesEnCurso = false;
+  }
+}
+
+// El boton de Gestion deja de decir "Actualizar catalogo" (que no dice nada)
+// y pasa a decir que va a traer.
+function setRefrescarCatalogoTextoNovedades() {
+  // Sin guard por refrescarCatalogoInProgress: al entrar a Gestion se dispara
+  // sincronizarCatalogoSilencioso, que pone esa bandera en true, y con el
+  // guard el boton se quedaba para siempre en "Actualizar catalogo". Cuando
+  // hay una corrida en curso el texto lo maneja setRefrescarCatalogoEstado.
+  if (!dom.refrescarCatalogo || dom.refrescarCatalogo.disabled) return;
+  dom.refrescarCatalogo.textContent = novedadesUltimo.total > 0
+    ? `⬇ Traer ${novedadesUltimo.texto}`
+    : "Buscar cambios";
+}
+
+function setupNovedades() {
+  dom.novedadesBadge?.addEventListener("click", () => traerNovedades());
+  if (novedadesTimer) window.clearInterval(novedadesTimer);
+  novedadesTimer = window.setInterval(revisarNovedadesAhora, 90000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") revisarNovedadesAhora();
+  });
+  window.addEventListener("online", revisarNovedadesAhora);
+}
+
+async function traerNovedades() {
+  if (refrescarCatalogoInProgress) return;
+  const cursores = novedadesUltimo.cursoresNuevos;
+  dom.novedadesBadge.disabled = true;
+  refrescarCatalogoInProgress = true;
+  try {
+    await pullCatalogoCompleto();
+    await marcarNovedadesTraidas(cursores);
+    novedadesUltimo = { total: 0, texto: "", cursoresNuevos: null };
+    renderNovedadesBadge();
+    if (currentView === "gestion") await refreshGestionSubView(currentGestionSubView);
+    if (currentView === "pedidos") await renderPedidosView();
+    setFlash("Cambios traídos.", "success");
+  } catch (error) {
+    setFlash(error.message || "No se pudieron traer los cambios (revisá la conexión).", "error");
+  } finally {
+    refrescarCatalogoInProgress = false;
+    dom.novedadesBadge.disabled = false;
+    setRefrescarCatalogoTextoNovedades();
+  }
 }
 
 // Estado de sincronizacion siempre visible. Antes era invisible: si un push a
@@ -713,7 +920,7 @@ function startPedidosPolling() {
   pedidosPollTimer = window.setInterval(() => { renderPedidosView(); }, 9000);
 }
 
-const CONSULTA_VIEWS = ["caja", "produccion", "historial"];
+const CONSULTA_VIEWS = ["caja", "produccion", "historial", "panel"];
 
 function stopConsultaPolling() {
   if (consultaPollTimer) {
@@ -758,6 +965,8 @@ function setCrearInsumoSheetOpen(isOpen) {
 function openCrearInsumoSheet() {
   dom.crearInsumoNombre.value = "";
   dom.crearInsumoUnidad.value = "";
+  dom.crearInsumoEnvase.value = "";
+  dom.crearInsumoEnvaseTrae.value = "";
   dom.crearInsumoMin.value = "";
   dom.crearInsumoCrit.value = "";
   setCrearInsumoSheetOpen(true);
@@ -931,16 +1140,25 @@ async function handleFacturaConfirmar() {
   }
 }
 
+// Insumos incluye la calibracion (es el mismo ciclo: que tengo / cuanto gasto
+// de verdad). El resto son pantallas propias.
+const SUBVISTAS_FUSIONADAS = { calibrar: "insumos" };
+
 async function refreshGestionSubView(subViewName) {
-  if (subViewName === "insumos") await renderInsumosView();
-  if (subViewName === "calibrar") await renderCalibracionView();
-  if (subViewName === "recetas") await renderRecetasView();
-  if (subViewName === "proveedores") await renderProveedoresView();
+  if (subViewName === "insumos") {
+    await renderInsumosView();
+    if (dom.seccionCalibracion?.open) await renderCalibracionView();
+  }
   if (subViewName === "menu") await renderMenuView();
+  if (subViewName === "recetas") await renderRecetasView();
   if (subViewName === "variantes") await renderVariantesView();
+  if (subViewName === "proveedores") await renderProveedoresView();
 }
 
 function showGestionSubView(subViewName) {
+  // Una pestaña vieja (o un dispositivo que venia con "calibrar"/"recetas"
+  // guardado de antes de la fusion) cae en la pantalla que ahora las contiene.
+  subViewName = SUBVISTAS_FUSIONADAS[subViewName] || subViewName;
   closeAllGestionSheets();
   currentGestionSubView = subViewName;
   document.querySelectorAll(".subview").forEach((section) => section.classList.toggle("active", section.id === `subview-${subViewName}`));
@@ -956,6 +1174,7 @@ function showView(viewName) {
   // nunca mientras se esta en Caja, ver sincronizarCatalogoSilencioso.
   if (viewName === "gestion" && vistaAnterior !== "gestion") {
     sincronizarCatalogoSilencioso();
+    setRefrescarCatalogoTextoNovedades();
   }
   if (viewName !== "caja") {
     setLecheSheetOpen(false);
@@ -1005,6 +1224,19 @@ function renderReservedStock() {
   const displayProducts = productsWithReservedStock();
   renderProductGrid(dom.productCategories, categories, displayProducts, handleProductTap);
   filterProductButtons(dom.salesSearch, dom.salesSearchEmpty);
+}
+
+// La tarjeta no tiene vuelto que calcular — el "Pago con" es una ayuda-memoria
+// de efectivo (ver recalcularVuelto), asi que se oculta con tarjeta y se
+// limpia si habia algo tipeado.
+function setFormaPago(forma) {
+  formaPagoActual = forma;
+  dom.pagoFormaEfectivo.classList.toggle("active", forma === "efectivo");
+  dom.pagoFormaEfectivo.setAttribute("aria-pressed", String(forma === "efectivo"));
+  dom.pagoFormaTarjeta.classList.toggle("active", forma === "tarjeta");
+  dom.pagoFormaTarjeta.setAttribute("aria-pressed", String(forma === "tarjeta"));
+  dom.cartVuelto.hidden = forma === "tarjeta";
+  if (forma === "tarjeta") resetVuelto();
 }
 
 function setCartMode(mode) {
@@ -1370,9 +1602,6 @@ function nudgeStockAdjust(delta) {
 async function renderHistoryView() {
   const fecha = dom.historyDate.value || todayISO();
   dom.historyDate.value = fecha;
-  // La vista previa del resumen es de UNA fecha puntual — si se cambia de
-  // fecha o se recarga la vista, se cierra para no mostrar un dia viejo.
-  dom.resumenPreview.hidden = true;
 
   if (isModoConsulta()) {
     showConsultaPlaceholder(dom.historyList, "Cargando...");
@@ -1410,7 +1639,6 @@ async function renderHistoryView() {
     return;
   }
 
-  dom.historialBackupPanel.style.display = "";
   const snapshot = await productionSnapshot(fecha);
   const sales = await salesForDay(fecha);
   const totalSandwichesProduced = snapshot.sandwiches.reduce(
@@ -1508,21 +1736,55 @@ function getInsumoStep(insumo) {
   return 1;
 }
 
+// Llena un selector con las unidades en las que se puede escribir ese insumo
+// (g/kg, ml/L...) y deja elegida la que corresponde al valor que se muestra.
+// Si el insumo no tiene multiplos (unidad, rebanada) el selector queda con una
+// sola opcion y no molesta.
+// El envase de un insumo, como lo entiende utils/unidades.js: el nombre con el
+// que se cuenta a ojo (botella, bolsa, paquete, pote) y cuantas unidades base
+// trae cada uno. Asi la leche se escribe y se lee en ml, en L o en botellas.
+function envaseDeInsumo(insumo) {
+  if (!insumo) return null;
+  return { nombre: insumo.unidadCompra, equivale: insumo.factorConversion };
+}
+
+function llenarSelectorUnidad(select, unidadBase, unidadElegida, envase = null) {
+  const opciones = unidadesDisponibles(unidadBase, envase);
+  select.innerHTML = opciones.map((u) => `<option value="${u}">${etiquetaUnidad(u)}</option>`).join("");
+  // Si la unidad pedida no esta entre las opciones (cambio el envase), se cae a
+  // la primera en vez de dejar el selector en blanco.
+  select.value = opciones.includes(unidadElegida) ? unidadElegida : opciones[0];
+  select.disabled = opciones.length <= 1;
+  select.dataset.unidadPrevia = select.value;
+}
+
+// Lo que hay escrito en el campo, convertido a la unidad base del insumo.
+function cantidadEnBase(input, select, unidadBase, envase = null) {
+  return aBase(parseFloat(String(input.value).replace(",", ".")), select?.value || unidadBase, unidadBase, envase);
+}
+
 function updateAjusteDeltaHint(insumo) {
-  const nuevo = parseFloat(dom.insumosAjusteCantidad.value);
   const hint = dom.insumosAjusteDeltaHint;
-  if (!insumo || isNaN(nuevo)) { hint.textContent = ""; hint.className = "insumo-stepper-hint"; return; }
-  const delta = parseFloat((nuevo - insumo.stockActual).toFixed(4));
+  if (!insumo) { hint.textContent = ""; hint.className = "insumo-stepper-hint"; return; }
+  // Se compara en la unidad BASE, aunque se haya escrito en kg o en L.
+  const nuevoBase = cantidadEnBase(dom.insumosAjusteCantidad, dom.insumosAjusteUnidad, insumo.unidad, envaseDeInsumo(insumo));
+  if (!Number.isFinite(nuevoBase)) { hint.textContent = ""; hint.className = "insumo-stepper-hint"; return; }
+  const delta = parseFloat((nuevoBase - insumo.stockActual).toFixed(4));
   if (delta === 0) {
     hint.textContent = "Sin cambios respecto al stock actual";
     hint.className = "insumo-stepper-hint";
-  } else if (delta > 0) {
-    hint.textContent = `+${delta} ${insumo.unidad} respecto al stock actual`;
-    hint.className = "insumo-stepper-hint sube";
   } else {
-    hint.textContent = `${delta} ${insumo.unidad} respecto al stock actual`;
-    hint.className = "insumo-stepper-hint baja";
+    hint.textContent = `${delta > 0 ? "+" : "−"}${formatearCantidad(Math.abs(delta), insumo.unidad)} respecto al stock actual`;
+    hint.className = `insumo-stepper-hint ${delta > 0 ? "sube" : "baja"}`;
   }
+}
+
+// "= 4 kg" debajo del campo de compra: confirma cuanto entra al stock.
+function updateCompraEquivale(insumo) {
+  if (!dom.insumosCompraEquivale) return;
+  const n = parseFloat(String(dom.insumosCompraCantidad.value).replace(",", "."));
+  if (!insumo || !Number.isFinite(n) || n <= 0) { dom.insumosCompraEquivale.textContent = ""; return; }
+  dom.insumosCompraEquivale.textContent = `Entran ${formatearCantidad(n * (insumo.factorConversion || 1), insumo.unidad)} al stock`;
 }
 
 // deficitBase (opcional): cuanto faltaba en la unidad BASE del insumo (ej.
@@ -1540,11 +1802,14 @@ function openInsumoAjusteSheet(insumo, deficitBase) {
   dom.insumosCompraCantidad.value = deficitBase > 0
     ? String(parseFloat((deficitBase / (insumo.factorConversion || 1)).toFixed(3)))
     : "";
-  const stockVal = Number.isInteger(insumo.stockActual) ? insumo.stockActual : parseFloat(insumo.stockActual.toFixed(1));
-  dom.insumosAjusteCantidad.value = String(stockVal);
-  dom.insumosAjusteUnidad.textContent = insumo.unidad;
+  // El stock se muestra en la unidad mas clara (5000 g -> 5 kg) y el selector
+  // queda en esa misma, asi lo que se escribe arriba coincide con lo que se lee.
+  const unidadVista = mejorUnidad(insumo.stockActual, insumo.unidad);
+  llenarSelectorUnidad(dom.insumosAjusteUnidad, insumo.unidad, unidadVista, envaseDeInsumo(insumo));
+  dom.insumosAjusteCantidad.value = paraInput(desdeBase(insumo.stockActual, dom.insumosAjusteUnidad.value, insumo.unidad, envaseDeInsumo(insumo)));
   dom.insumosAjusteMotivos.querySelectorAll("input[type='radio']").forEach(r => { r.checked = false; });
   updateAjusteDeltaHint(insumo);
+  updateCompraEquivale(insumo);
   setInsumosAjusteSheetOpen(true);
   dom.insumosCompraCantidad.focus();
 }
@@ -1587,15 +1852,18 @@ function closeInsumoAjusteSheet() {
 
 function openCalibracionSheet(insumo) {
   selectedInsumoId = insumo.id;
-  const stockDisplay = insumo.unidad === "g"
-    ? `${insumo.stockActual}g`
-    : `${Number.isInteger(insumo.stockActual) ? insumo.stockActual : insumo.stockActual.toFixed(1)} ${insumo.unidad}`;
+  const stockDisplay = formatearConEnvase(insumo.stockActual, insumo.unidad, envaseDeInsumo(insumo));
   dom.calibracionSelected.innerHTML = `
     <strong>${insumo.nombre}</strong>
-    <small>Sistema calcula: ${stockDisplay} (${(insumo.stockActual / insumo.factorConversion).toFixed(2)} ${insumo.unidadCompra})</small>
+    <small>Sistema calcula: ${stockDisplay}</small>
   `;
-  dom.calibracionLabel.textContent = `Stock real que contas (${insumo.unidad})`;
+  dom.calibracionLabel.textContent = "Stock real que contás";
+  // Se ofrece la unidad en la que es comodo contar: si el sistema calcula
+  // 3450 g, lo natural es pesar en kg.
+  llenarSelectorUnidad(dom.calibracionUnidad, insumo.unidad, mejorUnidad(insumo.stockActual, insumo.unidad), envaseDeInsumo(insumo));
   dom.calibracionCantidad.value = "";
+  dom.calibracionEquivale.textContent = "";
+  selectedInsumo = insumo;
   calibracionAlphaReceta = insumo.alphaReceta ?? 0.80;
   renderCalibracionRecetaSettings(dom.calibracionRecetaSettings, insumo, (_id, newSettings) => {
     calibracionAlphaReceta = newSettings.alphaReceta;
@@ -1625,11 +1893,53 @@ function ordenarInsumosParaVista(insumos, modo) {
   return insumos;
 }
 
+// Aviso de ciclo incompleto: insumos que entran pero nunca salen (sin receta)
+// o que no tienen a quien comprarse (sin proveedor). No bloquea nada; solo
+// hace visible la deuda, que si no queda invisible para siempre.
+async function renderAvisoCiclo() {
+  if (!dom.avisoCiclo) return;
+  const [insumos, recetas, proveedorInsumos, proveedores, productos] = await Promise.all([
+    getAll("insumos"), getAll("recetas"), getAll("proveedor_insumos"), getAll("proveedores"), listProducts()
+  ]);
+  const pendientes = pendientesDelCiclo(revisarCicloInsumos({ insumos, recetas, proveedorInsumos }));
+  renderPendientesCiclo(dom.avisoCiclo, {
+    pendientes,
+    resumen: resumenPendientes(pendientes),
+    proveedores: proveedores.filter((p) => p.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    productos: productos.filter((p) => p.controlaStock || p.categoriaId === "cafe" || p.categoriaId === "bebidas")
+  });
+}
+
+// Guarda un pendiente completado en el propio aviso.
+async function guardarPendienteCiclo(article) {
+  const error = article.querySelector(".pendiente-error");
+  const { datos, error: motivo } = leerPendiente(article);
+  if (motivo) { error.textContent = motivo; error.hidden = false; return; }
+  error.hidden = true;
+  const boton = article.querySelector('[data-accion="guardar"]');
+  boton.disabled = true;
+  try {
+    if (article.dataset.falta === "proveedor") {
+      await saveProveedorInsumo(datos);
+      setFlash(`Listo: ya se puede pedir a un proveedor.`, "success");
+    } else {
+      await crearLineaReceta({ productoId: datos.productoId, insumoId: datos.insumoId, cantidadPorUnidad: datos.cantidad });
+      setFlash("Listo: ahora se descuenta al producir o vender.", "success");
+    }
+    await renderInsumosView();
+  } catch (e) {
+    error.textContent = e.message || "No se pudo guardar.";
+    error.hidden = false;
+    boton.disabled = false;
+  }
+}
+
 async function renderInsumosView() {
   const insumos = await listInsumos();
   const ordenados = ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
   renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet);
   renderCalibracionAlert(dom.calibracionAlert, insumos);
+  await renderAvisoCiclo();
   if (insumosListaComprasVisible) {
     const smartData = await listaDeComprasSmart();
     renderListaComprasSmart(dom.listaComprasList, smartData);
@@ -1647,9 +1957,14 @@ async function renderCalibracionView() {
 function openRecetaEditSheet(receta) {
   selectedRecetaId = receta.id;
   dom.recetaEditTitle.textContent = receta.insumoNombre;
-  dom.recetaEditContext.textContent = `Cantidad actual: ${receta.cantidadPorUnidad} ${receta.unidad} por unidad${receta.esEstimado ? " (estimado)" : ""}`;
-  dom.recetaEditLabel.textContent = `Nueva cantidad (${receta.unidad} por unidad)`;
-  dom.recetaEditCantidad.value = String(receta.cantidadPorUnidad);
+  dom.recetaEditContext.textContent = `Cantidad actual: ${formatearCantidad(receta.cantidadPorUnidad, receta.unidad)} por unidad${receta.esEstimado ? " (estimado)" : ""}`;
+  dom.recetaEditLabel.textContent = "Nueva cantidad por unidad";
+  // En recetas las cantidades son chicas (25 g, 210 ml), asi que arranca en la
+  // unidad base — pero el selector esta por si hace falta cargar en kg o L.
+  recetaEditEnvase = { nombre: receta.unidadCompra, equivale: receta.factorConversion };
+  llenarSelectorUnidad(dom.recetaEditUnidad, receta.unidad, receta.unidad, recetaEditEnvase);
+  dom.recetaEditCantidad.value = paraInput(receta.cantidadPorUnidad);
+  recetaEditUnidadBase = receta.unidad;
   setRecetaEditSheetOpen(true);
   dom.recetaEditCantidad.focus();
   dom.recetaEditCantidad.select();
@@ -1692,6 +2007,8 @@ function openProvEdit(proveedor) {
   dom.provEditEmail.value = proveedor.email ?? "";
   dom.provEditNotas.value = proveedor.notas ?? "";
   dom.provEditDias.value = String(proveedor.diasCiclo ?? "");
+  dom.provEditLead.value = String(proveedor.leadTimeDias ?? 0);
+  marcarDiasEntrega(proveedor.diasEntrega);
   setProvEditSheetOpen(true);
   dom.provEditNombre.focus();
 }
@@ -1705,8 +2022,30 @@ function openProvAdd() {
   dom.provEditEmail.value = "";
   dom.provEditNotas.value = "";
   dom.provEditDias.value = "7";
+  dom.provEditLead.value = "0";
+  marcarDiasEntrega(null);
   setProvEditSheetOpen(true);
   dom.provEditNombre.focus();
+}
+
+// Los siete botones de dias de entrega, prendidos segun lo guardado.
+// La convencion es la de Date.getDay(): 0=domingo .. 6=sabado, igual que en la
+// base y en compras-calculos.js, para no traducir numeros en el camino.
+function marcarDiasEntrega(dias) {
+  const activos = new Set(Array.isArray(dias) ? dias.map(Number) : []);
+  dom.provEditEntrega.querySelectorAll(".dia-btn").forEach((btn) => {
+    btn.classList.toggle("active", activos.has(Number(btn.dataset.dia)));
+  });
+}
+
+// Lo que quedo marcado, ordenado. Ninguno marcado devuelve null, que significa
+// "entrega cualquier dia" — distinto de un array vacio, que seria "no entrega
+// ningun dia" y dejaria la lista de compras sin fecha de llegada posible.
+function leerDiasEntrega() {
+  const dias = [...dom.provEditEntrega.querySelectorAll(".dia-btn.active")]
+    .map((btn) => Number(btn.dataset.dia))
+    .sort((a, b) => a - b);
+  return dias.length > 0 ? dias : null;
 }
 
 function closeProvEdit() {
@@ -1731,7 +2070,7 @@ async function openProvProdAdd(proveedorId) {
   selectedProvId = proveedorId;
   selectedProvProdId = "";
   provProdMode = "add";
-  dom.provProdTitle.textContent = "Agregar producto";
+  dom.provProdTitle.textContent = "Agregar insumo";
   dom.provProdContext.textContent = "";
   dom.provProdNombre.value = "";
   dom.provProdUnidad.value = "";
@@ -1751,7 +2090,7 @@ async function openProvProdEdit(producto) {
   selectedProvId = producto.proveedorId;
   selectedProvProdId = producto.id;
   provProdMode = "edit";
-  dom.provProdTitle.textContent = "Editar producto";
+  dom.provProdTitle.textContent = "Editar insumo";
   dom.provProdContext.textContent = producto.nombreProducto;
   dom.provProdNombre.value = producto.nombreProducto;
   dom.provProdUnidad.value = producto.unidadCompra ?? "";
@@ -1854,6 +2193,9 @@ function populateMenuVarianteSelect(selectedGrupoId) {
 async function openMenuProductoAdd(categoriaId) {
   selectedMenuProductoId = "";
   menuProductoMode = "add";
+  menuProductoEditando = null;
+  // Un producto que todavia no existe no se puede eliminar.
+  dom.menuEditEliminarWrap.hidden = true;
   dom.menuEditTitle.textContent = "Agregar producto";
   dom.menuEditNombre.value = "";
   dom.menuEditPrecio.value = "";
@@ -1878,6 +2220,8 @@ async function openMenuProductoAdd(categoriaId) {
 async function openMenuProductoEdit(producto) {
   selectedMenuProductoId = producto.id;
   menuProductoMode = "edit";
+  menuProductoEditando = producto;
+  dom.menuEditEliminarWrap.hidden = false;
   dom.menuEditTitle.textContent = "Editar producto";
   dom.menuEditNombre.value = producto.nombre;
   dom.menuEditPrecio.value = (producto.precioCentavos / 100).toFixed(2);
@@ -1910,6 +2254,7 @@ async function openMenuProductoEdit(producto) {
 function closeMenuEdit() {
   setMenuEditSheetOpen(false);
   selectedMenuProductoId = "";
+  menuProductoEditando = null;
   menuRecetaLineas = [];
 }
 
@@ -1923,12 +2268,81 @@ async function handleToggleProductoActivo(producto) {
   }
 }
 
+// Borrado definitivo, lo que pidio el dueño: no hay papelera ni "deshacer".
+// Primero se consulta si se PUEDE (menu.js pregunta a la nube por ventas,
+// movimientos y pedidos abiertos) y recien despues se pide confirmacion — al
+// reves, el usuario confirmaria un borrado irreversible para despues recibir
+// un "no se pudo", que es la peor secuencia posible.
+async function handleEliminarProducto() {
+  if (menuEliminarInProgress) return;
+  if (menuProductoMode !== "edit" || !selectedMenuProductoId) return;
+  const id = selectedMenuProductoId;
+  menuEliminarInProgress = true;
+  dom.menuEditEliminar.disabled = true;
+  let sheetBajado = false;
+  try {
+    setFlash("Revisando si este producto se puede eliminar...", "warning");
+    const chequeo = await verificarEliminacionProducto(id);
+
+    if (!chequeo.puede) {
+      setFlash(mensajeBloqueoEliminacion(chequeo), "error");
+      return;
+    }
+
+    // El sheet del producto y el dialogo de confirmacion comparten la clase
+    // .stock-adjust-sheet y no hay z-index entre ellos: el sheet esta DESPUES
+    // en el HTML, asi que se pinta encima y se come los taps del dialogo
+    // (verificado en el navegador: el boton "No, dejarlo" era imposible de
+    // tocar). Se baja el sheet mientras se pregunta y se vuelve a subir si la
+    // respuesta es no — los campos del formulario quedan como estaban porque
+    // setMenuEditSheetOpen solo mueve la visibilidad, no limpia el estado.
+    setMenuEditSheetOpen(false);
+    sheetBajado = true;
+    const confirmado = await confirmDialog({
+      title: "Eliminar definitivamente",
+      message: mensajeConfirmacionEliminacion(chequeo),
+      acceptText: "Eliminar para siempre",
+      cancelText: "No, dejarlo"
+    });
+    if (!confirmado) {
+      setMenuEditSheetOpen(true);
+      setFlash("No se elimino nada.", "warning");
+      return;
+    }
+
+    const resultado = await eliminarProducto(id);
+    closeMenuEdit();
+    await renderMenuView();
+    setFlash(`"${resultado.nombre}" eliminado definitivamente.`, "success");
+  } catch (error) {
+    // Si fallo DESPUES de bajar el sheet para preguntar, hay que volver a
+    // subirlo: el producto no se borro, y dejar la pantalla vacia con solo un
+    // mensaje de error haria parecer que algo paso cuando no paso nada.
+    if (sheetBajado && selectedMenuProductoId === id) setMenuEditSheetOpen(true);
+    setFlash(error.message || "No se pudo eliminar el producto.", "error");
+  } finally {
+    menuEliminarInProgress = false;
+    dom.menuEditEliminar.disabled = false;
+  }
+}
+
 async function handleMoverProducto(id, direccion) {
   try {
     await moverProductoOrden(id, direccion);
     await renderMenuView();
   } catch (error) {
     setFlash(error.message || "No se pudo reordenar.", "error");
+  }
+}
+
+async function handleReordenarProductos(categoriaId, idsEnOrden) {
+  try {
+    await reordenarProductos(categoriaId, idsEnOrden);
+    await renderMenuView();
+    setFlash("Orden actualizado.", "success");
+  } catch (error) {
+    setFlash(error.message || "No se pudo guardar el orden.", "error");
+    await renderMenuView();
   }
 }
 
@@ -1940,6 +2354,46 @@ async function renderMenuView() {
     onToggleActivo: handleToggleProductoActivo,
     onMover: handleMoverProducto
   });
+  renderCombosConfigForm();
+  // renderMenuList rehace el HTML en cada render, asi que el arrastre se
+  // vuelve a enganchar sobre los nodos nuevos.
+  habilitarArrastre(dom.menuList, {
+    selectorAsa: ".asa-orden",
+    selectorFila: "tr[data-fila-id]",
+    onReordenar: handleReordenarProductos
+  });
+}
+
+function renderCombosConfigForm() {
+  const c = getCombosConfigActual();
+  dom.menuComboDocena.value = (c.docePrecioCentavos / 100).toFixed(2);
+  dom.menuComboMedia.value = (c.seisPrecioCentavos / 100).toFixed(2);
+  dom.menuComboPremium.value = (c.premiumExtraCentavos / 100).toFixed(2);
+  dom.menuCombosStatus.hidden = true;
+}
+
+let menuCombosGuardarInProgress = false;
+
+async function handleGuardarCombosConfig() {
+  if (menuCombosGuardarInProgress) return;
+  const docePrecioCentavos = Math.round(parseDecimal(dom.menuComboDocena.value) * 100);
+  const seisPrecioCentavos = Math.round(parseDecimal(dom.menuComboMedia.value) * 100);
+  const premiumExtraCentavos = Math.round(parseDecimal(dom.menuComboPremium.value) * 100);
+  if ([docePrecioCentavos, seisPrecioCentavos, premiumExtraCentavos].some((n) => !Number.isFinite(n) || n < 0)) {
+    setFlash("Revisá los importes de las promos — tienen que ser numeros, 0 o mas.", "error");
+    return;
+  }
+  menuCombosGuardarInProgress = true;
+  dom.menuCombosGuardar.disabled = true;
+  try {
+    await guardarCombosConfig({ docePrecioCentavos, seisPrecioCentavos, premiumExtraCentavos });
+    setFlash("Promos actualizadas.", "success");
+  } catch (error) {
+    setFlash(error.message || "No se pudieron guardar las promos.", "error");
+  } finally {
+    menuCombosGuardarInProgress = false;
+    dom.menuCombosGuardar.disabled = false;
+  }
 }
 
 function renderVariantesOpcionesRowsView() {
@@ -2018,7 +2472,109 @@ async function refreshView(viewName = currentView) {
   if (viewName === "pedidos") await renderPedidosView();
   if (viewName === "produccion") await renderProductionView();
   if (viewName === "historial") await renderHistoryView();
+  if (viewName === "panel") await renderPanelView();
+  if (viewName === "cierre") await renderCierreView();
   if (viewName === "gestion") await refreshGestionSubView(currentGestionSubView);
+}
+
+// Panel: ventas, horarios pico y stock. Lee de la nube (verdad de todos los
+// dispositivos) y, sin conexion, cae a lo guardado en este dispositivo.
+let panelFecha = null;
+let panelCargando = false;
+
+async function renderPanelView() {
+  if (!panelFecha) panelFecha = todayISO();
+  dom.panelDate.value = panelFecha;
+  if (panelCargando) return;
+  panelCargando = true;
+  try {
+    const datos = await cargarPanel(panelFecha);
+    if (currentView === "panel") renderPanel(dom.panelRoot, datos);
+  } catch (error) {
+    dom.panelRoot.textContent = `No se pudo cargar el panel: ${error.message || error}`;
+  } finally {
+    panelCargando = false;
+  }
+}
+
+function setPanelFecha(fecha) {
+  if (!fecha) return;
+  panelFecha = fecha;
+  renderPanelView();
+}
+
+// Cierre de caja: la tarjeta sale del cierre de Postnet (se anota a mano), el
+// efectivo esperado se deduce por resta, y cada cierre se guarda como registro
+// nuevo que no se edita (ver migracion 015).
+let cierreFecha = null;
+let cierreDatos = null;
+let cierreCargando = false;
+let cierreGuardando = false;
+
+const fechaDelCierre = () => cierreFecha || dom.cierreDate.value || todayISO();
+
+async function renderCierreView() {
+  if (!cierreFecha) cierreFecha = todayISO();
+  dom.cierreDate.value = cierreFecha;
+  // La vista previa del resumen es de UNA fecha puntual: al cambiar de fecha o
+  // recargar la vista se cierra, para no mostrar un dia viejo.
+  dom.resumenPreview.hidden = true;
+  if (cierreCargando) return;
+  cierreCargando = true;
+  try {
+    cierreDatos = await cargarCierre(cierreFecha);
+    if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos);
+  } catch (error) {
+    dom.cierreRoot.textContent = `No se pudo cargar el cierre: ${error.message || error}`;
+  } finally {
+    cierreCargando = false;
+  }
+}
+
+function setCierreFecha(fecha) {
+  if (!fecha) return;
+  cierreFecha = fecha;
+  renderCierreView();
+}
+
+async function handleGuardarCierre() {
+  if (cierreGuardando || !cierreDatos) return;
+  const r = calcularDesdeFormulario(dom.cierreRoot, cierreDatos.ventas);
+  if (r.error) { setFlash(r.error, "error"); return; }
+  const { calculo: c, form: f } = r;
+  const resumen = c.diferenciaCentavos === 0 ? "La caja cuadra." : c.diferenciaCentavos > 0 ? `Sobran ${centsToMoney(c.diferenciaCentavos)}.` : `Faltan ${centsToMoney(-c.diferenciaCentavos)}.`;
+  const confirmado = await confirmDialog({
+    title: "Cerrar caja",
+    message: `Cierre del ${cierreDatos.fecha}: ventas ${centsToMoney(c.ventasTotalCentavos)}, esperado en cajón ${centsToMoney(c.esperadoEfectivoCentavos)}, contado ${centsToMoney(f.contadoCentavos)}. ${resumen}${cierreDatos.vigente ? " Ya había un cierre de este día: este queda como versión nueva y el anterior se conserva." : ""}`,
+    acceptText: "Cerrar caja"
+  });
+  if (!confirmado) return;
+  cierreGuardando = true;
+  try {
+    await guardarCierre({
+      fecha: cierreDatos.fecha,
+      ventasTotalCentavos: c.ventasTotalCentavos,
+      tickets: c.tickets,
+      tgtgCentavos: c.tgtgCentavos,
+      tgtgEnCajon: f.tgtgEnCajon,
+      fondoInicialCentavos: f.fondoCentavos ?? 0,
+      tarjetaCentavos: f.tarjetaCentavos,
+      plataformasCentavos: f.plataformasCentavos ?? 0,
+      retirosCentavos: f.retirosCentavos ?? 0,
+      retirosNota: f.retirosNota,
+      contadoCentavos: f.contadoCentavos,
+      fondoMananaCentavos: f.fondoMananaCentavos,
+      esperadoEfectivoCentavos: c.esperadoEfectivoCentavos,
+      diferenciaCentavos: c.diferenciaCentavos,
+      nota: f.nota
+    });
+    setFlash(`Caja cerrada. ${resumen}`, c.nivel === "grande" ? "warning" : "success");
+    await renderCierreView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo guardar el cierre.", "error");
+  } finally {
+    cierreGuardando = false;
+  }
 }
 
 async function renderPedidosView() {
@@ -2281,7 +2837,7 @@ async function handleConfirmSale() {
       unitOrders: item.unitOrders,
       opcionNombre: item.opcionNombre || null
     }));
-    const sale = await confirmSale(items);
+    const sale = await confirmSale(items, formaPagoActual);
     cart.clear();
     resetVuelto();
     setSaleMessage(
@@ -2289,6 +2845,7 @@ async function handleConfirmSale() {
       true
     );
     setCartMode("normal");
+    setFormaPago("efectivo");
     // Sync fire-and-forget — nunca bloquea la caja
     const { venta, detalles, movimientosStock, movimientosInsumos } = sale._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
@@ -2379,6 +2936,8 @@ function bindEvents() {
   dom.cartModeTogooToggle.addEventListener("change", () => {
     setCartMode(dom.cartModeTogooToggle.checked ? "togoo" : "normal");
   });
+  dom.pagoFormaEfectivo.addEventListener("click", () => setFormaPago("efectivo"));
+  dom.pagoFormaTarjeta.addEventListener("click", () => setFormaPago("tarjeta"));
   dom.closeLeche.addEventListener("click", closeLecheSheet);
   dom.lecheBackdrop.addEventListener("click", closeLecheSheet);
   dom.lecheOpciones.addEventListener("click", (event) => {
@@ -2516,6 +3075,28 @@ function bindEvents() {
       stockAdjustInProgress = false;
     }
   });
+  dom.menuCombosGuardar.addEventListener("click", handleGuardarCombosConfig);
+
+  // Enlaces entre pantallas que son el mismo dato visto de otra manera. No
+  // cambian nada: solo llevan ahi y dejan la seccion abierta, para que se vea
+  // que estan conectadas.
+  dom.irARecetas?.addEventListener("click", () => {
+    setMenuEditSheetOpen(false);
+    showGestionSubView("recetas");
+  });
+  dom.irAInsumosDesdeVariantes?.addEventListener("click", () => {
+    setVarianteGrupoSheetOpen(false);
+    showGestionSubView("insumos");
+  });
+  dom.avisoCiclo?.addEventListener("click", (e) => {
+    const btn = e.target.closest('[data-accion="guardar"]');
+    if (!btn) return;
+    guardarPendienteCiclo(btn.closest(".pendiente"));
+  });
+
+  dom.seccionCalibracion?.addEventListener("toggle", () => {
+    if (dom.seccionCalibracion.open) renderCalibracionView();
+  });
   dom.historyFilter.addEventListener("submit", (event) => {
     event.preventDefault();
     renderHistoryView();
@@ -2524,7 +3105,7 @@ function bindEvents() {
   // "Ver resumen": muestra el cierre en pantalla en vez de descargar directo
   // — la descarga queda como boton aparte adentro del panel.
   dom.exportSalesSummary.addEventListener("click", async () => {
-    const fecha = dom.historyDate.value || todayISO();
+    const fecha = fechaDelCierre();
     dom.resumenPreviewText.textContent = "Cargando...";
     dom.resumenPreview.hidden = false;
     try {
@@ -2536,7 +3117,7 @@ function bindEvents() {
   });
 
   dom.resumenPreviewDownload.addEventListener("click", async () => {
-    await exportSalesSummary(dom.historyDate.value || todayISO());
+    await exportSalesSummary(fechaDelCierre());
     setFlash("Resumen TXT exportado.", "success");
   });
 
@@ -2544,8 +3125,19 @@ function bindEvents() {
     dom.resumenPreview.hidden = true;
   });
 
+  // Hasta ahora esta funcion existia en backup.js pero no tenia boton en
+  // ninguna pantalla: estaba escrita, andando, e inalcanzable.
+  dom.exportBackupCompleto.addEventListener("click", async () => {
+    try {
+      await exportFullBackup();
+      setFlash("Respaldo completo descargado.", "success");
+    } catch (error) {
+      setFlash(error.message || "No se pudo generar el respaldo.", "error");
+    }
+  });
+
   dom.exportSalesJson.addEventListener("click", async () => {
-    await exportDailySummaryJSON(dom.historyDate.value || todayISO());
+    await exportDailySummaryJSON(fechaDelCierre());
     setFlash("Resumen JSON exportado.", "success");
   });
 
@@ -2580,23 +3172,66 @@ function bindEvents() {
   dom.insumosAjusteTipoCompra.addEventListener("click", () => setInsumosAjusteTipo("compra"));
   dom.insumosAjusteTipoAjuste.addEventListener("click", () => setInsumosAjusteTipo("ajuste"));
 
-  dom.insumosAjusteMinus.addEventListener("click", () => {
+  // Los botones +/- se mueven en la unidad que se esta viendo: en g suman de a
+  // 100 g, pero si el selector esta en kg no tiene sentido sumar 0,1 kg de a
+  // pasos invisibles — el paso se convierte a la unidad en pantalla.
+  const pasoEnPantalla = () => {
+    const pasoBase = getInsumoStep(selectedInsumo);
+    const enPantalla = desdeBase(pasoBase, dom.insumosAjusteUnidad.value, selectedInsumo.unidad);
+    return enPantalla > 0 ? enPantalla : pasoBase;
+  };
+  const moverStepper = (signo) => {
     if (!selectedInsumo) return;
-    const paso = getInsumoStep(selectedInsumo);
-    const cur = parseFloat(dom.insumosAjusteCantidad.value) || 0;
-    dom.insumosAjusteCantidad.value = String(parseFloat(Math.max(0, cur - paso).toFixed(4)));
+    const cur = parseFloat(String(dom.insumosAjusteCantidad.value).replace(",", ".")) || 0;
+    const siguiente = Math.max(0, cur + signo * pasoEnPantalla());
+    dom.insumosAjusteCantidad.value = paraInput(siguiente);
     updateAjusteDeltaHint(selectedInsumo);
-  });
-
-  dom.insumosAjustePlus.addEventListener("click", () => {
-    if (!selectedInsumo) return;
-    const paso = getInsumoStep(selectedInsumo);
-    const cur = parseFloat(dom.insumosAjusteCantidad.value) || 0;
-    dom.insumosAjusteCantidad.value = String(parseFloat((cur + paso).toFixed(4)));
-    updateAjusteDeltaHint(selectedInsumo);
-  });
+  };
+  dom.insumosAjusteMinus.addEventListener("click", () => moverStepper(-1));
+  dom.insumosAjustePlus.addEventListener("click", () => moverStepper(1));
 
   dom.insumosAjusteCantidad.addEventListener("input", () => updateAjusteDeltaHint(selectedInsumo));
+  dom.insumosCompraCantidad.addEventListener("input", () => updateCompraEquivale(selectedInsumo));
+  // Cambiar de unidad convierte lo que ya estaba escrito, no lo reinterpreta:
+  // 1500 g pasa a 1,5 kg, no a 1500 kg.
+  // Mismo comportamiento en calibracion y receta: cambiar de unidad convierte
+  // lo escrito, y debajo del campo se confirma en cuanto queda.
+  const conectarSelectorUnidad = (input, select, equivale, getContexto) => {
+    const refrescar = () => {
+      const { base, envase } = getContexto();
+      if (!base || !equivale) return;
+      const valor = cantidadEnBase(input, select, base, envase);
+      equivale.textContent = Number.isFinite(valor) && valor > 0 && select.value !== base
+        ? `= ${formatearCantidad(valor, base, { unidad: base })}`
+        : "";
+    };
+    input.addEventListener("input", refrescar);
+    select.addEventListener("change", (e) => {
+      const { base, envase } = getContexto();
+      const anterior = e.target.dataset.unidadPrevia || base;
+      const valor = parseFloat(String(input.value).replace(",", "."));
+      if (Number.isFinite(valor)) input.value = paraInput(desdeBase(aBase(valor, anterior, base, envase), e.target.value, base, envase));
+      e.target.dataset.unidadPrevia = e.target.value;
+      refrescar();
+    });
+  };
+  conectarSelectorUnidad(dom.calibracionCantidad, dom.calibracionUnidad, dom.calibracionEquivale,
+    () => ({ base: selectedInsumo?.unidad, envase: envaseDeInsumo(selectedInsumo) }));
+  conectarSelectorUnidad(dom.recetaEditCantidad, dom.recetaEditUnidad, dom.recetaEditEquivale,
+    () => ({ base: recetaEditUnidadBase, envase: recetaEditEnvase }));
+
+  dom.insumosAjusteUnidad.addEventListener("change", (e) => {
+    if (!selectedInsumo) return;
+    const anterior = e.target.dataset.unidadPrevia || selectedInsumo.unidad;
+    const valor = parseFloat(String(dom.insumosAjusteCantidad.value).replace(",", "."));
+    if (Number.isFinite(valor)) {
+      const env = envaseDeInsumo(selectedInsumo);
+      const base = aBase(valor, anterior, selectedInsumo.unidad, env);
+      dom.insumosAjusteCantidad.value = paraInput(desdeBase(base, e.target.value, selectedInsumo.unidad, env));
+    }
+    e.target.dataset.unidadPrevia = e.target.value;
+    updateAjusteDeltaHint(selectedInsumo);
+  });
 
   dom.calibracionAlert.addEventListener("click", async (e) => {
     const insumos = await listInsumos();
@@ -2620,8 +3255,8 @@ function bindEvents() {
         delta = cantidadCompra * insumo.factorConversion;
         tipoGuardar = "compra";
       } else {
-        const nuevoStock = parseFloat(dom.insumosAjusteCantidad.value);
-        if (isNaN(nuevoStock) || nuevoStock < 0) throw new Error("Ingresa un stock valido.");
+        const nuevoStock = cantidadEnBase(dom.insumosAjusteCantidad, dom.insumosAjusteUnidad, insumo.unidad, envaseDeInsumo(insumo));
+        if (!Number.isFinite(nuevoStock) || nuevoStock < 0) throw new Error("Ingresa un stock valido.");
         delta = parseFloat((nuevoStock - insumo.stockActual).toFixed(4));
         if (delta === 0) throw new Error("El stock no cambio. Modificá la cantidad para registrar el ajuste.");
         tipoGuardar = dom.insumosAjusteMotivos.querySelector("input[name='insumo-motivo']:checked")?.value;
@@ -2665,7 +3300,9 @@ function bindEvents() {
     if (insumosCalibracionInProgress || !selectedInsumoId) return;
     try {
       insumosCalibracionInProgress = true;
-      await calibrarInsumo(selectedInsumoId, dom.calibracionCantidad.value, calibracionAlphaReceta);
+      // Lo contado puede venir en kg o L: se guarda siempre en la unidad base.
+      const contadoBase = cantidadEnBase(dom.calibracionCantidad, dom.calibracionUnidad, selectedInsumo?.unidad || "g", envaseDeInsumo(selectedInsumo));
+      await calibrarInsumo(selectedInsumoId, contadoBase, calibracionAlphaReceta);
       setFlash("Calibracion guardada. Las cantidades se ajustaron.", "success");
       closeCalibracionSheet();
       if (currentView === "calibrar") await renderCalibracionView();
@@ -2709,6 +3346,8 @@ function bindEvents() {
       await createInsumo({
         nombre: dom.crearInsumoNombre.value,
         unidad: dom.crearInsumoUnidad.value,
+        unidadCompra: dom.crearInsumoEnvase.value,
+        factorConversion: dom.crearInsumoEnvaseTrae.value,
         stockMinimo: dom.crearInsumoMin.value,
         stockCritico: dom.crearInsumoCrit.value
       });
@@ -2738,7 +3377,8 @@ function bindEvents() {
     if (recetaEditInProgress || !selectedRecetaId) return;
     try {
       recetaEditInProgress = true;
-      await actualizarReceta(selectedRecetaId, dom.recetaEditCantidad.value, dom.recetaEditMotivo.value);
+      const cantidadBase = cantidadEnBase(dom.recetaEditCantidad, dom.recetaEditUnidad, recetaEditUnidadBase, recetaEditEnvase);
+      await actualizarReceta(selectedRecetaId, cantidadBase, dom.recetaEditMotivo.value);
       setFlash("Receta actualizada.", "success");
       closeRecetaEditSheet();
       await renderRecetasView();
@@ -2782,6 +3422,11 @@ function bindEvents() {
     renderProvProdRecetaRowsView();
   });
 
+  dom.provEditEntrega.addEventListener("click", (event) => {
+    const btn = event.target.closest(".dia-btn");
+    if (btn) btn.classList.toggle("active");
+  });
+
   dom.provEditForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (provEditInProgress) return;
@@ -2795,7 +3440,12 @@ function bindEvents() {
         tel: dom.provEditTel.value.trim(),
         email: dom.provEditEmail.value.trim(),
         notas: dom.provEditNotas.value.trim(),
-        diasCiclo: Number(dom.provEditDias.value) || 7
+        diasCiclo: Number(dom.provEditDias.value) || 7,
+        // Un lead time de 0 es un valor legitimo (cash&carry: vas y traes), asi
+        // que no se puede usar `|| 0` sobre un NaN y quedarse tranquilo: se
+        // valida aparte y un campo vacio se lee como 0.
+        leadTimeDias: Math.max(0, Math.round(Number(dom.provEditLead.value) || 0)),
+        diasEntrega: leerDiasEntrega()
       };
       if (provEditMode === "add") {
         await createProveedor(datos);
@@ -2855,6 +3505,7 @@ function bindEvents() {
   });
 
   dom.closeMenuEdit.addEventListener("click", closeMenuEdit);
+  dom.menuEditEliminar.addEventListener("click", handleEliminarProducto);
   dom.menuEditBackdrop.addEventListener("click", closeMenuEdit);
   dom.menuEditCategoria.addEventListener("change", updateMenuTipoVisibility);
 
@@ -3003,7 +3654,11 @@ function bindEvents() {
     refrescarCatalogoInProgress = true;
     setRefrescarCatalogoEstado("loading");
     try {
+      const cursoresPrevios = novedadesUltimo.cursoresNuevos;
       const resultado = await pullCatalogoCompleto();
+      await marcarNovedadesTraidas(cursoresPrevios);
+      novedadesUltimo = { total: 0, texto: "", cursoresNuevos: null };
+      renderNovedadesBadge();
       await refreshGestionSubView(currentGestionSubView);
       setRefrescarCatalogoEstado(
         "success",
@@ -3012,6 +3667,9 @@ function bindEvents() {
         (resultado.stockProductos.corregidos.length > 0 ? `, ${resultado.stockProductos.corregidos.length} producto${resultado.stockProductos.corregidos.length === 1 ? "" : "s"}` : "") +
         (resultado.stockInsumos.omitido === "pendientes" ? " (stock sin alinear: hay operaciones sin sincronizar)" : "") +
         (resultado.variantesResult.aplicado ? `, ${resultado.variantesResult.grupos} grupo${resultado.variantesResult.grupos === 1 ? "" : "s"} de variante` : "") +
+        // Un producto que desaparece de la pantalla tiene que decirse: lo
+        // eliminaron desde otro dispositivo, no es un error de esta.
+        (resultado.catalogo.podados.length > 0 ? `. Se ${resultado.catalogo.podados.length === 1 ? "quito 1 producto eliminado" : `quitaron ${resultado.catalogo.podados.length} productos eliminados`} desde otro dispositivo` : "") +
         "."
       );
     } catch (error) {
@@ -3021,9 +3679,21 @@ function bindEvents() {
     }
   });
 
+  dom.cierreDate.addEventListener("change", () => setCierreFecha(dom.cierreDate.value));
+  dom.cierrePrev.addEventListener("click", () => setCierreFecha(sumarDias(cierreFecha || todayISO(), -1)));
+  dom.cierreNext.addEventListener("click", () => setCierreFecha(sumarDias(cierreFecha || todayISO(), 1)));
+  dom.cierreHoy.addEventListener("click", () => setCierreFecha(todayISO()));
+  dom.cierreRoot.addEventListener("click", (e) => { if (e.target.closest("#cierre-guardar")) handleGuardarCierre(); });
+
+  dom.panelDate.addEventListener("change", () => setPanelFecha(dom.panelDate.value));
+  dom.panelPrev.addEventListener("click", () => setPanelFecha(sumarDias(panelFecha || todayISO(), -1)));
+  dom.panelNext.addEventListener("click", () => setPanelFecha(sumarDias(panelFecha || todayISO(), 1)));
+  dom.panelHoy.addEventListener("click", () => setPanelFecha(todayISO()));
+  dom.panelRefresh.addEventListener("click", () => renderPanelView());
+
   window.addEventListener("hashchange", () => {
     const viewName = window.location.hash.replace("#", "") || "caja";
-    if (["caja", "pedidos", "produccion", "historial", "gestion"].includes(viewName)) showView(viewName);
+    if (["caja", "pedidos", "produccion", "historial", "panel", "cierre", "gestion"].includes(viewName)) showView(viewName);
   });
 
   document.addEventListener("visibilitychange", () => {
@@ -3111,8 +3781,17 @@ async function bootApp() {
   await seedProveedores();
   await initModoConsultaDefault();
   await refreshGruposVariantes();
+  // Antes de que Caja/Pedidos calculen ningun precio de combo (docena/media
+  // docena) — si nunca se edito, pricing.js ya arranca con el default de
+  // siempre, esto solo aplica lo que este dispositivo tenga guardado.
+  await cargarCombosConfigLocal();
   setupAutoSync();
   setupSyncBadge();
+  setupNovedades();
+  setupAvisosPedidos();
+  // Sin await: si tarda o falla (sin internet), no puede demorar el arranque.
+  inicializarNovedadesSiHaceFalta().then(revisarNovedadesAhora).catch(() => {});
+  revisarAvisosPedidos().catch(() => {});
   // Subir catalogo/insumos/recetas/proveedores a Supabase al arrancar
   // (upsert idempotente) — la lectura de facturas necesita esto del lado
   // del servidor, no solo la tablet lo usa mas.
@@ -3166,7 +3845,7 @@ async function bootApp() {
   dom.historyDate.value = todayISO();
   bindEvents();
   const initialView = window.location.hash.replace("#", "") || "caja";
-  showView(["caja", "pedidos", "produccion", "historial", "gestion"].includes(initialView) ? initialView : "caja");
+  showView(["caja", "pedidos", "produccion", "historial", "panel", "cierre", "gestion"].includes(initialView) ? initialView : "caja");
 }
 
 export async function startApp() {

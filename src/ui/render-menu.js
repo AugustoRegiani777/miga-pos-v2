@@ -16,7 +16,11 @@ export function renderMenuList(el, categorias, callbacks = {}) {
         ? `<span class="cal-muted prov-insumo-tag">${producto.recetaResumen.join(", ")}</span>`
         : "";
       return `
-        <tr>
+        <tr draggable="false" data-fila-id="${producto.id}" data-categoria="${categoria.id}">
+          <td class="celda-asa">
+            <button class="asa-orden" type="button" data-action="asa" data-id="${producto.id}"
+                    aria-label="Mover ${producto.nombre}" title="Mantené y arrastrá para cambiar el orden">⋮⋮</button>
+          </td>
           <td>
             ${producto.nombre}
             ${premiumBadge}
@@ -25,8 +29,6 @@ export function renderMenuList(el, categorias, callbacks = {}) {
           </td>
           <td class="prov-num">${fmtEur(producto.precioCentavos)}</td>
           <td class="prov-td-accion">
-            <button class="ghost-button compact" type="button" data-action="mover" data-dir="up" data-id="${producto.id}" ${index === 0 ? "disabled" : ""}>↑</button>
-            <button class="ghost-button compact" type="button" data-action="mover" data-dir="down" data-id="${producto.id}" ${index === categoria.productos.length - 1 ? "disabled" : ""}>↓</button>
             <button class="ghost-button compact" type="button" data-action="toggle-activo" data-id="${producto.id}">${producto.activo ? "Ocultar" : "Mostrar"}</button>
             <button class="ghost-button compact" type="button" data-action="edit-producto" data-id="${producto.id}">Editar</button>
           </td>
@@ -36,7 +38,7 @@ export function renderMenuList(el, categorias, callbacks = {}) {
     const tablaHTML = categoria.productos.length
       ? `<div class="prov-table-wrap">
           <table class="prov-tabla">
-            <thead><tr><th>Producto</th><th>Precio</th><th></th></tr></thead>
+            <thead><tr><th class="celda-asa"></th><th>Producto</th><th>Precio</th><th></th></tr></thead>
             <tbody>${filas}</tbody>
           </table>
          </div>`

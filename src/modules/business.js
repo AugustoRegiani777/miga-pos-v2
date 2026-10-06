@@ -325,13 +325,14 @@ export function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fec
   return resultado;
 }
 
-function mapVentaRemota(row) {
+export function mapVentaRemota(row) {
   return {
     id: row.id,
     fecha: row.fecha,
     hora: row.hora,
     totalCentavos: row.total_centavos,
     saleMode: row.sale_mode || "normal",
+    formaPago: row.forma_pago || "efectivo",
     origen: row.origen,
     pedidoId: row.pedido_id,
     clienteNombre: row.cliente_nombre,
@@ -531,7 +532,7 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
   });
 }
 
-export async function confirmSale(items) {
+export async function confirmSale(items, formaPago = "efectivo") {
   const cart = groupCartItems(items);
   const fecha = todayISO();
   const hora = currentTime();
@@ -599,7 +600,7 @@ export async function confirmSale(items) {
     totalCentavos = pricing.totalCentavos + toGooTotalCentavos + bajaTotalCentavos;
 
     const ventaUuid = crypto.randomUUID();
-    const saleId = await requestToPromise(stores.ventas.add({ fecha, hora, totalCentavos, saleMode, creadoEn: now, uuid: ventaUuid }));
+    const saleId = await requestToPromise(stores.ventas.add({ fecha, hora, totalCentavos, saleMode, formaPago, creadoEn: now, uuid: ventaUuid }));
 
     for (const line of lines) {
       const detalle = {
@@ -685,9 +686,9 @@ export async function confirmSale(items) {
       : [];
 
     return {
-      saleId, fecha, hora, totalCentavos, saleMode,
+      saleId, fecha, hora, totalCentavos, saleMode, formaPago,
       _syncPayload: {
-        venta: { fecha, hora, totalCentavos, saleMode, creadoEn: now, uuid: ventaUuid },
+        venta: { fecha, hora, totalCentavos, saleMode, formaPago, creadoEn: now, uuid: ventaUuid },
         detalles: _detallesSync,
         movimientosStock: _movStockSync,
         movimientosInsumos
@@ -710,7 +711,7 @@ export async function salesForDay(fecha = todayISO()) {
   return sales
     .filter((sale) => sale.fecha === fecha && !sale.anulada)
     .sort((a, b) => b.id - a.id)
-    .map((sale) => ({ ...sale, saleMode: sale.saleMode || "normal", detalles: detailsBySale.get(sale.id) || [] }));
+    .map((sale) => ({ ...sale, saleMode: sale.saleMode || "normal", formaPago: sale.formaPago || "efectivo", detalles: detailsBySale.get(sale.id) || [] }));
 }
 
 // Deshace una venta: devuelve al stock cada producto vendido (las lineas

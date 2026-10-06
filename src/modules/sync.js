@@ -4,6 +4,7 @@ import {
   pushCatalogoSnapshot,
   pushInsumosSnapshot,
   pushRecetasSnapshot,
+  deleteProductoRemoto,
   pushProveedoresSnapshot,
   pushProveedorInsumosSnapshot,
   pushMovimientosInsumos,
@@ -13,7 +14,8 @@ import {
   updateVentaAnulada,
   pushVariantesGrupos,
   pushHistorialReceta,
-  pushConfiguracionCompartida
+  pushConfiguracionCompartida,
+  pushCierreCaja
 } from "../db/supabase.js";
 
 // ---------------------------------------------------------------------------
@@ -205,6 +207,15 @@ export function getPendingVentaUuids() {
   return out;
 }
 
+// Hay alguna operacion de este tipo esperando en la cola? Lo usa
+// pullCatalogoDesdeNube antes de BORRAR productos locales que ya no estan en
+// la nube: si todavia hay un snapshot de catalogo sin subir, puede haber un
+// producto creado en este dispositivo que la nube todavia no vio, y podarlo
+// seria perderlo. En ese caso no se poda nada y se espera al proximo pull.
+export function hayPendientesDeTipo(type) {
+  return loadQueue().some((op) => op.type === type);
+}
+
 // ---- Ejecucion ------------------------------------------------------------
 
 async function executeOp(op) {
@@ -219,6 +230,12 @@ async function executeOp(op) {
       return pushInsumosSnapshot(op.payload);
     case "recetas_snapshot":
       return pushRecetasSnapshot(op.payload);
+    // Borrado definitivo de un producto. Va DESPUES de los dos snapshots en la
+    // cola (se encola ultimo, y el drenado respeta el orden) porque un
+    // snapshot que todavia estuviera pendiente de antes del borrado todavia
+    // contiene ese producto y lo volveria a insertar.
+    case "producto_eliminado":
+      return deleteProductoRemoto(op.payload.id);
     case "movimientos_insumos":
       return pushMovimientosInsumos(op.payload);
     // Nada nuevo encola estos dos tipos (ver migraciones 004 y 010: tanto
@@ -244,6 +261,8 @@ async function executeOp(op) {
       return pushHistorialReceta(op.payload);
     case "configuracion_compartida":
       return pushConfiguracionCompartida(op.payload.id, op.payload.valor);
+    case "cierre_caja":
+      return pushCierreCaja(op.payload);
     default:
       throw new Error(`Tipo de sync desconocido: ${op.type}`);
   }
@@ -363,6 +382,12 @@ export function trySyncRecetasSnapshot(recetas) {
   return tryNow({ type: "recetas_snapshot", payload: recetas });
 }
 
+// Se encola SIEMPRE despues de los snapshots de catalogo y recetas (ver el
+// comentario del case en executeOp).
+export function trySyncProductoEliminado(productoId) {
+  return tryNow({ type: "producto_eliminado", payload: { id: productoId } });
+}
+
 export function trySyncProveedoresSnapshot(proveedores) {
   return tryNow({ type: "proveedores_snapshot", payload: proveedores });
 }
@@ -397,6 +422,11 @@ export function trySyncVariantesGrupos(grupos) {
 
 export function trySyncHistorialReceta(evento) {
   return tryNow({ type: "historial_receta", payload: evento });
+}
+
+// Un cierre de caja se guarda una sola vez (uuid propio); reintentar es seguro.
+export function trySyncCierreCaja(cierre) {
+  return tryNow({ type: "cierre_caja", payload: cierre });
 }
 
 export function trySyncConfiguracionCompartida(id, valor) {

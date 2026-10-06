@@ -7,6 +7,7 @@ DELETE FROM movimientos_stock;
 DELETE FROM movimientos_insumos;
 DELETE FROM detalle_venta;
 DELETE FROM ventas;
+DELETE FROM cierres_caja;   -- solo existe si se corrio la migracion 015
 DELETE FROM historial_calibraciones;
 DELETE FROM historial_recetas;
 DELETE FROM configuracion_compartida;

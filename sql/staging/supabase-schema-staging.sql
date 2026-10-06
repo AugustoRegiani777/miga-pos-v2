@@ -27,7 +27,8 @@ CREATE TABLE productos (
   umbral_bajo     INTEGER NOT NULL DEFAULT 0,
   controla_stock  BOOLEAN NOT NULL DEFAULT true,
   orden           INTEGER NOT NULL DEFAULT 0,
-  activo          BOOLEAN NOT NULL DEFAULT true
+  activo          BOOLEAN NOT NULL DEFAULT true,
+  actualizado_en  TIMESTAMPTZ NOT NULL DEFAULT NOW()  -- mig. 017
 );
 
 -- ============ VENTAS (rediseñado: ya no incluye "baja") ============
@@ -41,6 +42,7 @@ CREATE TABLE ventas (
   -- 'baja' ya NO es un sale_mode — una baja no es una venta, no genera fila
   -- aca (ver movimientos_stock.tipo = 'baja' mas abajo).
   sale_mode      TEXT NOT NULL DEFAULT 'normal' CHECK (sale_mode IN ('normal', 'togoo')),
+  forma_pago     TEXT NOT NULL DEFAULT 'efectivo' CHECK (forma_pago IN ('efectivo', 'tarjeta')), -- mig. 016
   anulada        BOOLEAN NOT NULL DEFAULT false,
   anulada_en     TIMESTAMPTZ,
   origen         TEXT,

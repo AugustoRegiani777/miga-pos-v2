@@ -1,7 +1,27 @@
-export const SANDWICH_COMBOS = [
-  { cantidad: 12, precioCentavos: 3400, nombre: "Combo 12 sandwiches", premiumExtraCentavos: 30 },
-  { cantidad: 6, precioCentavos: 1900, nombre: "Combo 6 sandwiches", premiumExtraCentavos: 30 }
-];
+// Precio de las promos por cantidad — editable desde Gestion > Menu (ver
+// combos.js), guardado en configuracion_compartida para que valga en
+// cualquier dispositivo. Este modulo guarda el valor VIGENTE en memoria
+// (combosConfigActual) y arranca con el default de toda la vida; combos.js
+// lo actualiza al arrancar la app y cada vez que se guarda un cambio — asi
+// calculateCartPricing/aplicarCombosEnCascada, mas abajo, nunca tienen que
+// saber de donde salio el numero.
+export const DEFAULT_COMBOS_CONFIG = { docePrecioCentavos: 3400, seisPrecioCentavos: 1900, premiumExtraCentavos: 30 };
+let combosConfigActual = DEFAULT_COMBOS_CONFIG;
+
+export function setCombosConfig(valor) {
+  combosConfigActual = { ...DEFAULT_COMBOS_CONFIG, ...valor };
+}
+
+export function getCombosConfig() {
+  return combosConfigActual;
+}
+
+function combosVigentes() {
+  return [
+    { cantidad: 12, precioCentavos: combosConfigActual.docePrecioCentavos, nombre: "Combo 12 sandwiches", premiumExtraCentavos: combosConfigActual.premiumExtraCentavos },
+    { cantidad: 6, precioCentavos: combosConfigActual.seisPrecioCentavos, nombre: "Combo 6 sandwiches", premiumExtraCentavos: combosConfigActual.premiumExtraCentavos }
+  ];
+}
 
 const PREMIUM_SANDWICH_IDS = new Set(["atun-palta-queso", "huevo-jamon", "especial-semanal"]);
 
@@ -43,7 +63,7 @@ function premiumExtraCharge(comboUnits, combo) {
 // sandwiches se toman en el orden en que se agregaron al carrito
 // (unitOrders), no por precio.
 function aplicarCombosEnCascada(sandwichUnits, sandwichQuantity) {
-  const combosOrdenados = [...SANDWICH_COMBOS].sort((a, b) => b.cantidad - a.cantidad);
+  const combosOrdenados = combosVigentes().sort((a, b) => b.cantidad - a.cantidad);
   const aplicados = [];
   let cursor = 0;
   let restante = sandwichQuantity;

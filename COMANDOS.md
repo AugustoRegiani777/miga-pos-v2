@@ -10,7 +10,9 @@ Desde la carpeta del proyecto, en una terminal:
 npm start
 ```
 
-Abre el navegador en **http://localhost:3000**. Es la app real (mismo Supabase de producción) — cualquier venta o cambio que hagas ahí queda guardado de verdad.
+Abre el navegador en **http://localhost:3000**.
+
+**Ojo con esto:** desde que existe la rama `arquitectura-productos-v2`, correr en `localhost` (cualquier puerto) apunta solo a la base de **staging** — nunca a producción — sin importar qué rama tengas activa en Git en ese momento (la rama solo define qué *código* corrés; la base a la que apunta depende de si el navegador dice `localhost`/`127.0.0.1` o no). Ver la sección "Staging" más abajo. Netlify (`unodemigapos.netlify.app`, la tablet real) siempre usa producción, sin excepción — no hay forma de que se mezclen.
 
 Si necesitás probar "Cargar por factura" (la lectura de facturas con IA), esa función vive en un servidor de Netlify aparte y `npm start` no la levanta. Para eso:
 
@@ -54,3 +56,25 @@ git log --oneline -10   # ver los ultimos 10 commits
 ```
 
 **Importante:** después de cualquier `git push` a `main`, Netlify hace deploy automático a la app real. En la tablet hay que **cerrar la app del todo y volver a abrirla** (no alcanza con cambiar de pestaña) para que cargue el código nuevo.
+
+**Regla del proyecto ahora mismo:** todo lo nuevo (Panel, Cierre de caja, sync, etc.) se sube SOLO a `arquitectura-productos-v2`. `main` no se toca hasta que se decida explícitamente pasar algo a producción.
+
+## 5. Staging — cómo levantarlo, y qué usuario usar
+
+Staging es una base de Supabase de prueba, separada de la real, con datos simulados (15 días de ventas). Sirve para probar sin riesgo de romper nada de la tablet.
+
+**Para levantarlo:**
+
+1. Asegurate de estar parado en la rama `arquitectura-productos-v2` (`git branch --show-current`).
+2. `npm start` como siempre.
+3. Abrí **http://localhost:3000** — no hace falta nada más: como se explica arriba, correr en `localhost` ya apunta solo a staging.
+4. Vas a ver arriba de todo un cartel naranja: **"🧪 STAGING — hoy: ..."**. Si NO aparece ese cartel, no estás en staging (revisá que la URL diga `localhost`, no una IP de red ni la de Netlify).
+
+**¿Usuario y contraseña específicos? Sí, es obligatorio.** Staging es un proyecto de Supabase totalmente aparte — tu usuario y contraseña reales (los que usás en la tablet) **no existen ahí** y el login va a fallar si los probás. Hay un único usuario de prueba ya creado:
+
+- **Usuario:** `qa-demo`
+- **Contraseña:** `QaDemo-2026-staging`
+
+Ese usuario y esta base de staging son solo para probar — no tienen nada que ver con el negocio real. Se puede borrar en cualquier momento sin que afecte nada de producción.
+
+**El reloj simulado:** el cartel naranja tiene un botón **"+1 día"** — sirve para "avanzar el día" dentro de staging sin esperar al reloj real, útil para probar cosas que dependen de la fecha (cierres, producción). Solo aparece en staging, nunca en producción.

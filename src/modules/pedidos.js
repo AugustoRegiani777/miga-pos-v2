@@ -142,7 +142,7 @@ export async function marcarPedidoListo(pedido) {
     const saleId = await requestToPromise(
       stores.ventas.add({
         uuid: ventaUuid,
-        fecha, hora, totalCentavos, saleMode: "normal", creadoEn: now,
+        fecha, hora, totalCentavos, saleMode: "normal", formaPago: "efectivo", creadoEn: now,
         origen: "pedido",
         pedidoId: pedido.id,
         clienteNombre: pedido.clienteNombre
@@ -192,6 +192,7 @@ export async function marcarPedidoListo(pedido) {
 
     if (ajusteCentavos !== 0) {
       const ajuste = {
+        uuid: crypto.randomUUID(),
         ventaId: saleId,
         productoId: `ajuste-pedido-${pedido.id}`,
         productoNombre: "Ajuste de precio (promo)",
@@ -211,7 +212,7 @@ export async function marcarPedidoListo(pedido) {
       _syncPayload: {
         venta: {
           uuid: ventaUuid,
-          fecha, hora, totalCentavos, saleMode: "normal", creadoEn: now,
+          fecha, hora, totalCentavos, saleMode: "normal", formaPago: "efectivo", creadoEn: now,
           origen: "pedido",
           pedidoId: pedido.id,
           clienteNombre: pedido.clienteNombre

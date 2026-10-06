@@ -48,18 +48,18 @@ export function renderProveedoresList(el, data, callbacks = {}) {
     const tablaHTML = proveedor.productos.length
       ? `<div class="prov-table-wrap">
           <table class="prov-tabla">
-            <thead><tr><th>Producto</th><th>Unidad compra</th><th>Precio</th><th>Precio base</th><th></th></tr></thead>
+            <thead><tr><th>Insumo</th><th>Unidad compra</th><th>Precio</th><th>Precio base</th><th></th></tr></thead>
             <tbody>${filasProducto}</tbody>
           </table>
          </div>`
-      : "<p class='cal-muted' style='padding:0.5rem 0'>Sin productos registrados.</p>";
+      : "<p class='cal-muted' style='padding:0.5rem 0'>Sin insumos registrados.</p>";
 
     return `
       <details class="prov-card" data-prov-id="${proveedor.id}">
         <summary class="prov-summary">
           <div class="prov-summary-main">
             <strong>${proveedor.nombre}</strong>
-            <span class="cal-muted">${proveedor.productos.length} producto${proveedor.productos.length !== 1 ? "s" : ""} · ${cicloTexto}</span>
+            <span class="cal-muted">${proveedor.productos.length} insumo${proveedor.productos.length !== 1 ? "s" : ""} · ${cicloTexto}</span>
           </div>
           <button class="ghost-button compact prov-edit-btn" data-action="edit-prov" data-id="${proveedor.id}">Editar</button>
         </summary>
@@ -68,7 +68,7 @@ export function renderProveedoresList(el, data, callbacks = {}) {
           ${proveedor.notas ? `<p class="cal-muted prov-notas">${proveedor.notas}</p>` : ""}
           ${tablaHTML}
           <div class="prov-add-row">
-            <button class="ghost-button compact" data-action="add-prod" data-provid="${proveedor.id}">+ Agregar producto</button>
+            <button class="ghost-button compact" data-action="add-prod" data-provid="${proveedor.id}">+ Agregar insumo</button>
           </div>
         </div>
       </details>`;

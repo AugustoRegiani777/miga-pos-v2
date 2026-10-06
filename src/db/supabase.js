@@ -146,7 +146,11 @@ function authHeaders(accessToken) {
   };
 }
 
-async function sbFetch(path, method = "GET", body = null, extra = {}) {
+// Version que ademas devuelve las cabeceras de la respuesta. sbFetch (abajo)
+// sigue devolviendo solo el cuerpo, que es lo que espera todo el resto del
+// codigo — esta variante existe para los casos que necesitan leer una
+// cabecera, como la cuenta exacta de filas (ver sbFetchConCuenta).
+async function sbFetchConHeaders(path, method = "GET", body = null, extra = {}) {
   let session = loadSession();
   const doFetch = (accessToken) => fetchWithTimeout(`${BASE}${path}`, {
     method,
@@ -180,7 +184,23 @@ async function sbFetch(path, method = "GET", body = null, extra = {}) {
     throw error;
   }
   const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  return { filas: text ? JSON.parse(text) : null, headers: res.headers };
+}
+
+async function sbFetch(path, method = "GET", body = null, extra = {}) {
+  const { filas } = await sbFetchConHeaders(path, method, body, extra);
+  return filas;
+}
+
+// Igual que sbFetch pero ademas devuelve la CUENTA exacta de filas que
+// coinciden, que PostgREST manda en la cabecera Content-Range ("0-0/7" = 7).
+// Sirve para preguntar "cuantas cosas cambiaron" trayendo una sola fila (ver
+// novedades-remoto.js): la cuenta viene en la cabecera, no en el cuerpo.
+export async function sbFetchConCuenta(path) {
+  const { filas, headers } = await sbFetchConHeaders(path, "GET", null, { "Prefer": "count=exact" });
+  const rango = headers.get("content-range") || "";
+  const total = Number(rango.split("/")[1]);
+  return { filas, cuenta: Number.isFinite(total) ? total : null };
 }
 
 function insert(table, data) {
@@ -240,6 +260,7 @@ export async function pushVenta({ venta, detalles, movimientosStock }) {
       hora: venta.hora,
       total_centavos: venta.totalCentavos,
       sale_mode: venta.saleMode || "normal",
+      forma_pago: venta.formaPago || "efectivo",
       origen: venta.origen || null,
       pedido_id: venta.pedidoId || null,
       cliente_nombre: venta.clienteNombre || null,
@@ -350,11 +371,11 @@ export async function fetchProveedorInsumosCatalogo() {
 // que baja el historial completo se quedaria con una parte y creeria tener
 // todo. Se pagina por CURSOR DE ID (keyset): estable aunque entren filas
 // nuevas mientras se baja, a diferencia de un offset.
-async function fetchAllPorId(tabla, { desdeId = 0, filtro = "", pageSize = 1000 } = {}) {
+async function fetchAllPorId(tabla, { desdeId = 0, filtro = "", pageSize = 1000, select = "*" } = {}) {
   const out = [];
   let ultimo = Number(desdeId) || 0;
   for (;;) {
-    const page = await sbFetch(`/${tabla}?select=*&id=gt.${ultimo}${filtro}&order=id.asc&limit=${pageSize}`);
+    const page = await sbFetch(`/${tabla}?select=${select}&id=gt.${ultimo}${filtro}&order=id.asc&limit=${pageSize}`);
     if (!page || page.length === 0) break;
     out.push(...page);
     ultimo = page[page.length - 1].id;
@@ -431,6 +452,80 @@ export async function pushRecetasSnapshot(recetas) {
   })));
 }
 
+// --- Borrado definitivo de un producto -------------------------------------
+//
+// Un snapshot (pushCatalogoSnapshot / pushRecetasSnapshot) es un UPSERT: solo
+// inserta y actualiza, nunca borra filas que ya no estan en el payload. Asi
+// que borrar un producto SOLO en local no alcanza: la fila sigue en Supabase y
+// el proximo "Actualizar catalogo" de cualquier dispositivo (incluido el que
+// lo borro) lo vuelve a bajar. El borrado remoto tiene que ser explicito.
+//
+// Orden obligatorio por las FK del schema (ver sql/.../supabase-schema*.sql):
+// historial_recetas.producto_id y recetas.producto_id apuntan a productos(id)
+// SIN "ON DELETE CASCADE", y stock_productos.id tambien. Si se intenta borrar
+// productos primero, Postgres responde 409 / 23503 y el producto revive.
+// Cada DELETE es idempotente (borrar cero filas devuelve 200), asi que un
+// reintento de la cola de sync es seguro.
+//
+// Y una trampa que costo encontrar: un DELETE que RLS no permite NO devuelve
+// error. PostgREST contesta 204 "sin contenido" igual que si hubiera borrado,
+// porque desde el punto de vista de la politica no habia ninguna fila que
+// borrar. O sea que "no hubo error" NO significa "se borro" — hay que
+// verificarlo leyendo despues. Si esta funcion se quedara con el 204, la app
+// diria "eliminado" y el producto volveria en el proximo "Actualizar
+// catalogo" sin que nadie entienda por que.
+export async function deleteProductoRemoto(productoId) {
+  const q = encodeURIComponent(productoId);
+  // Orden obligatorio por las FK. Cada uno es idempotente, asi que reintentar
+  // es seguro.
+  await sbFetch(`/historial_recetas?producto_id=eq.${q}`, "DELETE");
+  await sbFetch(`/recetas?producto_id=eq.${q}`, "DELETE");
+  await sbFetch(`/stock_productos?id=eq.${q}`, "DELETE");
+  await sbFetch(`/productos?id=eq.${q}`, "DELETE");
+
+  const [producto, recetas] = await Promise.all([
+    sbFetch(`/productos?id=eq.${q}&select=id`),
+    sbFetch(`/recetas?producto_id=eq.${q}&select=id`)
+  ]);
+  if (producto?.length || recetas?.length) {
+    const error = new Error(
+      "Supabase acepto el borrado pero el producto sigue en la nube. Falta la politica de RLS de DELETE sobre productos y recetas (ver migracion de borrado de productos). Sin eso el producto volveria en el proximo \"Actualizar catalogo\"."
+    );
+    error.sinPermisoDelete = true;
+    throw error;
+  }
+  return true;
+}
+
+// Cuenta lo que haria imposible (o destructivo) borrar este producto. Se
+// pregunta a la NUBE y no a la IDB local a proposito:
+//  - los pedidos no existen en IndexedDB, viven solo en Supabase;
+//  - las ventas y los movimientos de stock de los OTROS dispositivos no estan
+//    en la copia local de este.
+// Trae una sola fila de cada tabla y lee la cuenta exacta de la cabecera
+// Content-Range (ver sbFetchConCuenta), asi que son consultas baratas.
+export async function contarReferenciasProducto(productoId) {
+  const q = encodeURIComponent(productoId);
+  const [ventas, movStock, movInsumos, pedidos] = await Promise.all([
+    sbFetchConCuenta(`/detalle_venta?producto_id=eq.${q}&select=id&limit=1`),
+    sbFetchConCuenta(`/movimientos_stock?producto_id=eq.${q}&select=id&limit=1`),
+    sbFetchConCuenta(`/movimientos_insumos?producto_id=eq.${q}&select=id&limit=1`),
+    // El filtro por estado del pedido padre se hace en JS: embeber y filtrar
+    // por una columna de la tabla embebida depende de la version de PostgREST,
+    // y esta lista es de unas pocas decenas de filas.
+    sbFetch(`/pedidos?select=id,estado,detalle_pedido(producto_id)`)
+  ]);
+  const pedidosAbiertos = (pedidos || []).filter((p) =>
+    p.estado !== "entregado" && (p.detalle_pedido || []).some((d) => d.producto_id === productoId)
+  ).length;
+  return {
+    ventas: ventas.cuenta ?? (ventas.filas?.length || 0),
+    movimientosStock: movStock.cuenta ?? (movStock.filas?.length || 0),
+    movimientosInsumos: movInsumos.cuenta ?? (movInsumos.filas?.length || 0),
+    pedidosAbiertos
+  };
+}
+
 // Grupos de variante (Gestion > Variantes, ej. "Tipo de leche") — a
 // diferencia de insumos/productos, esto vive en la tabla generica
 // configuracion_compartida (una sola fila, id fijo) en vez de tener su
@@ -469,6 +564,10 @@ export async function pushProveedoresSnapshot(proveedores) {
     email: p.email || null,
     notas: p.notas || null,
     dias_ciclo: p.diasCiclo,
+    // Separados a proposito: dias_ciclo es cada cuanto pido, lead_time_dias es
+    // cuanto tarda en llegar. Columnas de la migracion 019.
+    lead_time_dias: p.leadTimeDias ?? 0,
+    dias_entrega: Array.isArray(p.diasEntrega) && p.diasEntrega.length > 0 ? p.diasEntrega : null,
     activo: p.activo !== false,
     actualizado_en: new Date().toISOString()
   })));
@@ -597,6 +696,50 @@ export async function fetchMovimientosStockDesde(fecha) {
   // Paginado: con "fecha=gte" el rango crece cada dia y PostgREST corta en
   // 1000 filas sin avisar — el historico quedaria calculado con datos partidos.
   return fetchAllPorId("movimientos_stock", { filtro: `&fecha=gte.${fecha}` });
+}
+
+// Ventas (no anuladas) de un rango de fechas, con su detalle. Para el Panel:
+// una consulta paginada en vez de una por dia. Paginas chicas porque cada
+// venta trae sus lineas embebidas.
+export function fetchVentasRango(desde, hasta) {
+  return fetchAllPorId("ventas", {
+    select: "*,detalle_venta(*)",
+    filtro: `&fecha=gte.${desde}&fecha=lte.${hasta}&anulada=not.is.true`,
+    pageSize: 300
+  });
+}
+
+// Cierre de caja (migracion 015): tabla append-only. Solo hay politica de
+// INSERT (no de UPDATE), asi que el reintento de un cierre ya guardado tiene
+// que ser "ignorar duplicado" y no "actualizar": con merge-duplicates la base
+// pediria permiso de UPDATE y el reintento quedaria trabado para siempre.
+export async function pushCierreCaja(c) {
+  return sbFetch("/cierres_caja?on_conflict=uuid", "POST", [{
+    uuid: c.uuid,
+    fecha: c.fecha,
+    ventas_total_centavos: c.ventasTotalCentavos,
+    tickets: c.tickets,
+    tgtg_centavos: c.tgtgCentavos,
+    tgtg_en_cajon: c.tgtgEnCajon,
+    fondo_inicial_centavos: c.fondoInicialCentavos,
+    tarjeta_centavos: c.tarjetaCentavos,
+    tarjeta_origen: c.tarjetaOrigen || "manual",
+    plataformas_centavos: c.plataformasCentavos,
+    retiros_centavos: c.retirosCentavos,
+    retiros_nota: c.retirosNota || null,
+    contado_centavos: c.contadoCentavos,
+    fondo_manana_centavos: c.fondoMananaCentavos ?? null,
+    esperado_efectivo_centavos: c.esperadoEfectivoCentavos,
+    diferencia_centavos: c.diferenciaCentavos,
+    nota: c.nota || null,
+    creado_en: c.creadoEn
+  }], { "Prefer": "resolution=ignore-duplicates,return=minimal" });
+}
+
+// Cierres mas recientes primero. `desde` (YYYY-MM-DD) es opcional.
+export async function fetchCierresCaja({ desde, limit = 60 } = {}) {
+  const filtro = desde ? `&fecha=gte.${desde}` : "";
+  return sbFetch(`/cierres_caja?select=*${filtro}&order=fecha.desc,creado_en.desc&limit=${limit}`);
 }
 
 export async function fetchVentasDelDia(fecha) {

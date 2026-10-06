@@ -1,8 +1,12 @@
-import { getAll, countAll, withStores, requestToPromise } from "../db/idb.js";
+import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, getPendingSyncCount } from "./sync.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, getPendingSyncCount } from "./sync.js";
 import { fetchInsumosCatalogo, fetchStockInsumos } from "../db/supabase.js";
+import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
+import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
+import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
+
 
 // Punto unico para "armar un insumo nuevo" — antes esta misma logica estaba
 // copiada en menu.js, proveedores.js y facturas.js, cada una con su propia
@@ -10,7 +14,7 @@ import { fetchInsumosCatalogo, fetchStockInsumos } from "../db/supabase.js";
 // completando: si se crean varios insumos nuevos en el mismo lote (ej. dos
 // lineas de receta nuevas en un mismo producto), el segundo no puede
 // colisionar con el id que acaba de resolver el primero.
-export function construirInsumoNuevo(nombre, idsUsados, { unidad, stockMinimo, stockCritico } = {}) {
+export function construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, factorConversion, stockMinimo, stockCritico } = {}) {
   const nombreLimpio = String(nombre || "").trim();
   if (!nombreLimpio) throw new Error("El nombre del insumo nuevo es obligatorio.");
 
@@ -24,12 +28,22 @@ export function construirInsumoNuevo(nombre, idsUsados, { unidad, stockMinimo, s
 
   const now = new Date().toISOString();
   const unidadFinal = String(unidad || "").trim() || "unidad";
+
+  // El envase: con que nombre lo contas y cuanto trae cada uno. Sin envase
+  // propio, el insumo se cuenta en su unidad base (factor 1) — es lo que
+  // pasaba siempre antes, y dejaba insumos como "crema: g, de a g", que en la
+  // vista se leian dos veces lo mismo. Un envase que traiga 1 o menos no es un
+  // envase, asi que tampoco cuenta.
+  const envaseNombre = String(unidadCompra || "").trim();
+  const envaseTrae = parseFloat(String(factorConversion ?? "").replace(",", "."));
+  const tieneEnvase = Boolean(envaseNombre) && Number.isFinite(envaseTrae) && envaseTrae > 1;
+
   return {
     id,
     nombre: nombreLimpio,
     unidad: unidadFinal,
-    unidadCompra: unidadFinal,
-    factorConversion: 1,
+    unidadCompra: tieneEnvase ? envaseNombre : unidadFinal,
+    factorConversion: tieneEnvase ? envaseTrae : 1,
     stockActual: 0,
     stockMinimo: parseFloat(String(stockMinimo ?? "").replace(",", ".")) || 0,
     stockCritico: parseFloat(String(stockCritico ?? "").replace(",", ".")) || 0,
@@ -45,10 +59,10 @@ export function construirInsumoNuevo(nombre, idsUsados, { unidad, stockMinimo, s
 // directo porque necesitan escribirlo en la MISMA transaccion que su
 // producto/receta/proveedor_insumo — esta funcion es para cuando no hay
 // nada mas que crear junto con el.
-export async function createInsumo({ nombre, unidad, stockMinimo, stockCritico }) {
+export async function createInsumo({ nombre, unidad, unidadCompra, factorConversion, stockMinimo, stockCritico }) {
   const insumosActuales = await getAll("insumos");
   const idsUsados = new Set(insumosActuales.map((i) => i.id));
-  const insumo = construirInsumoNuevo(nombre, idsUsados, { unidad, stockMinimo, stockCritico });
+  const insumo = construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, factorConversion, stockMinimo, stockCritico });
 
   await withStores(["insumos"], "readwrite", (stores) => {
     stores.insumos.put(insumo);
@@ -145,6 +159,32 @@ export async function reconciliarStockInsumosConNube() {
 }
 
 const SEED_VERSION_KEY = "insumos_seed_version";
+// Normalizacion de envases (v11). El envase de un insumo es "como lo contas
+// vos", la unidad minima que contiene el producto a granel: una botella, una
+// bolsa, un pote. NO es como te lo vende el proveedor (eso vive en
+// proveedor_insumos, que puede traer una caja de 6 botellas).
+//
+// Antes habia insumos con el envase mal puesto: las leches decian "L" (que es
+// una medida, no un envase, asi que la vista mostraba "5,93 L / 5,93 L"), y
+// crema, salmon y leche de soja habian quedado con factor 1, o sea sin envase.
+// Esta tabla los corrige una sola vez. Incluye insumos que NO estan en el seed
+// (los creo el usuario en la app), porque el arreglo tiene que llegar al
+// dispositivo: la copia local se sube al arrancar, asi que tocar solo la nube
+// se pisaba solo.
+//
+// escalarPor esta para el unico caso que cambia de unidad base: la leche de
+// soja se media en L y pasa a ml, asi que sus cantidades se multiplican x1000
+// (stock, minimos y las recetas que la usan). Sin eso, 3 L de minimo pasarian
+// a leerse como 3 ml.
+const ENVASES_NORMALIZADOS_V11 = {
+  "leche-normal":      { unidadCompra: "botella", factorConversion: 1000 },
+  "leche-avena":       { unidadCompra: "botella", factorConversion: 1000 },
+  "leche-sin-lactosa": { unidadCompra: "botella", factorConversion: 1000 },
+  "leche-de-soja":     { unidadCompra: "botella", factorConversion: 1000, unidad: "ml", escalarPor: 1000 },
+  "crema":             { unidadCompra: "pote",    factorConversion: 1000 },
+  "salmon":            { unidadCompra: "envase",  factorConversion: 1000 }
+};
+
 const RECETAS_LECHE_ACTUALIZADAS_V8 = [
   "cafe-con-leche:leche-normal",
   "promo-cafe-con-leche:leche-normal",
@@ -226,21 +266,206 @@ export async function seedInsumos() {
   });
 }
 
-export async function listInsumos() {
-  const insumos = await getAll("insumos");
-  return insumos
-    .filter(i => i.activo)
-    .map(i => ({
-      ...i,
-      stockEnCompra: i.stockActual / i.factorConversion,
-      estadoStock: i.stockActual <= i.stockCritico ? "critico"
-                 : i.stockActual <= i.stockMinimo ? "bajo"
-                 : "ok"
-    }))
-    .sort((a, b) => {
-      const order = { critico: 0, bajo: 1, ok: 2 };
-      return (order[a.estadoStock] - order[b.estadoStock]) || a.nombre.localeCompare(b.nombre);
+const ENVASES_KEY = "envases_normalizados_v11";
+
+// Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
+//
+// Primero lo intente en seedInsumos y la prueba lo encontro: en un dispositivo
+// recien instalado el seed corre cuando lo unico que hay en la base son los
+// insumos del seed. Crema, salmon y leche de soja no estan ahi — los creo el
+// usuario desde la app — y llegan recien con pullInsumosDesdeNube, o sea
+// despues. La correccion no los veia nunca, y como la version de seed ya
+// quedaba marcada, tampoco volvia a intentarlo.
+//
+// Al final sube el resultado: asi la nube queda corregida sin tocarla a mano, y
+// los demas dispositivos se lo bajan ya bien. Cuando ya esta todo en orden no
+// escribe nada y no sube nada.
+export async function normalizarEnvasesInsumos() {
+  const [insumos, recetas, movimientos, config] = await Promise.all([
+    getAll("insumos"),
+    getAll("recetas"),
+    getAll("movimientos_insumos"),
+    getAll("configuracion")
+  ]);
+  if (config.find(c => c.id === ENVASES_KEY)?.valor) return { corregidos: [] };
+
+  const conMovimientos = new Set(movimientos.map(m => m.insumoId));
+  const now = new Date().toISOString();
+  const insumosArreglados = [];
+  const recetasArregladas = [];
+
+  for (const [id, fix] of Object.entries(ENVASES_NORMALIZADOS_V11)) {
+    const insumo = insumos.find(i => i.id === id);
+    if (!insumo) continue;
+    const escala = fix.escalarPor || 1;
+
+    // Cambiar la unidad base de un insumo que YA tiene movimientos cargados
+    // dejaria el historial escrito en la unidad vieja y el stock en la nueva:
+    // el ledger es la verdad del stock, asi que mejor no tocar nada y que
+    // quede a la vista, antes que reescribir numeros a ciegas.
+    if (escala !== 1 && conMovimientos.has(id)) continue;
+
+    const escalar = (v) => (Number.isFinite(Number(v)) ? Number(v) * escala : v);
+    const yaEstaba = insumo.unidadCompra === fix.unidadCompra
+      && insumo.factorConversion === fix.factorConversion
+      && (!fix.unidad || insumo.unidad === fix.unidad);
+    if (yaEstaba) continue;
+
+    insumosArreglados.push({
+      ...insumo,
+      unidad: fix.unidad || insumo.unidad,
+      unidadCompra: fix.unidadCompra,
+      factorConversion: fix.factorConversion,
+      stockActual: escalar(insumo.stockActual),
+      stockMinimo: escalar(insumo.stockMinimo),
+      stockCritico: escalar(insumo.stockCritico),
+      actualizadoEn: now
     });
+    if (escala === 1) continue;
+    // La unidad base cambio: las recetas que lo consumen estaban escritas en la
+    // vieja (0,25 L) y hay que reexpresarlas (250 ml).
+    for (const receta of recetas) {
+      if (receta.insumoId !== id) continue;
+      recetasArregladas.push({ ...receta, cantidadPorUnidad: escalar(receta.cantidadPorUnidad), actualizadoEn: now });
+    }
+  }
+
+  await withStores(["insumos", "recetas", "configuracion"], "readwrite", (stores) => {
+    for (const i of insumosArreglados) stores.insumos.put(i);
+    for (const r of recetasArregladas) stores.recetas.put(r);
+    stores.configuracion.put({ id: ENVASES_KEY, valor: true, actualizadoEn: now });
+  });
+
+  if (insumosArreglados.length === 0) return { corregidos: [] };
+
+  const [insumosFinal, recetasFinal] = await Promise.all([getAll("insumos"), getAll("recetas")]);
+  trySyncInsumosSnapshot(insumosFinal).catch(() => {});
+  if (recetasArregladas.length > 0) trySyncRecetasSnapshot(recetasFinal).catch(() => {});
+
+  return { corregidos: insumosArreglados.map(i => ({ id: i.id, nombre: i.nombre, envase: i.unidadCompra })) };
+}
+
+// El estado de cada insumo, con las dos lecturas:
+//
+//  - `estadoStock` (critico/bajo/ok) es el viejo umbral fijo. Se mantiene
+//    porque hay pantallas que todavia lo leen, pero NO es el que manda.
+//  - `prediccion` responde lo que de verdad importa: si el stock llega hasta
+//    que entre el proximo pedido. Un umbral fijo no sabe nada del tiempo: el
+//    cafe decia "bajo" con 790 g aunque eso fueran 5 dias y el pedido entrara
+//    en 3, y al reves un insumo podia decir "ok" y no llegar porque el
+//    proveedor tarda 5 dias.
+//
+// `pedidos` es opcional a proposito: los encargos de clientes viven SOLO en la
+// nube (no hay store local), asi que sin internet llega vacio. El estado tiene
+// que servir igual — por eso viaja `pedidosIncluidos`, para poder decir en
+// pantalla que la cuenta no los contempla en vez de quedarse corta en silencio.
+export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
+  const [insumos, movimientosLocales, proveedorInsumos, proveedores, recetas, serieNube] = await Promise.all([
+    getAll("insumos"),
+    getAll("movimientos_insumos"),
+    getAll("proveedor_insumos"),
+    getAll("proveedores"),
+    getAll("recetas"),
+    leerSerieConsumoLocal().catch(() => ({ serie: [] }))
+  ]);
+
+  // El ledger local NO alcanza. La sincronizacion del historial es solo de
+  // subida: el dispositivo sube lo que hace, pero nunca baja lo que hicieron
+  // los demas. Medido contra staging: 0 movimientos locales contra 587 en la
+  // nube. Una tablet de repuesto, el celular o un reemplazo no tenian con que
+  // estimar nada — y el modelo viejo tapaba eso cayendo a `stockMinimo / 7` y
+  // mostrando esa cuenta inventada como si fuera un dato medido.
+  //
+  // Asi que se juntan las dos fuentes: lo que bajo de la nube (hasta ayer) y lo
+  // que este dispositivo hizo hoy y todavia no subio. Se prefiere lo local
+  // cuando hay para la misma fecha: es lo mas nuevo.
+  // La primera vez en un dispositivo no hay ninguna copia, y sin ella no hay
+  // con que estimar nada: ahi SI se espera la bajada, aunque tarde. Mostrar
+  // "sin datos" en la primera pantalla de una tablet recien instalada seria
+  // peor que esperar medio segundo. Si no hay internet tampoco se cuelga:
+  // sincronizarSerieConsumo devuelve lo que haya (vacio) en vez de tirar.
+  //
+  // Cuando ya hay copia, el refresco va en segundo plano y la pantalla se
+  // dibuja con lo ultimo bajado — que es lo que permite trabajar sin wifi.
+  let serie = serieNube?.serie || [];
+  if (serie.length === 0) {
+    serie = (await sincronizarSerieConsumo({ hasta: hoy }).catch(() => null))?.serie || [];
+  } else if (serieNube?.actualizadoEn?.slice(0, 10) !== hoy) {
+    sincronizarSerieConsumo({ hasta: hoy }).catch(() => {});
+  }
+
+  const vistos = new Set();
+  const movimientos = [];
+  for (const m of movimientosLocales) {
+    movimientos.push(m);
+    vistos.add(`${m.insumoId}|${String(m.fecha || "").slice(0, 10)}`);
+  }
+  for (const punto of serie) {
+    if (vistos.has(`${punto.insumoId}|${punto.fecha}`)) continue;
+    // La serie viene ya agregada y en positivo; serieDeConsumo espera un
+    // movimiento crudo, asi que se le devuelve el signo que tendria en el ledger.
+    movimientos.push({ insumoId: punto.insumoId, tipo: "venta", cantidad: -punto.cantidad, fecha: punto.fecha });
+  }
+
+  const provById = new Map(proveedores.map(p => [p.id, p]));
+  const proveedoresPorInsumo = new Map();
+  for (const pi of proveedorInsumos) {
+    if (pi.activo === false) continue;
+    const prov = provById.get(pi.proveedorId);
+    if (!prov || prov.activo === false) continue;
+    if (!proveedoresPorInsumo.has(pi.insumoId)) proveedoresPorInsumo.set(pi.insumoId, []);
+    proveedoresPorInsumo.get(pi.insumoId).push(prov);
+  }
+
+  const activos = insumos.filter(i => i.activo);
+
+  // Hasta donde mirar los pedidos: el horizonte mas largo que cubre cualquier
+  // proveedor. Mas alla de eso ya no afecta si llego al proximo pedido.
+  let horizonte = 14;
+  for (const lista of proveedoresPorInsumo.values()) {
+    for (const p of lista) horizonte = Math.max(horizonte, (Number(p.diasCiclo) || 7) + (Number(p.leadTimeDias) || 0));
+  }
+
+  const demandaPorInsumo = pedidos
+    ? demandaConocidaPorInsumo({ pedidos, recetas, hoy, hastaFecha: sumarDiasISO(hoy, horizonte) })
+    : null;
+
+  const estados = estadoDeTodos({
+    insumos: activos,
+    movimientos,
+    proveedoresPorInsumo,
+    hoy,
+    demandaPorInsumo,
+    pedidosIncluidos: Boolean(pedidos)
+  });
+
+  const orden = { "no-llega": 0, justo: 1, "sin-proveedor": 2, "sin-datos": 3, bien: 4 };
+
+  return activos
+    .map(i => {
+      const prediccion = estados.get(i.id);
+      return {
+        ...i,
+        stockEnCompra: i.stockActual / i.factorConversion,
+        estadoStock: i.stockActual <= i.stockCritico ? "critico"
+                   : i.stockActual <= i.stockMinimo ? "bajo"
+                   : "ok",
+        prediccion,
+        prediccionTexto: explicarEstado(prediccion)
+      };
+    })
+    .sort((a, b) => {
+      const pa = orden[a.prediccion?.estado] ?? 9;
+      const pb = orden[b.prediccion?.estado] ?? 9;
+      return (pa - pb) || a.nombre.localeCompare(b.nombre);
+    });
+}
+
+// Suma dias a una fecha ISO sin pasar por Date local (reloj simulado).
+function sumarDiasISO(fechaISO, dias) {
+  const [a, m, d] = String(fechaISO).slice(0, 10).split("-").map(Number);
+  const t = Date.UTC(a, m - 1, d) + dias * 86400000;
+  return new Date(t).toISOString().slice(0, 10);
 }
 
 export async function listaDeComprasSmart() {
@@ -371,11 +596,23 @@ export async function ajustarStockInsumo(insumoId, cantidad, tipo) {
     ? { ...insumo.ultimaCalibracion, stockEnCalibracion: (insumo.ultimaCalibracion.stockEnCalibracion || 0) + cantidad }
     : insumo.ultimaCalibracion;
 
+  // INCIDENTE (04/10/2026): este movimiento se guardaba SOLO en la tablet y
+  // nunca se sincronizaba. Como el stock de la nube se calcula unicamente
+  // sumando movimientos_insumos (migracion 012), una compra cargada a mano no
+  // cambiaba nada alla — y en la siguiente alineacion
+  // (reconciliarStockInsumosConNube) el stock local volvia al de la nube, o
+  // sea que la compra se perdia sin dejar rastro. Todo movimiento que mueve
+  // stock tiene que viajar.
+  const movimiento = { uuid: crypto.randomUUID(), insumoId, tipo, cantidad, stockAnterior, stockNuevo, fecha, creadoEn: now };
+
   // Escribir sincrónico — sin await adentro
-  return withStores(["insumos", "movimientos_insumos"], "readwrite", (stores) => {
+  await withStores(["insumos", "movimientos_insumos"], "readwrite", (stores) => {
     stores.insumos.put({ ...insumo, stockActual: stockNuevo, ultimaCalibracion, actualizadoEn: now });
-    stores.movimientos_insumos.add({ uuid: crypto.randomUUID(), insumoId, tipo, cantidad, stockAnterior, stockNuevo, fecha, creadoEn: now });
+    stores.movimientos_insumos.add(movimiento);
   });
+
+  trySyncMovimientosInsumos([movimiento]).catch(() => {});
+  return movimiento;
 }
 
 export async function calibrarInsumo(insumoId, stockRealRaw, alphaRecetaOverride = null) {
@@ -487,11 +724,26 @@ export async function calibrarInsumo(insumoId, stockRealRaw, alphaRecetaOverride
     }
   });
 
-  // Sync asíncrono — no bloquea la UI aunque Supabase falle
+  // Sync asíncrono — no bloquea la UI aunque Supabase falle.
+  //
+  // Todo lo que sigue va DESPUES del await, nunca adentro del callback: la
+  // cola se escribe antes de enviar, pero tiene que escribirse cuando la
+  // transaccion local ya commiteo. Al reves, una transaccion que abortara
+  // (cuota de IndexedDB, un add que falla) dejaba el movimiento igual en la
+  // cola: subia a la nube un movimiento que en este dispositivo no existe, y
+  // la reconciliacion despues bajaba ese fantasma.
+  const [syncInsumos, syncRecetas] = await Promise.all([getAll("insumos"), getAll("recetas")]);
+
+  // El stock y la marca de calibrado cambian SIEMPRE que se calibra, haya o no
+  // datos para recalcular el modelo. Por eso estas dos no van dentro del if:
+  // una calibracion sin historial suficiente igual mueve el stock y pone
+  // necesitaCalibracion en false, y eso tiene que llegar a los demas.
+  trySyncMovimientosInsumos([movimiento]).catch(() => {});
+  trySyncInsumosSnapshot(syncInsumos).catch(() => {});
+
+  // Esto si depende de que el modelo se haya recalculado.
   if (eventoCalib) {
-    const [syncInsumos, syncRecetas] = await Promise.all([getAll("insumos"), getAll("recetas")]);
     trySyncCalibracion(eventoCalib).catch(() => {});
-    trySyncInsumosSnapshot(syncInsumos).catch(() => {});
     trySyncRecetasSnapshot(syncRecetas).catch(() => {});
   }
 }
@@ -519,7 +771,14 @@ export async function getRecetasDashboardData() {
     const historial = (historialPorReceta.get(r.id) || [])
       .sort((a, b) => b.creadoEn.localeCompare(a.creadoEn))
       .slice(0, 5);
-    porProducto.get(r.productoId).push({ ...r, insumoNombre: insumo.nombre, unidad: insumo.unidad, historial });
+    porProducto.get(r.productoId).push({
+      ...r,
+      insumoNombre: insumo.nombre,
+      unidad: insumo.unidad,
+      unidadCompra: insumo.unidadCompra,
+      factorConversion: insumo.factorConversion,
+      historial
+    });
   }
 
   return Array.from(porProducto.entries())
@@ -529,6 +788,28 @@ export async function getRecetasDashboardData() {
       recetas: recetasDelProducto
     }))
     .sort((a, b) => a.productoNombre.localeCompare(b.productoNombre));
+}
+
+// Crea la linea de receta que faltaba (ver el aviso de ciclo incompleto en
+// Insumos). Es alta, no edicion: si ya existiera, se corrige desde Recetas.
+export async function crearLineaReceta({ productoId, insumoId, cantidadPorUnidad }) {
+  const cantidad = Number(cantidadPorUnidad);
+  if (!productoId || !insumoId) throw new Error("Faltan el producto o el insumo.");
+  if (!Number.isFinite(cantidad) || cantidad <= 0) throw new Error("La cantidad tiene que ser mayor que cero.");
+
+  const id = `${productoId}:${insumoId}`;
+  const existente = await getOne("recetas", id);
+  if (existente) throw new Error("Ese producto ya usa este insumo.");
+
+  const now = new Date().toISOString();
+  await withStores(["recetas"], "readwrite", (stores) => {
+    // esEstimado: lo escribio una persona, asi que el modelo no lo trata como
+    // una estimacion suya (mismo criterio que actualizarReceta).
+    stores.recetas.put({ id, productoId, insumoId, cantidadPorUnidad: cantidad, esEstimado: false, creadoEn: now, actualizadoEn: now });
+  });
+
+  trySyncRecetasSnapshot(await getAll("recetas")).catch(() => {});
+  return id;
 }
 
 export async function actualizarReceta(recetaId, nuevaCantidadRaw, motivo = "", recetaFija = null) {
@@ -567,6 +848,13 @@ export async function actualizarReceta(recetaId, nuevaCantidadRaw, motivo = "", 
   });
 
   trySyncHistorialReceta(eventoHistorial).catch(() => {});
+  // Y la receta en si. Antes subia solo el log del cambio: la nube quedaba
+  // diciendo "paso de 20 a 25" con la receta todavia en 20, y el proximo
+  // "Actualizar catalogo" revertia la edicion (pullCatalogoDesdeNube reescribe
+  // recetas sin proteger nada). De paso, deductInsumosInTx seguia descontando
+  // con la cantidad vieja.
+  const recetasFinal = await getAll("recetas");
+  trySyncRecetasSnapshot(recetasFinal).catch(() => {});
 }
 
 export async function exportarListaCompras() {

@@ -29,7 +29,13 @@ export const STORE_NAMES = [
 // abajo. v10 porque v9 ya habia quedado guardada localmente antes de que el
 // cambio de activo estuviera completo (savedVersion < version no volvia a
 // disparar la actualizacion).
-export const INSUMOS_SEED_VERSION = 10;
+// Version del seed de PRODUCTOS. Subirla es la UNICA forma de pisar desde el
+// codigo un producto que ya existe en un dispositivo (ver seedDatabase en
+// idb.js). Mientras no suba, lo que el usuario edito desde Gestion > Menu
+// manda siempre: precio, nombre, si se muestra en caja, el orden, todo.
+export const PRODUCTOS_SEED_VERSION = 1;
+
+export const INSUMOS_SEED_VERSION = 11;
 
 // Nombres de insumos obsoletos que hay que borrar de instalaciones viejas (no deberian existir)
 export const INSUMOS_OBSOLETOS_NOMBRES = new Set(["Mezcla"]);
@@ -69,12 +75,14 @@ export const initialInsumos = [
   { id: "huevo",            nombre: "Huevo",               unidad: "unidad",   unidadCompra: "paquete", factorConversion: 24,   stockActual: 0, stockMinimo: 36,   stockCritico: 18,   esEstimado: false, activo: true },
   // 10g por café base — bolsa de 1kg — ~25 cafés/día = ~250g/día estimado
   { id: "cafe",             nombre: "Cafe",                unidad: "g",        unidadCompra: "bolsa",   factorConversion: 1000, stockActual: 0, stockMinimo: 800,  stockCritico: 400,  esEstimado: true,  activo: true },
-  // Leche por ml, compra por L (1000ml) — leche normal ~15 bebidas×150ml=2250ml/día estimado
-  { id: "leche-normal",     nombre: "Leche entera",        unidad: "ml",       unidadCompra: "L",       factorConversion: 1000, stockActual: 0, stockMinimo: 6750, stockCritico: 3375, esEstimado: true,  activo: true },
+  // Leche por ml, y se cuenta por botella de 1 L (1000 ml): mentalmente una
+  // botella ES un litro, asi que el envase se llama como se lo nombra en el
+  // mostrador, no como lo factura el proveedor (que puede traer cajas de 6).
+  { id: "leche-normal",     nombre: "Leche entera",        unidad: "ml",       unidadCompra: "botella", factorConversion: 1000, stockActual: 0, stockMinimo: 6750, stockCritico: 3375, esEstimado: true,  activo: true },
   // Leche avena ~5 bebidas/día = 750ml/día estimado
-  { id: "leche-avena",      nombre: "Leche de avena",      unidad: "ml",       unidadCompra: "L",       factorConversion: 1000, stockActual: 0, stockMinimo: 2250, stockCritico: 1125, esEstimado: true,  activo: true },
+  { id: "leche-avena",      nombre: "Leche de avena",      unidad: "ml",       unidadCompra: "botella", factorConversion: 1000, stockActual: 0, stockMinimo: 2250, stockCritico: 1125, esEstimado: true,  activo: true },
   // Leche sin lactosa ~5 bebidas/día = 750ml/día estimado
-  { id: "leche-sin-lactosa",nombre: "Leche sin lactosa",   unidad: "ml",       unidadCompra: "L",       factorConversion: 1000, stockActual: 0, stockMinimo: 2250, stockCritico: 1125, esEstimado: true,  activo: true },
+  { id: "leche-sin-lactosa",nombre: "Leche sin lactosa",   unidad: "ml",       unidadCompra: "botella", factorConversion: 1000, stockActual: 0, stockMinimo: 2250, stockCritico: 1125, esEstimado: true,  activo: true },
   // Dulce de leche — mini-croissant-ddl ~15/día × 20g = 300g/día estimado
   { id: "dulce-de-leche",   nombre: "Dulce de leche",      unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 900,  stockCritico: 450,  esEstimado: true,  activo: false }
 ];
@@ -596,17 +604,26 @@ export const initialProducts = [
   }
 ];
 
-export const PROVEEDORES_SEED_VERSION = 5;
+export const PROVEEDORES_SEED_VERSION = 6;
+
+// diasCiclo     = cada cuanto le hago un pedido a este proveedor
+// leadTimeDias  = cuanto tarda desde que lo pido hasta tenerlo en la puerta
+//                 (0 = cash&carry: vas y traes). Son dos cosas independientes;
+//                 mezclarlas hacia que la lista de compras pidiera de menos.
+// diasEntrega   = dias fijos de entrega, 0=domingo..6=sabado. null = cualquier dia.
+//
+// OJO: los lead time son SUPUESTOS, sin confirmar con el dueño todavia. Son el
+// dato con mas peso del modelo: deciden cuanto se pide de cada cosa.
 
 export const initialProveedores = [
-  { id: "mercadona",         nombre: "Mercadona",               tel: "800 500 220",   email: "",                           notas: "Pedido online. Entrega mart/mier/vier aprox. Pago tarjeta domiciliada.",              diasCiclo: 3,  activo: true },
-  { id: "tropicalia",        nombre: "Tropicalia",              tel: "963346917",     email: "",                           notas: "Pan de miga congelado y reposteria argentina. Agente Gustavo: 654615630. Domiciliacion.", diasCiclo: 7,  activo: true },
-  { id: "reyunos",           nombre: "Los Reyunos",             tel: "916852999",     email: "comercial@losreyunos.es",    notas: "Pan de miga. Mas barato que Tropicalia. Pago transferencia.",                        diasCiclo: 14, activo: true },
-  { id: "jasa",              nombre: "JASA Alimentacion",       tel: "963961386",     email: "",                           notas: "Jamon y congelados. Agente Sara Bonilla. Giro 7 dias. jasaalimentacion.com",          diasCiclo: 7,  activo: true },
-  { id: "kaffetto",          nombre: "Kaffetto Coffee Roasters",tel: "611876699",     email: "contacto@kaffetto.es",       notas: "Cafe specialty. Pago transferencia.",                                                diasCiclo: 30, activo: true },
-  { id: "makro",             nombre: "Makro (Albuixech)",       tel: "961400616",     email: "",                           notas: "Lacteos, siropes, varios. Gestora: Cristina Vano. Pago efectivo a entrega.",          diasCiclo: 14, activo: true },
-  { id: "delicias-vegetales",nombre: "Delicias Vegetales",      tel: "",              email: "unodemigavalencia@gmail.com",notas: "Verdura ecologica. Orihuela. Pago tarjeta. Envio gratis.",                           diasCiclo: 7,  activo: true },
-  { id: "pampa",             nombre: "Pampa Drugstore",         tel: "666085041",     email: "",                           notas: "Reposteria argentina. Barcelona. Mas caro que Tropicalia para alfajores. Pago tarjeta.", diasCiclo: 30, activo: true }
+  { id: "mercadona",         nombre: "Mercadona",               tel: "800 500 220",   email: "",                           notas: "Pedido online. Entrega mart/mier/vier aprox. Pago tarjeta domiciliada.",              diasCiclo: 3,  leadTimeDias: 2, diasEntrega: [2, 3, 5], activo: true },
+  { id: "tropicalia",        nombre: "Tropicalia",              tel: "963346917",     email: "",                           notas: "Pan de miga congelado y reposteria argentina. Agente Gustavo: 654615630. Domiciliacion.", diasCiclo: 7,  leadTimeDias: 3, diasEntrega: null, activo: true },
+  { id: "reyunos",           nombre: "Los Reyunos",             tel: "916852999",     email: "comercial@losreyunos.es",    notas: "Pan de miga. Mas barato que Tropicalia. Pago transferencia.",                        diasCiclo: 14, leadTimeDias: 5, diasEntrega: null, activo: true },
+  { id: "jasa",              nombre: "JASA Alimentacion",       tel: "963961386",     email: "",                           notas: "Jamon y congelados. Agente Sara Bonilla. Giro 7 dias. jasaalimentacion.com",          diasCiclo: 7,  leadTimeDias: 2, diasEntrega: null, activo: true },
+  { id: "kaffetto",          nombre: "Kaffetto Coffee Roasters",tel: "611876699",     email: "contacto@kaffetto.es",       notas: "Cafe specialty. Pago transferencia.",                                                diasCiclo: 30, leadTimeDias: 4, diasEntrega: null, activo: true },
+  { id: "makro",             nombre: "Makro (Albuixech)",       tel: "961400616",     email: "",                           notas: "Lacteos, siropes, varios. Gestora: Cristina Vano. Pago efectivo a entrega.",          diasCiclo: 14, leadTimeDias: 0, diasEntrega: null, activo: true },
+  { id: "delicias-vegetales",nombre: "Delicias Vegetales",      tel: "",              email: "unodemigavalencia@gmail.com",notas: "Verdura ecologica. Orihuela. Pago tarjeta. Envio gratis.",                           diasCiclo: 7,  leadTimeDias: 2, diasEntrega: null, activo: true },
+  { id: "pampa",             nombre: "Pampa Drugstore",         tel: "666085041",     email: "",                           notas: "Reposteria argentina. Barcelona. Mas caro que Tropicalia para alfajores. Pago tarjeta.", diasCiclo: 30, leadTimeDias: 4, diasEntrega: null, activo: true }
 ];
 
 // cantidadPorUnidad = cuanto insumo (en su unidad base) hay por unidadCompra

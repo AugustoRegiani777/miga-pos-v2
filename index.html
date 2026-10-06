@@ -22,6 +22,14 @@
   <!-- Aviso de "sin conexion": lo maneja app.js (setupSyncBadge). Mientras
        esta visible, todo lo que se hace queda guardado en este dispositivo y
        sube solo al volver internet. -->
+  <!-- Avisos de pedidos: el resumen del dia al abrir la app, y "falta una
+       hora" antes de cada entrega (ver avisos-pedidos.js). -->
+  <div class="aviso-pedidos" id="aviso-pedidos" role="status" hidden>
+    <span id="aviso-pedidos-texto"></span>
+    <button type="button" class="aviso-pedidos-ver" id="aviso-pedidos-ver">Ver pedidos</button>
+    <button type="button" class="aviso-pedidos-cerrar" id="aviso-pedidos-cerrar" aria-label="Cerrar aviso">✕</button>
+  </div>
+
   <div class="offline-banner" id="offline-banner" role="status" hidden>
     Sin conexión — lo que hagas se guarda en este dispositivo y se sincroniza solo cuando vuelva internet.
   </div>
@@ -48,10 +56,13 @@
       <button class="nav-link active" type="button" data-view="caja">Caja</button>
       <button class="nav-link" type="button" data-view="pedidos">Pedidos</button>
       <button class="nav-link" type="button" data-view="produccion">Produccion</button>
-      <button class="nav-link" type="button" data-view="historial">Historial</button>
       <button class="nav-link" type="button" data-view="gestion">Gestión</button>
+      <button class="nav-link" type="button" data-view="historial">Historial</button>
+      <button class="nav-link" type="button" data-view="panel">Panel</button>
+      <button class="nav-link" type="button" data-view="cierre">Cierre</button>
     </nav>
     <div class="topbar-actions">
+      <button class="novedades-badge" type="button" id="novedades-badge" hidden></button>
       <button class="sync-status-badge" type="button" id="sync-status-badge" hidden></button>
       <button class="ghost-button compact" type="button" id="logout-button">Cerrar sesión</button>
     </div>
@@ -93,9 +104,14 @@
             <strong>Insumo</strong>
             <small>Stock calculado: —</small>
           </div>
+          <p class="form-instruccion">Pesá o contá lo que hay de verdad y anotalo acá. Si no coincide con lo calculado, el sistema aprende y ajusta solo cuánto consume cada producto.</p>
           <label class="quantity-field">
-            <span id="calibracion-label">Stock real que contas</span>
-            <input id="calibracion-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+            <span id="calibracion-label">Stock real que contás</span>
+            <div class="campo-con-unidad">
+              <input id="calibracion-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+              <select class="selector-unidad" id="calibracion-unidad" aria-label="Unidad"></select>
+            </div>
+            <small id="calibracion-equivale" class="campo-equivale"></small>
           </label>
           <div id="calibracion-receta-settings"></div>
         </div>
@@ -140,7 +156,11 @@
               <span>Total</span>
               <strong id="cart-total">0,00 EUR</strong>
             </div>
-            <div class="cart-vuelto">
+            <div class="pago-forma" role="group" aria-label="Forma de pago">
+              <button type="button" class="pago-forma-button active" id="pago-forma-efectivo" data-forma="efectivo" aria-pressed="true">💵 Efectivo</button>
+              <button type="button" class="pago-forma-button" id="pago-forma-tarjeta" data-forma="tarjeta" aria-pressed="false">💳 Tarjeta</button>
+            </div>
+            <div class="cart-vuelto" id="cart-vuelto">
               <label for="pago-con">Pago con
                 <input type="number" step="any" inputmode="decimal" id="pago-con" placeholder="0,00">
               </label>
@@ -190,6 +210,7 @@
           </div>
 
           <div class="sheet-scroll-body">
+            <p class="form-instruccion">Un encargo de un cliente para una fecha y hora. El stock se descuenta recién cuando lo marcás listo, no ahora.</p>
             <div id="pedido-product-picker" class="category-stack"></div>
 
             <label class="quantity-field">
@@ -245,6 +266,7 @@
       <section class="form-section production-sheet" id="production-sheet" aria-hidden="true">
         <form id="production-form" class="stock-form" novalidate>
           <div class="production-sheet-header">
+            <p class="form-instruccion">Cuánto saliste a hacer de este producto. Al guardar se descuentan sus insumos según la receta.</p>
             <div>
               <h2>Cargar produccion</h2>
               <p>Toca guardar para sumar o restar stock del producto elegido.</p>
@@ -294,6 +316,7 @@
             <button type="button" class="ghost-button compact" id="close-stock-adjust" aria-label="Cerrar">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
+            <p class="form-instruccion">Corregí el stock cuando no coincide con lo que hay en vitrina. Elegí el motivo: eso decide si cuenta como pérdida o como corrección de lo producido.</p>
             <div class="production-selected-box" id="stock-adjust-selected-box">
               <strong>Selecciona un producto</strong>
               <small>Stock actual: 0</small>
@@ -363,18 +386,58 @@
 
       <p id="history-production-text" class="history-summary">Cantidad de produccion del dia: 0 sandwiches.</p>
 
-      <section class="backup-panel" id="historial-backup-panel">
-        <div>
-          <h2>Exportacion local</h2>
-          <p>Exporta el cierre del dia en TXT (para imprimir/compartir) o JSON (para analisis de datos).</p>
-        </div>
-        <div class="backup-actions">
-          <button class="ghost-button" type="button" id="export-sales-summary">Ver resumen</button>
-          <button class="ghost-button" type="button" id="export-sales-json">Exportar JSON</button>
-        </div>
+      <section class="history-list" id="history-list"></section>
+    </section>
+
+    <section class="view" id="view-panel" aria-labelledby="panel-title">
+      <section class="section-heading">
+        <h1 id="panel-title">Panel</h1>
+        <p>Cómo va el local: ventas, horarios pico y stock, siempre desde la nube.</p>
       </section>
 
-      <section class="backup-panel resumen-preview" id="resumen-preview" hidden>
+      <div class="panel-toolbar">
+        <button class="ghost-button compact" type="button" id="panel-prev" aria-label="Día anterior">‹</button>
+        <input type="date" id="panel-date" aria-label="Fecha">
+        <button class="ghost-button compact" type="button" id="panel-next" aria-label="Día siguiente">›</button>
+        <button class="ghost-button compact" type="button" id="panel-hoy">Hoy</button>
+        <button class="ghost-button compact" type="button" id="panel-refresh">↻ Actualizar</button>
+      </div>
+
+      <div id="panel-root" class="panel-root" aria-live="polite"></div>
+    </section>
+
+    <section class="view" id="view-cierre" aria-labelledby="cierre-title">
+      <section class="section-heading">
+        <h1 id="cierre-title">Cierre de caja</h1>
+        <p>Tarjeta del cierre de Postnet, efectivo contado, y cuánto debería haber en el cajón.</p>
+      </section>
+
+      <div class="panel-toolbar">
+        <button class="ghost-button compact" type="button" id="cierre-prev" aria-label="Día anterior">&lsaquo;</button>
+        <input type="date" id="cierre-date" aria-label="Fecha del cierre">
+        <button class="ghost-button compact" type="button" id="cierre-next" aria-label="Día siguiente">&rsaquo;</button>
+        <button class="ghost-button compact" type="button" id="cierre-hoy">Hoy</button>
+      </div>
+
+      <section class="cierre-export" aria-label="Resumen y exportación del día">
+        <strong class="cierre-export-title">Resumen del día</strong>
+        <div class="cierre-export-actions">
+          <button class="ghost-button compact" type="button" id="export-sales-summary">Ver resumen</button>
+          <button class="ghost-button compact" type="button" id="export-sales-json">Exportar JSON</button>
+        </div>
+        <details class="cierre-periodo" id="historial-rango-panel">
+          <summary>Exportar varios días, o todo</summary>
+          <form class="cierre-periodo-form" id="historial-rango-form" novalidate>
+            <label>Desde <input type="date" id="historial-rango-desde" required></label>
+            <label>Hasta <input type="date" id="historial-rango-hasta" required></label>
+            <button class="ghost-button compact" type="submit">Descargar ZIP</button>
+          </form>
+          <p class="cierre-nota">Respaldo completo: todo lo que este dispositivo tiene guardado, en un solo archivo. Para guardar por las dudas — la nube ya es la copia principal.</p>
+          <button class="ghost-button compact" type="button" id="export-backup-completo">Descargar respaldo completo</button>
+        </details>
+      </section>
+
+      <section class="panel-card resumen-preview" id="resumen-preview" hidden>
         <div class="resumen-preview-header">
           <h2>Resumen del día</h2>
           <div class="backup-actions">
@@ -385,25 +448,7 @@
         <pre id="resumen-preview-text" class="resumen-preview-text"></pre>
       </section>
 
-      <section class="backup-panel" id="historial-rango-panel">
-        <div>
-          <h2>Exportar por periodo</h2>
-          <p>Descarga un TXT de cierre por cada dia del rango, todos juntos en un ZIP.</p>
-        </div>
-        <form class="date-filter" id="historial-rango-form" novalidate>
-          <label>
-            Desde
-            <input type="date" id="historial-rango-desde" required>
-          </label>
-          <label>
-            Hasta
-            <input type="date" id="historial-rango-hasta" required>
-          </label>
-          <button class="ghost-button compact" type="submit">Descargar ZIP</button>
-        </form>
-      </section>
-
-      <section class="history-list" id="history-list"></section>
+      <div id="cierre-root" class="panel-root" aria-live="polite"></div>
     </section>
 
     <section class="view" id="view-gestion" aria-labelledby="gestion-title">
@@ -414,17 +459,16 @@
       </section>
       <nav class="nav sub-nav" aria-label="Gestión">
         <button class="nav-link sub-nav-link active" type="button" data-subview="insumos">Insumos</button>
-        <button class="nav-link sub-nav-link" type="button" data-subview="calibrar">Calibrar</button>
-        <button class="nav-link sub-nav-link" type="button" data-subview="recetas">Recetas</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="proveedores">Proveedores</button>
-        <button class="nav-link sub-nav-link" type="button" data-subview="menu">Menu</button>
+        <button class="nav-link sub-nav-link sub-nav-sep" type="button" data-subview="menu">Menú</button>
+        <button class="nav-link sub-nav-link" type="button" data-subview="recetas">Recetas</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="variantes">Variantes</button>
       </nav>
 
       <section class="subview active" id="subview-insumos" aria-labelledby="insumos-title">
       <section class="section-heading">
         <h1 id="insumos-title">Insumos</h1>
-        <p>Stock de insumos, compras y lista de lo que falta.</p>
+        <p>Qué tenés en la despensa, qué falta pedir y qué llegó.</p>
       </section>
 
       <div id="calibracion-alert" hidden></div>
@@ -491,10 +535,18 @@
         </div>
       </section>
 
-      <section class="stock-toolbar">
-        <button class="ghost-button compact" type="button" id="ver-lista-compras">Lista de compras</button>
-        <button class="ghost-button compact" type="button" id="abrir-factura">Cargar por factura</button>
-        <button class="ghost-button compact" type="button" id="abrir-crear-insumo">+ Crear insumo</button>
+      <div id="aviso-ciclo" class="aviso-ciclo" hidden></div>
+
+      <section class="stock-toolbar stock-toolbar-ciclo">
+        <div class="toolbar-paso">
+          <span class="toolbar-paso-titulo">Antes de comprar</span>
+          <button class="ghost-button compact" type="button" id="ver-lista-compras">Qué pedir</button>
+        </div>
+        <div class="toolbar-paso">
+          <span class="toolbar-paso-titulo">Cuando llega</span>
+          <button class="ghost-button compact" type="button" id="abrir-factura">Cargar factura</button>
+          <button class="ghost-button compact" type="button" id="abrir-crear-insumo" title="Normalmente no hace falta: cargando la factura el insumo se crea solo, con su proveedor y precio">Insumo suelto</button>
+        </div>
       </section>
 
       <!-- Sheet: crear insumo suelto (sin producto ni proveedor asociado) -->
@@ -506,6 +558,7 @@
             <button type="button" class="ghost-button compact" id="close-crear-insumo">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
+            <p class="form-instruccion">Algo que comprás y consumís, con su stock propio. Si ya sabés a quién se lo comprás, cargalo desde Proveedores y se crea solo.</p>
             <label class="quantity-field">
               <span>Nombre</span>
               <input id="crear-insumo-nombre" type="text" required>
@@ -513,6 +566,15 @@
             <label class="quantity-field">
               <span>Unidad base (g, ml, unidad...)</span>
               <input id="crear-insumo-unidad" type="text">
+            </label>
+            <p class="form-instruccion">Y ahora, c&oacute;mo lo cont&aacute;s vos cuando lo mir&aacute;s en la estanter&iacute;a. No c&oacute;mo te lo factura el proveedor: eso se carga aparte, en Proveedores.</p>
+            <label class="quantity-field">
+              <span>&iquest;C&oacute;mo lo cont&aacute;s? <small>(botella, bolsa, pote, envase... dejalo vac&iacute;o si lo contas suelto)</small></span>
+              <input id="crear-insumo-envase" type="text" placeholder="botella">
+            </label>
+            <label class="quantity-field">
+              <span>&iquest;Cu&aacute;nto trae cada uno? <small>(en la unidad base)</small></span>
+              <input id="crear-insumo-envase-trae" type="number" min="0" step="any" inputmode="decimal" placeholder="1000">
             </label>
             <label class="quantity-field">
               <span>Stock minimo</span>
@@ -548,55 +610,18 @@
         </select>
       </label>
       <div class="stock-list" id="insumos-list"></div>
-    </section>
 
-    <section class="subview" id="subview-calibrar" aria-labelledby="calibrar-title">
-      <section class="section-heading">
-        <h1 id="calibrar-title">Calibracion</h1>
-        <p>Verificacion de stock real y ajuste del modelo de consumo por insumo.</p>
-      </section>
-      <div id="calibrar-list"></div>
-    </section>
-
-    <section class="subview" id="subview-recetas" aria-labelledby="recetas-title">
-      <section class="section-heading">
-        <h1 id="recetas-title">Recetas</h1>
-        <p>Ingredientes y cantidades por producto. Editá para corregir antes de que el modelo calibre solo.</p>
-      </section>
-
-      <section class="production-sheet-backdrop" id="receta-edit-backdrop" hidden></section>
-      <section class="form-section stock-adjust-sheet" id="receta-edit-sheet" aria-hidden="true">
-        <form id="receta-edit-form" class="stock-form" novalidate>
-          <div class="production-sheet-header">
-            <div>
-              <h2 id="receta-edit-title">Editar cantidad</h2>
-              <p id="receta-edit-context" class="cal-muted"></p>
-            </div>
-            <button type="button" class="ghost-button compact" id="close-receta-edit">Cerrar</button>
-          </div>
-          <div class="sheet-scroll-body">
-            <label class="quantity-field">
-              <span id="receta-edit-label">Cantidad por unidad</span>
-              <input id="receta-edit-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
-            </label>
-            <label class="quantity-field">
-              <span>Motivo del cambio <span class="cal-muted">(opcional)</span></span>
-              <input id="receta-edit-motivo" type="text" placeholder="ej: decisión de calidad, ajuste de costos...">
-            </label>
-          </div>
-          <div class="sheet-footer">
-            <button class="primary-button" type="submit">Guardar</button>
-          </div>
-        </form>
-      </section>
-
-      <div id="recetas-list"></div>
+      <details class="gestion-seccion" id="seccion-calibracion">
+        <summary><strong>Calibración</strong> <span class="gestion-seccion-hint">— verificar consumo real de cada insumo</span></summary>
+        <p class="gestion-seccion-nota">Contá el stock real de un insumo y el sistema corrige solo cuánto calcula que gastás. Cuanto más lo hagas, más finas quedan las <strong>Recetas</strong>.</p>
+        <div id="calibrar-list"></div>
+      </details>
     </section>
 
     <section class="subview" id="subview-proveedores" aria-labelledby="proveedores-title">
       <section class="section-heading">
         <h1 id="proveedores-title">Proveedores</h1>
-        <p>Directorio de proveedores con precios extraidos de facturas reales.</p>
+        <p>A quién le comprás cada insumo, a qué precio y cada cuánto. Define la lista de compras de <strong>Insumos</strong>.</p>
         <button type="button" class="ghost-button compact" id="prov-add-nuevo">+ Agregar proveedor</button>
       </section>
 
@@ -609,6 +634,7 @@
             <button type="button" class="ghost-button compact" id="close-prov-edit">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
+            <p class="form-instruccion">Estos datos deciden cuánto te va a decir la app que compres. Los dos de abajo son distintos: uno es cada cuánto <em>pedís</em>, el otro cuánto <em>tarda en llegar</em>.</p>
             <label class="quantity-field">
               <span>Nombre</span>
               <input id="prov-edit-nombre" type="text" required>
@@ -626,9 +652,41 @@
               <textarea id="prov-edit-notas" class="comment-textarea" rows="3"></textarea>
             </label>
             <label class="quantity-field">
-              <span>Dias entre pedidos</span>
+              <span>&iquest;Cada cu&aacute;ntos d&iacute;as le ped&iacute;s?</span>
               <input id="prov-edit-dias" type="number" min="1" step="1" inputmode="numeric">
             </label>
+
+            <label class="quantity-field">
+              <span>&iquest;Cu&aacute;ntos d&iacute;as tarda en llegar?</span>
+              <input id="prov-edit-lead" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
+            </label>
+            <p class="campo-ayuda">
+              Desde que hac&eacute;s el pedido hasta que lo ten&eacute;s en la puerta.
+              Mir&aacute; tus &uacute;ltimos 3 o 4 pedidos y cont&aacute; los d&iacute;as de <strong>calendario</strong>,
+              fines de semana incluidos: si ped&iacute;s viernes y llega lunes, son 3 d&iacute;as, no 1.
+              <strong>Si var&iacute;a, pon&eacute; el m&aacute;s largo</strong>, no el promedio &mdash; que te sobre cuesta
+              un poco de plata quieta, que te falte cuesta no tener qu&eacute; vender.
+              Si vas y lo tra&eacute;s vos, pon&eacute; <strong>0</strong>.
+            </p>
+
+            <div class="quantity-field">
+              <span>&iquest;Entrega d&iacute;as fijos?</span>
+              <div class="dias-entrega-btns" id="prov-edit-entrega">
+                <button type="button" class="dia-btn" data-dia="1">L</button>
+                <button type="button" class="dia-btn" data-dia="2">M</button>
+                <button type="button" class="dia-btn" data-dia="3">M</button>
+                <button type="button" class="dia-btn" data-dia="4">J</button>
+                <button type="button" class="dia-btn" data-dia="5">V</button>
+                <button type="button" class="dia-btn" data-dia="6">S</button>
+                <button type="button" class="dia-btn" data-dia="0">D</button>
+              </div>
+            </div>
+            <p class="campo-ayuda">
+              Solo si entrega d&iacute;as fijos de la semana. Si no toc&aacute;s ninguno, se asume que puede
+              entregar cualquier d&iacute;a. Importa porque cambia cu&aacute;nto hay que cubrir de verdad:
+              si hoy es jueves y entrega mar/mi&eacute;/vie, lo de hoy llega el viernes, pero lo siguiente
+              no llega hasta el martes.
+            </p>
           </div>
           <div class="sheet-footer">
             <button class="primary-button" type="submit">Guardar cambios</button>
@@ -636,28 +694,29 @@
         </form>
       </section>
 
-      <!-- Sheet: agregar / editar producto de proveedor -->
+      <!-- Sheet: agregar / editar un insumo del catalogo de un proveedor -->
       <section class="production-sheet-backdrop" id="prov-prod-backdrop" hidden></section>
       <section class="form-section stock-adjust-sheet" id="prov-prod-sheet" aria-hidden="true">
         <form id="prov-prod-form" class="stock-form" novalidate>
           <div class="production-sheet-header">
             <div>
-              <h2 id="prov-prod-title">Agregar producto</h2>
+              <h2 id="prov-prod-title">Agregar insumo</h2>
               <p id="prov-prod-context" class="cal-muted"></p>
             </div>
             <button type="button" class="ghost-button compact" id="close-prov-prod">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
+            <p class="form-instruccion">Lo que te vende este proveedor y a qué precio. Sirve para comparar entre proveedores y para que la lista de compras sepa cuánto pedir.</p>
             <label class="quantity-field">
-              <span>Nombre del producto (como en factura)</span>
+              <span>Nombre en la factura <span class="cal-muted">(como lo escribe el proveedor)</span></span>
               <input id="prov-prod-nombre" type="text" required>
             </label>
             <label class="quantity-field">
-              <span>Unidad de compra (ej: kg, caja, bolsa, pack)</span>
+              <span>&iquest;C&oacute;mo te lo factura? <small>(la unidad del proveedor: kg, caja, pack...)</small></span>
               <input id="prov-prod-unidad" type="text" placeholder="kg, caja, bolsa..." required>
             </label>
             <label class="quantity-field">
-              <span>Insumo vinculado <span class="cal-muted">(opcional)</span></span>
+              <span>¿Qué insumo es? <span class="cal-muted">(el que usás y del que llevás stock)</span></span>
               <select id="prov-prod-insumo"></select>
             </label>
             <div id="prov-prod-nuevo-insumo-fields" hidden>
@@ -703,8 +762,8 @@
 
       <section class="subview" id="subview-menu" aria-labelledby="menu-title">
         <section class="section-heading">
-          <h1 id="menu-title">Menu</h1>
-          <p>Productos que aparecen en caja y produccion, agrupados por categoria.</p>
+          <h1 id="menu-title">Menú</h1>
+          <p>Qué vendés: productos, precios y promos por cantidad. La receta de cada uno se edita en <strong>Recetas</strong>.</p>
         </section>
 
         <!-- Sheet: alta / edicion de producto -->
@@ -718,6 +777,7 @@
               <button type="button" class="ghost-button compact" id="close-menu-edit">Cerrar</button>
             </div>
             <div class="sheet-scroll-body">
+              <p class="form-instruccion">Una unidad de venta tuya: lo que se toca en Caja. Abajo cargás de qué insumos está hecha una unidad.</p>
               <label class="quantity-field">
                 <span>Nombre</span>
                 <input id="menu-edit-nombre" type="text" required>
@@ -756,30 +816,109 @@
                 </select>
               </label>
 
-              <div class="section-heading" style="margin-top: 1rem;">
-                <h2 style="font-size: 1rem;">Receta</h2>
-                <p class="cal-muted">Insumos que consume una unidad de este producto.</p>
+              <div class="section-heading seccion-con-link" style="margin-top: 1rem;">
+                <div>
+                  <h2 style="font-size: 1rem;">Receta</h2>
+                  <p class="cal-muted">Insumos que consume una unidad de este producto.</p>
+                </div>
+                <button type="button" class="link-cruzado" id="ir-a-recetas" title="Es la misma receta que ves en la sección Recetas">Ver en Recetas →</button>
               </div>
               <div id="menu-receta-rows"></div>
               <button type="button" class="ghost-button compact" id="menu-add-receta-row">+ Agregar insumo</button>
             </div>
             <div class="sheet-footer">
               <button class="primary-button" type="submit">Guardar</button>
+              <!-- Separado de Guardar a proposito (abajo, chico, alineado a la
+                   derecha) y oculto en el alta: solo aparece al editar un
+                   producto que ya existe. type="button" es obligatorio, sin
+                   eso el navegador lo trata como submit del formulario
+                   (CLAUDE.md 8.6). 48px de alto para el dedo en la tablet. -->
+              <div id="menu-edit-eliminar-wrap" hidden style="text-align: right; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line);">
+                <button class="ghost-button" type="button" id="menu-edit-eliminar"
+                        style="min-height: 48px; min-width: 48px; padding: 0 16px; color: var(--out); border-color: var(--out); font-size: 0.85rem;"
+                        title="Eliminar este producto definitivamente"
+                        aria-label="Eliminar este producto definitivamente">
+                  Eliminar
+                </button>
+              </div>
             </div>
           </form>
         </section>
 
+        <section class="panel-card" id="menu-combos-panel">
+          <h2>Promos por cantidad</h2>
+          <p class="cierre-nota">Descuento que se aplica solo en Caja cuando el carrito llega a 6 o 12 sandwiches (docena / media docena). El extra "de la casa" es por cada sandwich premium que entra en esa promo.</p>
+          <div class="cierre-form">
+            <label class="quantity-field">
+              <span>Precio de la docena (12 sandwiches, EUR)</span>
+              <input id="menu-combo-docena" type="number" min="0" step="0.01" inputmode="decimal" placeholder="34.00">
+            </label>
+            <label class="quantity-field">
+              <span>Precio de la media docena (6 sandwiches, EUR)</span>
+              <input id="menu-combo-media" type="number" min="0" step="0.01" inputmode="decimal" placeholder="19.00">
+            </label>
+            <label class="quantity-field">
+              <span>Extra por sandwich "de la casa" en la promo (EUR)</span>
+              <input id="menu-combo-premium" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.30">
+            </label>
+          </div>
+          <button type="button" class="ghost-button compact" id="menu-combos-guardar">Guardar promos</button>
+          <p class="cierre-nota" id="menu-combos-status" hidden></p>
+        </section>
+
         <div id="menu-list"></div>
+
+
       </section>
 
+      <section class="subview" id="subview-recetas" aria-labelledby="recetas-title">
+        <section class="section-heading">
+          <h1 id="recetas-title">Recetas</h1>
+          <p>De qué está hecho cada producto: cuánto insumo consume una unidad.</p>
+        </section>
+
+      <section class="production-sheet-backdrop" id="receta-edit-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="receta-edit-sheet" aria-hidden="true">
+        <form id="receta-edit-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div>
+              <h2 id="receta-edit-title">Editar cantidad</h2>
+              <p id="receta-edit-context" class="cal-muted"></p>
+            </div>
+            <button type="button" class="ghost-button compact" id="close-receta-edit">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <p class="form-instruccion">Cuánto de este insumo lleva UNA unidad del producto. Si lo corregís a mano, el sistema deja de estimarlo y usa tu número.</p>
+            <label class="quantity-field">
+              <span id="receta-edit-label">Cantidad por unidad</span>
+              <div class="campo-con-unidad">
+                <input id="receta-edit-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+                <select class="selector-unidad" id="receta-edit-unidad" aria-label="Unidad"></select>
+              </div>
+              <small id="receta-edit-equivale" class="campo-equivale"></small>
+            </label>
+            <label class="quantity-field">
+              <span>Motivo del cambio <span class="cal-muted">(opcional)</span></span>
+              <input id="receta-edit-motivo" type="text" placeholder="ej: decisión de calidad, ajuste de costos...">
+            </label>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar</button>
+          </div>
+        </form>
+      </section>
+
+        <div class="recetas-cuerpo">
+          <div id="recetas-list"></div>
+        </div>
+
+      </section>
       <section class="subview" id="subview-variantes" aria-labelledby="variantes-title">
         <section class="section-heading">
           <h1 id="variantes-title">Variantes</h1>
-          <p>Grupos de opciones a elegir en caja (ej: tipo de leche) — que insumo descuenta cada opcion y en que productos aparece.</p>
-          <button type="button" class="ghost-button compact" id="variante-add-grupo">+ Agregar grupo de variante</button>
+          <p>Una variante es una receta condicional: según la opción que se elija en caja, se descuenta un insumo u otro. Por eso viven acá.</p>
         </section>
 
-        <!-- Sheet: agregar / editar grupo de variante -->
         <section class="production-sheet-backdrop" id="variante-grupo-backdrop" hidden></section>
         <section class="form-section stock-adjust-sheet" id="variante-grupo-sheet" aria-hidden="true">
           <form id="variante-grupo-form" class="stock-form" novalidate>
@@ -788,6 +927,8 @@
               <button type="button" class="ghost-button compact" id="close-variante-grupo">Cerrar</button>
             </div>
             <div class="sheet-scroll-body">
+              <p class="form-instruccion">Una pregunta que hace la caja antes de sumar el producto al carrito. Ejemplo: "Tipo de leche" con las opciones Entera, Avena y Sin lactosa — cada opción descuenta su propio insumo.</p>
+              <button type="button" class="link-cruzado" id="ir-a-insumos-desde-variantes">Ver los insumos →</button>
               <label class="quantity-field">
                 <span>Nombre del grupo (ej: Tipo de leche)</span>
                 <input id="variante-grupo-nombre" type="text" required>
@@ -816,8 +957,13 @@
           </form>
         </section>
 
-        <div id="variantes-grupos-list"></div>
+
+          <button type="button" class="ghost-button compact" id="variante-add-grupo">+ Agregar grupo de variante</button>
+          <div id="variantes-grupos-list"></div>
       </section>
+
+
+
     </section>
   </main>
 
@@ -846,16 +992,18 @@
           <button type="button" class="ghost-button compact active" id="insumo-tipo-compra">Compra</button>
           <button type="button" class="ghost-button compact" id="insumo-tipo-ajuste">Ajuste manual</button>
         </div>
+        <p class="form-instruccion" id="insumos-ajuste-instruccion">Llegó mercadería: anotá cuánto entró y se suma al stock.</p>
         <label class="quantity-field" id="insumos-compra-field">
           <span id="insumos-compra-label">Cantidad recibida</span>
           <input id="insumos-compra-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+          <small id="insumos-compra-equivale" class="campo-equivale"></small>
         </label>
         <div id="insumos-ajuste-field" hidden>
           <div class="insumo-stepper">
             <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-minus">−</button>
             <div class="insumo-stepper-center">
               <input id="insumos-ajuste-cantidad" type="number" min="0" step="any" inputmode="decimal">
-              <span class="insumo-stepper-unit" id="insumos-ajuste-unidad">g</span>
+              <select class="insumo-stepper-unit selector-unidad" id="insumos-ajuste-unidad" aria-label="Unidad"></select>
             </div>
             <button type="button" class="ghost-button stepper-btn" id="insumos-ajuste-plus">+</button>
           </div>

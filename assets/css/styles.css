@@ -63,7 +63,7 @@ button {
 }
 
 .brand {
-  color: var(--primary);
+  color: var(--ink);
   font-size: 1.25rem;
   font-weight: 800;
   text-decoration: none;
@@ -536,6 +536,31 @@ button {
 
 .cart-total strong {
   font-size: 2rem;
+}
+
+.pago-forma {
+  display: flex;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.pago-forma-button {
+  flex: 1 1 0;
+  min-height: var(--tap);
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pago-forma-button.active {
+  border-color: var(--primary-2);
+  background: var(--primary-2);
+  color: #ffffff;
 }
 
 .cart-vuelto {
@@ -2639,4 +2664,891 @@ details[open] > .prov-summary::before {
   color: var(--accent);
   font-weight: 700;
   cursor: pointer;
+}
+
+/* ================= Panel (dashboard simple) ================= */
+.panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.panel-toolbar input[type="date"] {
+  min-height: 48px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.panel-toolbar .ghost-button {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+.panel-root {
+  display: grid;
+  gap: 14px;
+}
+
+.panel-aviso {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--low);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.panel-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.panel-kpi {
+  display: grid;
+  gap: 2px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.panel-kpi.is-main {
+  grid-column: 1 / -1;
+  border-color: var(--primary-2);
+}
+
+.panel-kpi-title {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.panel-kpi-value {
+  font-size: 1.9rem;
+  line-height: 1.15;
+}
+
+.panel-kpi.is-main .panel-kpi-value {
+  font-size: 2.4rem;
+}
+
+.panel-kpi-detail {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.panel-up { color: #4cc38a; font-weight: 800; }
+.panel-down { color: #ff7a66; font-weight: 800; }
+
+.panel-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.panel-card h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+
+.panel-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.panel-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.panel-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.panel-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.panel-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  height: 170px;
+}
+
+.panel-bar-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+}
+
+.panel-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary-2);
+}
+
+.panel-bar.is-peak,
+.panel-bar.is-selected {
+  background: var(--accent);
+}
+
+/* la pista ocupa el alto restante entre el numero de arriba y la etiqueta */
+.panel-bar-track {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+}
+
+.panel-bar-num,
+.panel-bar-label,
+.panel-bar-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.1;
+}
+
+.panel-bar-num { min-height: 0.8rem; color: var(--ink); font-weight: 700; }
+
+.panel-top {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.panel-top li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 2.2rem 4.8rem;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-top-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-top-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.panel-top-bar i {
+  display: block;
+  height: 100%;
+  background: var(--primary-2);
+}
+
+.panel-top li strong { text-align: right; }
+.panel-top li small { text-align: right; color: var(--muted); }
+
+.panel-two-cols {
+  display: grid;
+  gap: 16px;
+}
+
+.panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.panel-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--page);
+}
+
+.panel-list li small { flex-basis: 100%; color: var(--muted); }
+.panel-ok { color: #4cc38a; font-weight: 700; }
+.panel-insumo-negativo { border-left: 4px solid var(--out); }
+.panel-insumo-critico { border-left: 4px solid var(--accent); }
+.panel-insumo-bajo { border-left: 4px solid var(--low); }
+
+@media (min-width: 700px) {
+  .panel-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .panel-kpi.is-main { grid-column: span 2; }
+  .panel-grid,
+  .panel-two-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ================= Cierre de caja ================= */
+.cierre-ventas {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.cierre-ventas div {
+  display: grid;
+  gap: 2px;
+}
+
+.cierre-ventas small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.cierre-ventas strong {
+  font-size: 1.7rem;
+}
+
+.cierre-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.cierre-check input {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.cierre-form {
+  display: grid;
+  gap: 12px;
+}
+
+.cierre-field {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.cierre-field > span {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.cierre-field small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.cierre-field input {
+  min-height: 52px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.15rem;
+}
+
+.cierre-field input[data-money] {
+  text-align: right;
+}
+
+.cierre-field input[aria-invalid="true"] {
+  border-color: var(--out);
+}
+
+.cierre-resultado {
+  display: grid;
+  gap: 6px;
+}
+
+.cierre-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.cierre-row.is-minus span,
+.cierre-row.is-minus strong {
+  color: var(--muted);
+}
+
+.cierre-row.is-sub,
+.cierre-row.is-total {
+  border-top: 1px solid var(--line);
+  font-size: 1.05rem;
+}
+
+.cierre-row.is-total strong {
+  font-size: 1.4rem;
+}
+
+.cierre-diff {
+  margin-top: 8px;
+  padding: 14px;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #ffffff;
+  background: var(--line);
+}
+
+.cierre-diff.is-ok { background: var(--ok); }
+.cierre-diff.is-chico { background: var(--low); }
+.cierre-diff.is-grande { background: var(--out); }
+.cierre-diff.is-pendiente { color: var(--muted); }
+
+.cierre-nota,
+.cierre-vigente {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.cierre-alerta {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--page);
+  border-left: 4px solid var(--low);
+  font-size: 0.9rem;
+}
+
+#cierre-guardar {
+  width: 100%;
+  margin-top: 14px;
+  min-height: 56px;
+  font-size: 1.1rem;
+}
+
+#cierre-guardar:disabled {
+  opacity: 0.45;
+}
+
+.cierre-historial {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.cierre-historial li {
+  display: grid;
+  grid-template-columns: 4rem 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--page);
+}
+
+.cierre-diff-mini {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.cierre-diff-mini.is-ok { background: var(--ok); }
+.cierre-diff-mini.is-chico { background: var(--low); }
+.cierre-diff-mini.is-grande { background: var(--out); }
+
+/* Exportacion del cierre: una tira compacta en vez de dos bloques grandes */
+.cierre-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.cierre-export-title {
+  font-size: 0.9rem;
+}
+
+.cierre-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cierre-export .ghost-button.compact {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 0.85rem;
+}
+
+.cierre-periodo {
+  flex: 1 0 100%;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.cierre-periodo summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.cierre-periodo-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  padding: 8px 0 2px;
+}
+
+.cierre-periodo-form label {
+  display: grid;
+  gap: 2px;
+  font-size: 0.8rem;
+}
+
+.cierre-periodo-form input[type="date"] {
+  min-height: 40px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--ink);
+  font: inherit;
+}
+
+@media (min-width: 700px) {
+  .cierre-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+  .cierre-field input { min-height: 48px; }
+}
+
+/* Aviso de cambios ENTRANTES (lo que hizo otro dispositivo y falta bajar).
+   Espejo de .sync-status-badge, que cuenta lo que falta SUBIR. */
+.novedades-badge {
+  min-height: 46px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary-2);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.novedades-badge:active {
+  opacity: 0.85;
+}
+
+.novedades-badge:disabled {
+  opacity: 0.6;
+}
+
+/* Gestion: las 6 subpestañas son en realidad DOS ciclos distintos —
+   la despensa (Insumos, Calibración, Proveedores) y el producto
+   (Menú, Recetas, Variantes). Esta linea marca donde empieza el segundo. */
+.sub-nav-sep {
+  border-left: 2px solid var(--line);
+  margin-left: 10px;
+  padding-left: 16px;
+}
+
+/* Secciones dentro de una pantalla de Gestion (ej. Calibracion dentro de
+   Insumos). Plegables: la pantalla queda completa pero se puede achicar. */
+.gestion-seccion {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 2px solid var(--line);
+}
+
+.gestion-seccion > summary {
+  cursor: pointer;
+  padding: 6px 0;
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.gestion-seccion-nota {
+  margin: 4px 0 14px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.gestion-seccion-hint {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.9rem;
+}
+
+/* Aviso de pedidos (resumen del dia / falta una hora). Arriba de todo, como
+   el cartel de "sin conexion", pero con color propio para que no se confunda
+   con un problema: esto es informacion util, no una falla. */
+.aviso-pedidos {
+  position: sticky;
+  top: 0;
+  z-index: 998;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--primary-2);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.aviso-pedidos > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aviso-pedidos-ver,
+.aviso-pedidos-cerrar {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.aviso-pedidos-cerrar {
+  min-width: 44px;
+  padding: 0 10px;
+}
+
+.aviso-pedidos-ver:active,
+.aviso-pedidos-cerrar:active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+@media (max-width: 600px) {
+  .aviso-pedidos { flex-wrap: wrap; font-size: 0.9rem; }
+  .aviso-pedidos > span { flex-basis: 100%; }
+}
+
+/* Instruccion corta arriba de un formulario: que hace esto, en una linea. */
+.form-instruccion {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--primary-2);
+  border-radius: 0 8px 8px 0;
+  background: var(--page);
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* "= 1,5 kg" debajo de un campo: confirma en cuanto quedo lo que se escribio. */
+.campo-equivale {
+  color: var(--muted);
+  font-size: 0.85rem;
+  min-height: 1.1em;
+}
+
+/* Selector de unidad al lado del campo (g/kg, ml/L). */
+.selector-unidad {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  padding: 0 6px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* Campo numerico con su selector de unidad al lado. */
+.campo-con-unidad {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.campo-con-unidad > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.campo-con-unidad > .selector-unidad {
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+
+/* Enlaces entre pantallas que hablan de lo mismo (ej. la receta dentro de un
+   producto y la seccion Recetas). Son el mismo dato: el enlace lo hace visible
+   en vez de dejar que parezcan cosas distintas. */
+.link-cruzado {
+  border: 1px solid var(--primary-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--primary-2);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 6px 14px;
+  min-height: 40px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.link-cruzado:active {
+  background: var(--primary-2);
+  color: #ffffff;
+}
+
+.seccion-con-link {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Reordenar arrastrando (ver src/ui/arrastrar-filas.js) */
+.celda-asa {
+  width: 44px;
+  padding-right: 0 !important;
+}
+
+.asa-orden {
+  width: 40px;
+  min-height: 44px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  letter-spacing: -2px;
+  cursor: grab;
+  /* Sin esto el navegador se queda el gesto para hacer scroll y el arrastre
+     nunca llega a dispararse con el dedo. */
+  touch-action: none;
+}
+
+.asa-orden:active { cursor: grabbing; color: var(--ink); }
+
+.fila-arrastrando {
+  position: relative;
+  z-index: 5;
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+}
+
+.fila-arrastrando td { background: var(--surface); }
+
+/* Mientras se arrastra, que no se seleccione texto ni aparezca el menu del
+   navegador al mantener apretado. */
+body.arrastrando-fila {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grabbing;
+}
+
+/* Barra de Insumos agrupada por momento del ciclo (que pedir / que llego) */
+.stock-toolbar-ciclo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  /* flex-start: con flex-end los titulitos de cada paso quedaban a distinta
+     altura cuando un grupo tiene mas botones que el otro. */
+  align-items: flex-start;
+}
+
+.toolbar-paso {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolbar-paso-titulo {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.toolbar-paso > .ghost-button {
+  margin-right: 6px;
+}
+
+/* Aviso de ciclo incompleto: insumos que entran pero nunca salen, o que no
+   tienen de donde comprarse. Que la deuda sea visible sin bloquear nada. */
+.aviso-ciclo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-left: 4px solid var(--low);
+  border-radius: 0 8px 8px 0;
+  background: var(--page);
+  font-size: 0.92rem;
+}
+
+.aviso-ciclo strong { color: var(--ink); }
+.aviso-ciclo-detalle { color: var(--muted); flex-basis: 100%; font-size: 0.86rem; }
+
+.aviso-ciclo-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  flex-basis: 100%;
+}
+
+/* Pendientes que se resuelven en el mismo aviso que los detecta */
+.aviso-ciclo { display: block; }
+
+.aviso-ciclo-resumen { margin: 0 0 12px; }
+
+.pendiente {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.pendiente-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pendiente-falta {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--low);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.pendiente-porque {
+  margin: 6px 0 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.pendiente-form {
+  display: grid;
+  gap: 10px;
+}
+
+.pendiente-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.pendiente-form small { font-weight: 400; color: var(--muted); }
+
+.pendiente-form input,
+.pendiente-form select {
+  min-height: 48px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--ink);
+  font: inherit;
+}
+
+.pendiente-error {
+  margin: 10px 0 0;
+  color: #ff7a66;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+@media (min-width: 700px) {
+  .pendiente-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+
+/* Texto de ayuda debajo de un campo: explica como se saca el dato, no que es.
+   Va aparte de .form-instruccion (que encabeza el formulario entero). */
+.campo-ayuda {
+  margin: -0.35rem 0 0.9rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* Dias fijos de entrega: siete botones que se prenden y apagan. Son toggles,
+   no un submit — en el HTML van con type="button" (si no, el form se envia al
+   tocarlos). 48px de lado para que se puedan tocar con el dedo en la tablet. */
+.dias-entrega-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.dias-entrega-btns .dia-btn {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 1px solid #d4dce5;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dias-entrega-btns .dia-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
 }
