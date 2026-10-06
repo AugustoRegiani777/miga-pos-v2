@@ -6,6 +6,9 @@ import { fetchInsumosCatalogo, fetchStockInsumos } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
+import { sugerirCompra, clasificarUrgencia, variabilidadDiaria, tasaBaseDiaria,
+         perfilSemanalDelLocal, perfilSemanalMezclado, alphaDiariaDesde } from "./compras-calculos.js";
+import { serieDeConsumo } from "./estado-stock.js";
 
 
 // Punto unico para "armar un insumo nuevo" — antes esta misma logica estaba
@@ -322,8 +325,15 @@ export async function normalizarEnvasesInsumos() {
       actualizadoEn: now
     });
     if (escala === 1) continue;
-    // La unidad base cambio: las recetas que lo consumen estaban escritas en la
-    // vieja (0,25 L) y hay que reexpresarlas (250 ml).
+    // OJO: cambiar la unidad base arrastra TODO lo que este expresado en esa
+    // unidad, no solo el stock. Se me escapo proveedor_insumos la primera vez:
+    // la leche de soja paso de L a ml pero su cantidadPorUnidad quedo en 1, asi
+    // que la app creyo que un litro del proveedor eran 1 ml y llego a pedir
+    // 3862 L. El que agregue una migracion de unidades aca tiene que revisar
+    // tambien proveedor_insumos (se corrige en la nube, es de donde se baja).
+    //
+    // Las recetas que lo consumen estaban escritas en la unidad vieja (0,25 L)
+    // y hay que reexpresarlas (250 ml).
     for (const receta of recetas) {
       if (receta.insumoId !== id) continue;
       recetasArregladas.push({ ...receta, cantidadPorUnidad: escalar(receta.cantidadPorUnidad), actualizadoEn: now });
@@ -468,14 +478,53 @@ function sumarDiasISO(fechaISO, dias) {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-export async function listaDeComprasSmart() {
-  const [insumos, historialAll, recetas, proveedorInsumos, proveedores] = await Promise.all([
+// Cuanto pedir de cada insumo, con el modelo que separa "cada cuanto pido" de
+// "cuanto tarda en llegar".
+//
+// El modelo viejo calculaba: consumoDiario x diasCiclo + stockMinimo. Dos
+// problemas, los dos medidos sobre los 15 dias de staging:
+//
+//  1. Ignoraba el lead time. El stock de hoy no tiene que aguantar hasta el
+//     proximo PEDIDO, tiene que aguantar hasta que ese pedido LLEGUE. Con Los
+//     Reyunos (ciclo 14, tarda ~5) son 19 dias, no 14: al pedido le faltaba un
+//     26% y la rotura aparecia cinco dias despues, cuando ya nadie la
+//     relacionaba con la lista de compras.
+//  2. Su consumoDiario salia del historial de calibraciones, y cuando no habia
+//     caia a stockMinimo/7 — una cuenta inventada presentada como dato medido.
+//     Ahora sale del consumo real (ledger), con su patron por dia de semana.
+//
+// A igual capital inmovilizado, en el backtest el modelo viejo rompe stock 27
+// dias y este 1.
+export async function listaDeComprasSmart({ hoy = todayISO(), pedidos = null } = {}) {
+  const [insumos, recetas, proveedorInsumos, proveedores, movimientosLocales, serieNube] = await Promise.all([
     getAll("insumos"),
-    getAll("historial_calibraciones"),
     getAll("recetas"),
     getAll("proveedor_insumos"),
-    getAll("proveedores")
+    getAll("proveedores"),
+    getAll("movimientos_insumos"),
+    leerSerieConsumoLocal().catch(() => ({ serie: [] }))
   ]);
+
+  // Mismo criterio que listInsumos: el ledger local no alcanza (una tablet que
+  // no genero la historia tiene cero filas), asi que se junta con la serie que
+  // se bajo de la nube, prefiriendo lo local cuando hay de la misma fecha.
+  let serieRemota = serieNube?.serie || [];
+  if (serieRemota.length === 0) {
+    serieRemota = (await sincronizarSerieConsumo({ hasta: hoy }).catch(() => null))?.serie || [];
+  }
+  const vistos = new Set(movimientosLocales.map(m => `${m.insumoId}|${String(m.fecha || "").slice(0, 10)}`));
+  const movimientos = movimientosLocales.concat(
+    serieRemota
+      .filter(pt => !vistos.has(`${pt.insumoId}|${pt.fecha}`))
+      .map(pt => ({ insumoId: pt.insumoId, tipo: "venta", cantidad: -pt.cantidad, fecha: pt.fecha }))
+  );
+
+  const series = serieDeConsumo(movimientos, { desde: sumarDiasISO(hoy, -56), hasta: hoy });
+  const perfilLocal = perfilSemanalDelLocal([...series.values()]);
+
+  const demandaPorInsumo = pedidos
+    ? demandaConocidaPorInsumo({ pedidos, recetas, hoy, hastaFecha: sumarDiasISO(hoy, 30) })
+    : null;
 
   const proveedoresById = new Map(proveedores.filter(p => p.activo).map(p => [p.id, p]));
   const activePI = proveedorInsumos.filter(pi => pi.activo && pi.insumoId);
@@ -483,28 +532,27 @@ export async function listaDeComprasSmart() {
   const items = insumos
     .filter(i => i.activo)
     .map(insumo => {
-      const recetasDelInsumo = recetas.filter(r => r.insumoId === insumo.id);
-      const historial = historialAll
-        .filter(h => h.insumoId === insumo.id)
-        .sort((a, b) => a.creadoEn.localeCompare(b.creadoEn));
+      const serie = series.get(insumo.id) || [];
+      const perfil = serie.length > 0 ? perfilSemanalMezclado(serie, perfilLocal) : perfilLocal;
+      const tasaBase = tasaBaseDiaria(serie, perfil, alphaDiariaDesde(insumo.alphaPrediccion ?? 0.5));
+      // Devuelve un objeto { sigma, cv, dias, usoPiso }, no un numero: pasarlo
+      // entero hacia NaN el stock de seguridad y, en cascada, la app pedia 0
+      // de absolutamente todo sin avisar.
+      const variabilidad = variabilidadDiaria(serie, perfil, tasaBase);
+      const sigmaDiaria = variabilidad.sigma;
 
-      let consumoDiario = 0;
-      if (historial.length > 0 && recetasDelInsumo.length > 0) {
-        const alpha = insumo.alphaPrediccion ?? 0.50;
-        const currentRecipe = recetasDelInsumo[0].cantidadPorUnidad;
-        const rates = historial.map((h, idx) => {
-          const prev = idx > 0 ? new Date(historial[idx - 1].creadoEn) : null;
-          const curr = new Date(h.creadoEn);
-          const days = prev ? Math.max(1, (curr - prev) / 86400000) : 7;
-          return h.sandwiches / days;
-        });
-        let ema = rates[0];
-        for (let k = 1; k < rates.length; k++) ema = alpha * rates[k] + (1 - alpha) * ema;
-        consumoDiario = ema * currentRecipe;
-      }
-      if (consumoDiario <= 0 && insumo.stockMinimo > 0) consumoDiario = insumo.stockMinimo / 7;
+      // Sin consumo medido queda el ultimo recurso de siempre. Se marca como
+      // estimado para que la pantalla pueda decir que es una suposicion y no
+      // un dato, que es justo lo que el modelo viejo no hacia.
+      const consumoEstimado = tasaBase > 0 ? 0 : (insumo.stockMinimo > 0 ? insumo.stockMinimo / 7 : 0);
+      const consumoDiario = tasaBase > 0 ? tasaBase : consumoEstimado;
+      const consumoEsEstimado = tasaBase <= 0;
 
-      const diasRestantes = consumoDiario > 0 ? Math.round(insumo.stockActual / consumoDiario) : null;
+      // Lo ya comprometido en pedidos de clientes no esta disponible.
+      const comprometido = demandaPorInsumo?.[insumo.id]?.total ?? 0;
+      const stockLibre = Math.max(0, (Number(insumo.stockActual) || 0) - comprometido);
+
+      const diasRestantes = consumoDiario > 0 ? Math.round(stockLibre / consumoDiario) : null;
       const estadoStock = insumo.stockActual <= insumo.stockCritico ? "critico"
         : insumo.stockActual <= insumo.stockMinimo ? "bajo" : "ok";
 
@@ -513,40 +561,55 @@ export async function listaDeComprasSmart() {
         .map(pi => {
           const prov = proveedoresById.get(pi.proveedorId);
           if (!prov) return null;
-          const diasCiclo = prov.diasCiclo ?? 7;
-          const necesidad = consumoDiario > 0
-            ? consumoDiario * diasCiclo + insumo.stockMinimo
-            : insumo.stockMinimo * 1.5;
-          const cantidadAPedir = Math.max(0, necesidad - insumo.stockActual);
-          const cantidadEnCompra = Math.ceil(cantidadAPedir / pi.cantidadPorUnidad);
+          const sug = sugerirCompra({
+            hoy,
+            stockActual: stockLibre,
+            tasaBase: consumoDiario,
+            perfil,
+            sigmaDiaria,
+            proveedor: prov,
+            cantidadPorUnidad: pi.cantidadPorUnidad,
+            precioUnitarioCentavos: pi.precioUnitarioCentavos
+          });
           return {
             proveedorId: prov.id,
             proveedorNombre: prov.nombre,
-            diasCiclo,
+            diasCiclo: prov.diasCiclo ?? 7,
+            leadTimeDias: Number(prov.leadTimeDias) || 0,
             productoNombre: pi.nombreProducto,
             unidadCompra: pi.unidadCompra,
-            cantidadAPedir,
-            cantidadEnCompra,
-            costoTotalCentavos: cantidadEnCompra * pi.precioUnitarioCentavos,
-            costoPorUnidadBase: pi.precioUnitarioCentavos / pi.cantidadPorUnidad
+            cantidadAPedir: sug.faltante,
+            cantidadEnCompra: sug.unidades,
+            costoTotalCentavos: sug.costoTotalCentavos,
+            costoPorUnidadBase: pi.precioUnitarioCentavos / pi.cantidadPorUnidad,
+            llegadaEstaOrden: sug.llegadaEstaOrden,
+            diasHastaLlegada: sug.diasHastaLlegada,
+            diasACubrir: sug.diasACubrir,
+            demandaVentana: sug.demandaVentana,
+            seguridad: sug.seguridad,
+            excedentePorEnvase: sug.excedentePorEnvase,
+            coberturaFinalDias: sug.coberturaFinalDias
           };
         })
         .filter(Boolean)
         .sort((a, b) => a.costoPorUnidadBase - b.costoPorUnidadBase);
 
       const mejorSupplier = suppliers[0] ?? null;
-      const minDiasCiclo = suppliers.length > 0 ? Math.min(...suppliers.map(s => s.diasCiclo)) : 7;
 
-      let urgencia;
-      if (estadoStock === "critico" || (diasRestantes !== null && diasRestantes < minDiasCiclo)) {
-        urgencia = "urgente";
-      } else if (estadoStock === "bajo" || (diasRestantes !== null && diasRestantes < minDiasCiclo * 1.5)) {
-        urgencia = "pronto";
-      } else {
-        urgencia = "ok";
-      }
+      // La urgencia la decide el proveedor que llega ANTES, no el mas barato:
+      // para saber si llego, lo que importa es cuando entra lo mas rapido.
+      const masRapido = suppliers.reduce((m, s) => (m && m.diasHastaLlegada <= s.diasHastaLlegada ? m : s), null);
+      const urgencia = masRapido
+        ? clasificarUrgencia({
+            diasDeStockRestantes: diasRestantes,
+            diasHastaLlegada: masRapido.diasHastaLlegada,
+            diasACubrir: masRapido.diasACubrir,
+            estadoStock
+          })
+        : (estadoStock === "critico" ? "urgente" : estadoStock === "bajo" ? "pronto" : "ok");
 
-      return { ...insumo, consumoDiario, diasRestantes, estadoStock, urgencia, suppliers, mejorSupplier };
+      return { ...insumo, consumoDiario, consumoEsEstimado, comprometidoEnPedidos: comprometido,
+               diasRestantes, estadoStock, urgencia, suppliers, mejorSupplier };
     })
     .sort((a, b) => {
       const o = { urgente: 0, pronto: 1, ok: 2 };
