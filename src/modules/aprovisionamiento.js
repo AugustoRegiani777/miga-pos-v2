@@ -551,6 +551,49 @@ export async function limpiarCatalogoV12() {
   return { cambios, insumos: insumosNuevos.map(i => i.nombre) };
 }
 
+// Sacar un insumo de circulacion.
+//
+// No se borra: tiene movimientos en el ledger y el stock se deriva de ahi, asi
+// que borrarlo dejaria huerfana su historia. Ademas el borrado remoto necesita
+// una politica de RLS que produccion no tiene. Desactivarlo lo saca de todas
+// las listas, de la lista de compras y del aviso de pendientes, y se puede
+// volver atras.
+export async function descartarInsumo(insumoId) {
+  const insumo = await getOne("insumos", insumoId);
+  if (!insumo) throw new Error("Ese insumo no existe en este dispositivo.");
+
+  const recetas = await getAll("recetas");
+  const enUso = recetas.filter((r) => r.insumoId === insumoId);
+  if (enUso.length > 0) {
+    const productos = await getAll("productos");
+    const nombres = enUso
+      .map((r) => productos.find((p) => p.id === r.productoId)?.nombre || r.productoId)
+      .slice(0, 3);
+    throw new Error(`No se puede: lo usa ${nombres.join(", ")}${enUso.length > 3 ? ` y ${enUso.length - 3} más` : ""}. Sacalo de esas recetas primero.`);
+  }
+
+  await withStores(["insumos"], "readwrite", (stores) => {
+    stores.insumos.put({ ...insumo, activo: false, actualizadoEn: new Date().toISOString() });
+  });
+
+  // Sus lineas de proveedor tambien salen: si el insumo no se usa, no tiene
+  // sentido que siga apareciendo en la lista de compras.
+  const proveedorInsumos = await getAll("proveedor_insumos");
+  const suyas = proveedorInsumos.filter((pi) => pi.insumoId === insumoId && pi.activo !== false);
+  if (suyas.length > 0) {
+    const now = new Date().toISOString();
+    await withStores(["proveedor_insumos"], "readwrite", (stores) => {
+      for (const pi of suyas) stores.proveedor_insumos.put({ ...pi, activo: false, actualizadoEn: now });
+    });
+  }
+
+  const [insumosFinal, piFinal] = await Promise.all([getAll("insumos"), getAll("proveedor_insumos")]);
+  trySyncInsumosSnapshot(insumosFinal).catch(() => {});
+  if (suyas.length > 0) trySyncProveedorInsumosSnapshot(piFinal).catch(() => {});
+
+  return { nombre: insumo.nombre, lineasProveedor: suyas.length };
+}
+
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
   const [insumos, movimientosLocales, proveedorInsumos, proveedores, recetas, serieNube] = await Promise.all([
     getAll("insumos"),

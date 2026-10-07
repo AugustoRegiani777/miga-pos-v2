@@ -7,7 +7,7 @@ import { renderMovimientosCaja } from "../ui/render-caja-movimientos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto } from "../modules/menu.js";
@@ -1930,6 +1930,28 @@ async function renderAvisoCiclo() {
   });
 }
 
+// "No lo uso": saca el insumo de circulacion en vez de obligar a inventarle
+// una receta. El dueño lo pidio asi: "esto si no tiene solucion, prefiero tener
+// la posibilidad de eliminarlo".
+async function descartarPendienteCiclo(article) {
+  const error = article.querySelector(".pendiente-error");
+  const insumoId = article.dataset.insumo;
+  const nombre = article.querySelector("strong")?.textContent || insumoId;
+  if (!window.confirm(`¿Sacar "${nombre}" de la lista? Deja de aparecer en insumos y en la lista de compras. Se puede volver atrás.`)) return;
+
+  const boton = article.querySelector('[data-accion="descartar"]');
+  boton.disabled = true;
+  try {
+    const { lineasProveedor } = await descartarInsumo(insumoId);
+    setFlash(`"${nombre}" salió de la lista${lineasProveedor > 0 ? ` (y ${lineasProveedor} línea${lineasProveedor === 1 ? "" : "s"} de proveedor)` : ""}.`, "success");
+    await renderInsumosView();
+  } catch (e) {
+    error.textContent = e.message || "No se pudo sacar de la lista.";
+    error.hidden = false;
+    boton.disabled = false;
+  }
+}
+
 // Guarda un pendiente completado en el propio aviso.
 async function guardarPendienteCiclo(article) {
   const error = article.querySelector(".pendiente-error");
@@ -3138,9 +3160,11 @@ function bindEvents() {
     showGestionSubView("insumos");
   });
   dom.avisoCiclo?.addEventListener("click", (e) => {
-    const btn = e.target.closest('[data-accion="guardar"]');
+    const btn = e.target.closest("[data-accion]");
     if (!btn) return;
-    guardarPendienteCiclo(btn.closest(".pendiente"));
+    const article = btn.closest(".pendiente");
+    if (btn.dataset.accion === "descartar") descartarPendienteCiclo(article);
+    else if (btn.dataset.accion === "guardar") guardarPendienteCiclo(article);
   });
 
   dom.seccionCalibracion?.addEventListener("toggle", () => {

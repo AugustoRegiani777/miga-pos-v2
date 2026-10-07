@@ -71,9 +71,12 @@ export function renderPendientesCiclo(container, { pendientes, resumen, proveedo
             <strong>${esc(p.insumoNombre)}</strong>
             <span class="pendiente-falta">${esc(p.titulo)}</span>
           </div>
-          <button type="button" class="ghost-button compact" data-accion="guardar">Guardar</button>
+          <div class="pendiente-acciones">
+            <button type="button" class="ghost-button compact pendiente-descartar" data-accion="descartar">No lo uso</button>
+            <button type="button" class="ghost-button compact" data-accion="guardar">Guardar</button>
+          </div>
         </header>
-        <p class="pendiente-porque">${esc(p.porQue)}</p>
+        <p class="pendiente-porque">${esc(p.porQue)} <span class="cal-muted">Si ya no lo us&aacute;s, "No lo uso" lo saca de la lista y el aviso desaparece.</span></p>
         ${p.falta === "proveedor" ? formularioProveedor(p, proveedores) : formularioReceta(p, productos)}
         <p class="pendiente-error" hidden></p>
       </article>`).join("")}`;

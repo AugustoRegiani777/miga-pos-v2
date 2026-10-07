@@ -3577,3 +3577,9 @@ body.arrastrando-fila {
 .caja-mov-fila.anulado { opacity: 0.55; }
 .caja-mov-fila.anulado .mov-motivo { text-decoration: line-through; }
 .caja-mov-total { display: flex; justify-content: space-between; padding-top: 0.7rem; font-weight: 700; }
+
+/* Las dos salidas de un pendiente, juntas y con la destructiva en segundo
+   plano: completarlo es lo normal, descartarlo es la excepcion. */
+.pendiente-acciones { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.pendiente-acciones .pendiente-descartar { color: var(--muted); }
+.pendiente-acciones .pendiente-descartar:hover { color: var(--out); border-color: var(--out); }
