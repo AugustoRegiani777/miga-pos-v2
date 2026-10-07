@@ -2,6 +2,8 @@ import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, bu
 import { cargarPanel } from "../modules/panel.js";
 import { cargarCierre, guardarCierre } from "../modules/cierre.js";
 import { renderCierre, calcularDesdeFormulario } from "../ui/render-cierre.js";
+import { anotarGasto, anotarRetiro, anotarIngreso, anularMovimiento, movimientosDelDia, totalesDelDia } from "../modules/caja-dia.js";
+import { renderMovimientosCaja } from "../ui/render-caja-movimientos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
@@ -508,6 +510,17 @@ const dom = {
   provEditNotas: document.querySelector("#prov-edit-notas"),
   provEditDias: document.querySelector("#prov-edit-dias"),
   provEditLead: document.querySelector("#prov-edit-lead"),
+  cajaMovLista: document.querySelector("#caja-movimientos-lista"),
+  cajaAnotar: document.querySelector("#caja-anotar"),
+  cajaMovSheet: document.querySelector("#caja-mov-sheet"),
+  cajaMovBackdrop: document.querySelector("#caja-mov-backdrop"),
+  cajaMovForm: document.querySelector("#caja-mov-form"),
+  cajaMovTipo: document.querySelector("#caja-mov-tipo"),
+  cajaMovImporte: document.querySelector("#caja-mov-importe"),
+  cajaMovMotivo: document.querySelector("#caja-mov-motivo"),
+  cajaMovCajon: document.querySelector("#caja-mov-cajon"),
+  cajaMovCajonCampo: document.querySelector("#caja-mov-cajon-campo"),
+  closeCajaMov: document.querySelector("#close-caja-mov"),
   provEditEntrega: document.querySelector("#prov-edit-entrega"),
   provProdSheet: document.querySelector("#prov-prod-sheet"),
   provProdBackdrop: document.querySelector("#prov-prod-backdrop"),
@@ -2513,6 +2526,34 @@ let cierreGuardando = false;
 
 const fechaDelCierre = () => cierreFecha || dom.cierreDate.value || todayISO();
 
+let cajaMovEnCurso = false;
+
+function tipoCajaElegido() {
+  return dom.cajaMovTipo.querySelector(".tipo-btn.active")?.dataset.tipo || "gasto";
+}
+
+function setCajaMovSheetOpen(abierto) {
+  dom.cajaMovSheet.classList.toggle("open", abierto);
+  dom.cajaMovSheet.setAttribute("aria-hidden", abierto ? "false" : "true");
+  dom.cajaMovBackdrop.hidden = !abierto;
+  dom.cajaMovBackdrop.classList.toggle("open", abierto);
+}
+
+// Solo un gasto puede ser "no salio del cajon" (pagado con tarjeta). Un retiro
+// o un ingreso son efectivo por definicion, y ofrecer la opcion ahi solo
+// invita a cargarlo mal.
+function actualizarCampoCajon() {
+  dom.cajaMovCajonCampo.hidden = tipoCajaElegido() !== "gasto";
+}
+
+async function refrescarMovimientosCaja() {
+  const [movimientos, totales] = await Promise.all([
+    movimientosDelDia(cierreFecha),
+    totalesDelDia(cierreFecha)
+  ]);
+  renderMovimientosCaja(dom.cajaMovLista, { movimientos, totales, soloLectura: isModoConsulta() });
+}
+
 async function renderCierreView() {
   if (!cierreFecha) cierreFecha = todayISO();
   dom.cierreDate.value = cierreFecha;
@@ -2523,6 +2564,7 @@ async function renderCierreView() {
   cierreCargando = true;
   try {
     cierreDatos = await cargarCierre(cierreFecha);
+    await refrescarMovimientosCaja().catch(() => {});
     if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos);
   } catch (error) {
     dom.cierreRoot.textContent = `No se pudo cargar el cierre: ${error.message || error}`;
@@ -3680,6 +3722,77 @@ function bindEvents() {
   });
 
   dom.cierreDate.addEventListener("change", () => setCierreFecha(dom.cierreDate.value));
+  // --- Movimientos de caja del dia -----------------------------------------
+  dom.cajaAnotar.addEventListener("click", () => {
+    dom.cajaMovForm.reset();
+    dom.cajaMovTipo.querySelectorAll(".tipo-btn").forEach((b, i) => b.classList.toggle("active", i === 0));
+    actualizarCampoCajon();
+    setCajaMovSheetOpen(true);
+    dom.cajaMovImporte.focus();
+  });
+  dom.closeCajaMov.addEventListener("click", () => setCajaMovSheetOpen(false));
+  dom.cajaMovBackdrop.addEventListener("click", () => setCajaMovSheetOpen(false));
+
+  dom.cajaMovTipo.addEventListener("click", (e) => {
+    const btn = e.target.closest(".tipo-btn");
+    if (!btn) return;
+    dom.cajaMovTipo.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    actualizarCampoCajon();
+  });
+
+  dom.cajaMovForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (cajaMovEnCurso) return;
+    try {
+      cajaMovEnCurso = true;
+      // El importe se escribe en euros y se guarda en centavos enteros: con
+      // flotantes, 0.1 + 0.2 no da 0.3 y eso termina siendo un descuadre de
+      // caja que nadie sabe explicar.
+      const euros = parseFloat(String(dom.cajaMovImporte.value).replace(",", "."));
+      if (!Number.isFinite(euros) || euros <= 0) throw new Error("Poné un importe mayor que cero.");
+      const importeCentavos = Math.round(euros * 100);
+      const motivo = dom.cajaMovMotivo.value.trim();
+      if (!motivo) throw new Error("Escribí en qué fue, aunque sea corto.");
+
+      const tipo = tipoCajaElegido();
+      if (tipo === "gasto") {
+        await anotarGasto({ importeCentavos, motivo, fecha: cierreFecha, afectaCajon: dom.cajaMovCajon.value !== "no" });
+      } else if (tipo === "retiro") {
+        await anotarRetiro({ importeCentavos, motivo, fecha: cierreFecha });
+      } else {
+        await anotarIngreso({ importeCentavos, motivo, fecha: cierreFecha });
+      }
+
+      setFlash("Movimiento anotado.", "success");
+      setCajaMovSheetOpen(false);
+      await refrescarMovimientosCaja();
+      await renderCierreView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo anotar.", "error");
+    } finally {
+      cajaMovEnCurso = false;
+    }
+  });
+
+  // Anular no borra: appendea el importe al reves, enlazado al original. Los
+  // dos quedan a la vista y el total da bien solo.
+  dom.cajaMovLista.addEventListener("click", async (event) => {
+    const btn = event.target.closest("[data-anular]");
+    if (!btn || cajaMovEnCurso) return;
+    if (!window.confirm("¿Anular este movimiento? Queda anotado que se anuló, no se borra.")) return;
+    try {
+      cajaMovEnCurso = true;
+      await anularMovimiento(btn.dataset.anular, { motivo: "anulado desde el cierre" });
+      setFlash("Movimiento anulado.", "success");
+      await refrescarMovimientosCaja();
+      await renderCierreView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo anular.", "error");
+    } finally {
+      cajaMovEnCurso = false;
+    }
+  });
+
   dom.cierrePrev.addEventListener("click", () => setCierreFecha(sumarDias(cierreFecha || todayISO(), -1)));
   dom.cierreNext.addEventListener("click", () => setCierreFecha(sumarDias(cierreFecha || todayISO(), 1)));
   dom.cierreHoy.addEventListener("click", () => setCierreFecha(todayISO()));

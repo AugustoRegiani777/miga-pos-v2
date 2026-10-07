@@ -412,6 +412,54 @@
         <p>Tarjeta del cierre de Postnet, efectivo contado, y cuánto debería haber en el cajón.</p>
       </section>
 
+      <section class="form-section" id="caja-movimientos-bloque">
+        <div class="section-heading">
+          <h2>Movimientos del d&iacute;a</h2>
+          <button class="primary-button compact" type="button" id="caja-anotar">+ Anotar</button>
+        </div>
+        <p class="form-instruccion">Anot&aacute; lo que pagu&eacute;s o saques del caj&oacute;n <strong>cuando pasa</strong>, y al cerrar el d&iacute;a ya est&aacute; todo contado. Si lo carg&aacute;s mal, se anula.</p>
+        <div id="caja-movimientos-lista"></div>
+      </section>
+
+      <!-- Sheet: anotar un movimiento de caja -->
+      <section class="production-sheet-backdrop" id="caja-mov-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="caja-mov-sheet" aria-hidden="true">
+        <form id="caja-mov-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div><h2>Anotar movimiento</h2></div>
+            <button type="button" class="ghost-button compact" id="close-caja-mov">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <div class="quantity-field">
+              <span>&iquest;Qu&eacute; pas&oacute;?</span>
+              <div class="caja-tipo-btns" id="caja-mov-tipo">
+                <button type="button" class="tipo-btn active" data-tipo="gasto">Pagu&eacute; algo</button>
+                <button type="button" class="tipo-btn" data-tipo="retiro">Saqu&eacute; plata</button>
+                <button type="button" class="tipo-btn" data-tipo="ingreso">Entr&oacute; plata</button>
+              </div>
+            </div>
+            <label class="quantity-field">
+              <span>Importe (EUR)</span>
+              <input id="caja-mov-importe" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" required>
+            </label>
+            <label class="quantity-field">
+              <span>&iquest;En qu&eacute;? <small>(queda guardado, as&iacute; que escrib&iacute; algo que se entienda ma&ntilde;ana)</small></span>
+              <input id="caja-mov-motivo" type="text" placeholder="Verdura, taxi, al banco..." required>
+            </label>
+            <label class="quantity-field" id="caja-mov-cajon-campo">
+              <span>&iquest;Sali&oacute; del caj&oacute;n?</span>
+              <select id="caja-mov-cajon">
+                <option value="si">S&iacute;, pagu&eacute; en efectivo</option>
+                <option value="no">No, con tarjeta o transferencia</option>
+              </select>
+            </label>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar</button>
+          </div>
+        </form>
+      </section>
+
       <div class="panel-toolbar">
         <button class="ghost-button compact" type="button" id="cierre-prev" aria-label="Día anterior">&lsaquo;</button>
         <input type="date" id="cierre-date" aria-label="Fecha del cierre">

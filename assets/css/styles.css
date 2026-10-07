@@ -3552,3 +3552,28 @@ body.arrastrando-fila {
   border-color: var(--primary);
   color: #fff;
 }
+
+
+/* Que paso: tres botones grandes en vez de un desplegable. En una tablet, con
+   el dedo y con prisa, elegir de una lista cerrada es mas lento y se erra. */
+.caja-tipo-btns { display: flex; gap: 0.5rem; margin-top: 0.3rem; flex-wrap: wrap; }
+.caja-tipo-btns .tipo-btn {
+  flex: 1 1 30%; min-height: 48px; padding: 0 0.6rem;
+  border: 1px solid #d4dce5; border-radius: 10px;
+  background: var(--surface); color: var(--ink);
+  font-size: 0.9rem; font-weight: 600; cursor: pointer;
+}
+.caja-tipo-btns .tipo-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+.caja-mov-fila {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.6rem 0; border-bottom: 1px solid #eef2f5;
+}
+.caja-mov-fila:last-child { border-bottom: 0; }
+.caja-mov-fila .mov-motivo { flex: 1; min-width: 0; }
+.caja-mov-fila .mov-importe { font-weight: 700; white-space: nowrap; }
+.caja-mov-fila .mov-importe.sale { color: var(--out); }
+.caja-mov-fila .mov-importe.entra { color: var(--ok); }
+.caja-mov-fila.anulado { opacity: 0.55; }
+.caja-mov-fila.anulado .mov-motivo { text-decoration: line-through; }
+.caja-mov-total { display: flex; justify-content: space-between; padding-top: 0.7rem; font-weight: 700; }

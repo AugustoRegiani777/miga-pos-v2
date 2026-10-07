@@ -15,7 +15,10 @@ import {
   pushVariantesGrupos,
   pushHistorialReceta,
   pushConfiguracionCompartida,
-  pushCierreCaja
+  pushCierreCaja,
+  pushSesionCaja,
+  pushMovimientosCaja,
+  pushArqueoCaja
 } from "../db/supabase.js";
 
 // ---------------------------------------------------------------------------
@@ -61,7 +64,14 @@ const SNAPSHOT_TYPES = new Set([
 const TIER = {
   catalogo_snapshot: 0,
   insumos_snapshot: 1, proveedores_snapshot: 1, variantes_grupos: 1,
-  recetas_snapshot: 2, proveedor_insumos_snapshot: 2
+  recetas_snapshot: 2, proveedor_insumos_snapshot: 2,
+  // Caja por turnos: la apertura del turno sale antes que los movimientos y el
+  // arqueo que la referencian. Como esas referencias NO tienen foreign key (a
+  // proposito: una FK haria fallar el push con 23503 y trabaria la cola, y una
+  // operacion trabada apaga la reconciliacion de stock), un movimiento que
+  // llegue primero no rompe nada — pero ordenarlo sale gratis y evita que la
+  // nube tenga un movimiento sin turno cuando no hace falta.
+  sesion_caja: 3, movimiento_caja: 4, arqueo_caja: 4
 };
 const tierOf = (op) => TIER[op.type] ?? 3;
 
@@ -263,6 +273,12 @@ async function executeOp(op) {
       return pushConfiguracionCompartida(op.payload.id, op.payload.valor);
     case "cierre_caja":
       return pushCierreCaja(op.payload);
+    case "sesion_caja":
+      return pushSesionCaja(op.payload);
+    case "movimiento_caja":
+      return pushMovimientosCaja(op.payload);
+    case "arqueo_caja":
+      return pushArqueoCaja(op.payload);
     default:
       throw new Error(`Tipo de sync desconocido: ${op.type}`);
   }
@@ -427,6 +443,24 @@ export function trySyncHistorialReceta(evento) {
 // Un cierre de caja se guarda una sola vez (uuid propio); reintentar es seguro.
 export function trySyncCierreCaja(cierre) {
   return tryNow({ type: "cierre_caja", payload: cierre });
+}
+
+// Caja por turnos (migracion 020). Las tres tablas son append-only y cada fila
+// nace con su uuid, asi que reintentar no puede duplicar nada: un push repetido
+// cae en "ignorar duplicado" por uuid.
+export function trySyncSesionCaja(sesion) {
+  return tryNow({ type: "sesion_caja", payload: sesion });
+}
+
+// No se agrupan ni se coalescen: un movimiento es un hecho puntual del libro
+// de caja y cada uno sube por su cuenta (si uno fallara, los otros no se
+// quedan esperandolo).
+export function trySyncMovimientoCaja(movimiento) {
+  return tryNow({ type: "movimiento_caja", payload: movimiento });
+}
+
+export function trySyncArqueoCaja(arqueo) {
+  return tryNow({ type: "arqueo_caja", payload: arqueo });
 }
 
 export function trySyncConfiguracionCompartida(id, valor) {

@@ -84,6 +84,32 @@ function createStores(db) {
     store.createIndex("proveedorId", "proveedorId", { unique: false });
     store.createIndex("insumoId", "insumoId", { unique: false });
   }
+
+  // --- Caja por turnos (DB_VERSION 11, migracion 020) -------------------
+  // La clave es el `uuid` y no un autoIncrement: es el mismo identificador con
+  // el que la fila viaja a Supabase, asi que reintentar el guardado local es
+  // idempotente igual que el push (no hay forma de que el mismo movimiento
+  // entre dos veces con dos ids distintos).
+  //
+  // Las tres son APPEND-ONLY, como en la nube: un movimiento mal cargado se
+  // corrige con otro movimiento (corrige_uuid), nunca editando ni borrando.
+  // Nada en este archivo lo impide por si mismo — lo garantiza que
+  // caja-sesion.js solo haga `add`/`put` de filas nuevas, y que la base remota
+  // no tenga politica de UPDATE ni de DELETE.
+  if (!db.objectStoreNames.contains("sesiones_caja")) {
+    const store = db.createObjectStore("sesiones_caja", { keyPath: "uuid" });
+    store.createIndex("fecha", "fecha", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("movimientos_caja")) {
+    const store = db.createObjectStore("movimientos_caja", { keyPath: "uuid" });
+    store.createIndex("sesionUuid", "sesionUuid", { unique: false });
+    store.createIndex("fecha", "fecha", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("arqueos_caja")) {
+    const store = db.createObjectStore("arqueos_caja", { keyPath: "uuid" });
+    store.createIndex("sesionUuid", "sesionUuid", { unique: false });
+    store.createIndex("fecha", "fecha", { unique: false });
+  }
 }
 
 export function openDatabase() {

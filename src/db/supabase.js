@@ -742,6 +742,113 @@ export async function fetchCierresCaja({ desde, limit = 60 } = {}) {
   return sbFetch(`/cierres_caja?select=*${filtro}&order=fecha.desc,creado_en.desc&limit=${limit}`);
 }
 
+// --- Caja por turnos (migracion 020) --------------------------------------
+//
+// Las tres tablas son append-only: solo tienen politica de INSERT, ninguna de
+// UPDATE. Por eso todos los push de aca usan "ignorar duplicado" (DO NOTHING)
+// y no merge-duplicates, igual que pushCierreCaja: con merge, el reintento de
+// una fila ya subida pediria permiso de UPDATE y quedaria trabado para
+// siempre. El uuid es lo que hace que reintentar sea inofensivo.
+//
+// Y nada de aca manda PATCH ni DELETE a estas tablas: sin politica, Postgres
+// no devuelve error, devuelve "0 filas afectadas". Pareceria funcionar y no
+// haria nada.
+
+const IGNORAR_DUPLICADOS = { "Prefer": "resolution=ignore-duplicates,return=minimal" };
+
+export async function pushSesionCaja(s) {
+  const fila = [{
+    uuid: s.uuid,
+    fecha: s.fecha,
+    turno: s.turno,
+    abierta_por: s.abiertaPor,
+    abierta_en: s.abiertaEn,
+    fondo_inicial_centavos: s.fondoInicialCentavos,
+    fondo_inicial_origen: s.fondoInicialOrigen || "contado",
+    sesion_previa_uuid: s.sesionPreviaUuid || null,
+    dispositivo: s.dispositivo || null,
+    nota: s.nota || null,
+    creado_en: s.creadoEn
+  }];
+  try {
+    return await sbFetch("/sesiones_caja?on_conflict=uuid", "POST", fila, IGNORAR_DUPLICADOS);
+  } catch (error) {
+    // sesiones_caja tiene DOS restricciones unicas: uuid (que el
+    // on_conflict de arriba absorbe) y (fecha, turno). La segunda salta si dos
+    // dispositivos abrieron el turno 1 del mismo dia sin verse, y con un
+    // throw esta operacion quedaria trabada en la cola para siempre — y una
+    // sola operacion trabada apaga la reconciliacion de stock entera (05/10).
+    // El turno del otro dispositivo ya esta en la nube, asi que no hay nada
+    // que reintentar: se deja pasar y queda el aviso en consola. Los
+    // movimientos de este dispositivo suben igual (son referencias blandas,
+    // sin FK) y quedan visibles colgando de su sesion_uuid local.
+    const turnoYaTomado = error?.body?.code === "23505"
+      && JSON.stringify(error.body || {}).includes("sesiones_caja_fecha_turno_unique");
+    if (!turnoYaTomado) throw error;
+    console.warn(`[caja] el turno ${s.turno} del ${s.fecha} ya lo abrio otro dispositivo; no se reintenta.`);
+    return null;
+  }
+}
+
+// Lote: los movimientos se encolan de a uno, pero la firma acepta array para
+// poder subir varios de una pasada si alguna vez hace falta.
+export async function pushMovimientosCaja(movimientos) {
+  const lista = Array.isArray(movimientos) ? movimientos : [movimientos];
+  if (lista.length === 0) return null;
+  return sbFetch("/movimientos_caja?on_conflict=uuid", "POST", lista.map((m) => ({
+    uuid: m.uuid,
+    sesion_uuid: m.sesionUuid,
+    fecha: m.fecha,
+    tipo: m.tipo,
+    importe_centavos: m.importeCentavos,
+    motivo: m.motivo,
+    categoria: m.categoria || null,
+    afecta_cajon: m.afectaCajon !== false,
+    comprobante: m.comprobante || null,
+    quien: m.quien || null,
+    corrige_uuid: m.corrigeUuid || null,
+    ocurrido_en: m.ocurridoEn,
+    creado_en: m.creadoEn
+  })), IGNORAR_DUPLICADOS);
+}
+
+export async function pushArqueoCaja(a) {
+  return sbFetch("/arqueos_caja?on_conflict=uuid", "POST", [{
+    uuid: a.uuid,
+    sesion_uuid: a.sesionUuid,
+    fecha: a.fecha,
+    tipo: a.tipo,
+    contado_por: a.contadoPor,
+    recibido_por: a.recibidoPor || null,
+    contado_en: a.contadoEn,
+    contado_centavos: a.contadoCentavos,
+    deja_centavos: a.dejaCentavos ?? null,
+    fondo_inicial_centavos: a.fondoInicialCentavos,
+    ventas_total_centavos: a.ventasTotalCentavos || 0,
+    ventas_efectivo_centavos: a.ventasEfectivoCentavos || 0,
+    ventas_tarjeta_centavos: a.ventasTarjetaCentavos || 0,
+    tickets: a.tickets || 0,
+    movimientos_centavos: a.movimientosCentavos || 0,
+    esperado_centavos: a.esperadoCentavos,
+    diferencia_centavos: a.diferenciaCentavos,
+    nota: a.nota || null,
+    creado_en: a.creadoEn
+  }], IGNORAR_DUPLICADOS);
+}
+
+// Lecturas. Se piden por fecha porque la caja siempre se mira por dia.
+export function fetchSesionesCaja(fecha) {
+  return sbFetch(`/sesiones_caja?fecha=eq.${fecha}&select=*&order=turno.asc`);
+}
+
+export function fetchMovimientosCaja(fecha) {
+  return sbFetch(`/movimientos_caja?fecha=eq.${fecha}&select=*&order=ocurrido_en.asc`);
+}
+
+export function fetchArqueosCaja(fecha) {
+  return sbFetch(`/arqueos_caja?fecha=eq.${fecha}&select=*&order=creado_en.asc`);
+}
+
 export async function fetchVentasDelDia(fecha) {
   return sbFetch(`/ventas?fecha=eq.${fecha}&anulada=not.is.true&select=*,detalle_venta(*)&order=id.desc`);
 }

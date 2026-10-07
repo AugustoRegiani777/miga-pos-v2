@@ -1,5 +1,8 @@
 export const DB_NAME = "miga-pos-local";
-export const DB_VERSION = 10;
+// DB_VERSION 11 (migracion 020, caja por turnos): agrega los tres stores de
+// caja. Subir este numero SIN agregar el store en createStores() de idb.js
+// hace fallar el upgrade en silencio — los dos cambios van siempre juntos.
+export const DB_VERSION = 11;
 
 export const STORE_NAMES = [
   "categorias",
@@ -16,7 +19,13 @@ export const STORE_NAMES = [
   "historial_calibraciones",
   "historial_recetas",
   "proveedores",
-  "proveedor_insumos"
+  "proveedor_insumos",
+  // Caja por turnos (migracion 020). Tienen store local porque cargar un gasto
+  // a las 11 de la mañana no puede depender de que haya wifi: se escribe en
+  // IDB y la cola de sync lo empuja cuando pueda.
+  "sesiones_caja",
+  "movimientos_caja",
+  "arqueos_caja"
 ];
 
 // Versión del seed de insumos — incrementar cuando cambien insumos o stockMinimo/stockCritico
