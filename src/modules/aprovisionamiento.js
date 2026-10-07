@@ -1,7 +1,7 @@
 import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, getPendingSyncCount } from "./sync.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, getPendingSyncCount } from "./sync.js";
 import { fetchInsumosCatalogo, fetchStockInsumos } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
@@ -271,6 +271,87 @@ export async function seedInsumos() {
 
 const ENVASES_KEY = "envases_normalizados_v11";
 
+// ---------------------------------------------------------------------------
+// Limpieza del catalogo (v12)
+// ---------------------------------------------------------------------------
+// Insumos que entraron por la lectura de facturas con el titulo literal del
+// proveedor como nombre y su CODIGO como unidad: "METRO Chef Sirope de caramelo
+// en botella 1 Kg", unidad "BT". Inusables para escribir una receta.
+//
+// Por que esto va en el codigo y no se arregla en la nube: se intento editar
+// Supabase directamente y duro unas horas. La app sube su catalogo local
+// ENTERO en cada arranque (`subidaDeArranque`), asi que la copia del
+// dispositivo gana siempre y revirtio todo. Peor: revirtio los insumos pero no
+// los movimientos del ledger, que no viajan en ese snapshot, y quedaron
+// unidades viejas con cantidades nuevas. La correccion tiene que correr EN el
+// dispositivo para que despues suba sola.
+//
+// `escalarLedger: true` es un permiso explicito: estos insumos SI tienen
+// movimientos, y aun asi se les cambia la unidad base. Se puede porque son una
+// unica carga por factura (una compra), no historia real del negocio. Para
+// cualquier otro insumo la regla sigue siendo la contraria.
+// Cada entrada DECLARA el destino en vez de calcularlo. Es la leccion de la
+// primera version: escalaba las recetas por un factor, y en una base donde ya
+// estaban bien las multiplico igual (25 g -> 25000 g). Una migracion no puede
+// suponer de donde parte; tiene que decir adonde llega. Asi ademas correrla dos
+// veces no hace daño.
+//
+// `recetaObjetivo`: cuanto lleva UNA unidad del producto, en la unidad nueva.
+// `ledgerPor`: cuanto multiplicar los movimientos ya cargados. null = ya estan
+//   en la unidad nueva y no se tocan. Las pajitas son ese caso: la factura
+//   decia 250 y son 250 pajitas (una bolsa), no 250 bolsas.
+const LIMPIEZA_CATALOGO_V12 = {
+  "mortadela-italiana-c-kg": {
+    nombre: "Mortadela", unidad: "g", unidadCompra: "kg", factorConversion: 1000,
+    stockMinimo: 400, stockCritico: 200, recetaObjetivo: 25, ledgerPor: 1000
+  },
+  "metro-chef-sirope-de-caramelo-en-botella-1-kg": {
+    nombre: "Sirope de caramelo", unidad: "g", unidadCompra: "botella", factorConversion: 1000,
+    stockMinimo: 500, stockCritico: 250, recetaObjetivo: 20, ledgerPor: 1000
+  },
+  "metro-professional-pajitas-de-papel-bio-14-5-cm-x-6-mm-250unidades": {
+    nombre: "Pajitas", unidad: "unidad", unidadCompra: "bolsa", factorConversion: 250,
+    stockMinimo: 250, stockCritico: 125, recetaObjetivo: 1, ledgerPor: null
+  }
+};
+
+// Consumibles que entraron por factura y que el dueño decidio que NO forman
+// parte del ecosistema ("solo guarda pajitas y sirope"). No se borran: tienen
+// una compra en el ledger y el borrado necesita permisos que produccion no
+// tiene. Desactivarlos los saca de la lista y es reversible.
+const INSUMOS_FUERA_V12 = [
+  "metro-chef-harina-de-trigo-de-uso-comun-5-kg",
+  "metro-chef-mantequilla-pura-1-kg",
+  "metro-professional-cuchara-de-madera-bio-16-5cm-100-unidades",
+  "metro-professional-papel-higienico-de-2-capas-48-metros-contiene-12-rollos",
+  "grillix-ensaladera-plastico-1000cc-50-unidades"
+];
+
+// Lineas de proveedor que quedaron apuntando al texto "null" porque la lectura
+// de facturas nunca las vinculo a un insumo. Las que no tienen con que
+// vincularse (alfajores, granola, chocolinas) se dejan: son compras reales.
+const PROVEEDOR_INSUMOS_V12 = {
+  "jasa:salmon": "salmon",
+  "jasa:queso-mezcla": "mezcla",
+  "makro:pajitas": "metro-professional-pajitas-de-papel-bio-14-5-cm-x-6-mm-250unidades",
+  "makro:sirope-caramelo": "metro-chef-sirope-de-caramelo-en-botella-1-kg"
+};
+const PROVEEDOR_INSUMOS_FUERA_V12 = ["makro:mantequilla"];
+
+// Cuando cambia la unidad base de un insumo, lo que el proveedor vende hay que
+// reexpresarlo igual. Es el olvido que ya costo caro dos veces: la leche de
+// soja paso de L a ml y su linea quedo diciendo que un litro del proveedor era
+// 1 ml -> la app pidio 3862 litros. Despues lo mismo con la mortadela: "pedir
+// 514 K". Si manaña se cambia la unidad de otro insumo, esta tabla tambien.
+const PROVEEDOR_UNIDADES_V12 = {
+  "jasa:mortadela-italiana-c-kg": { unidadCompra: "kg", cantidadPorUnidad: 1000 },
+  "makro:metro-chef-sirope-de-caramelo-en-botella-1-kg": { unidadCompra: "botella", cantidadPorUnidad: 1000 },
+  // Las pajitas ya traian 250 por bolsa: solo se arregla el nombre "B".
+  "makro:metro-professional-pajitas-de-papel-bio-14-5-cm-x-6-mm-250unidades": { unidadCompra: "bolsa", cantidadPorUnidad: 250 }
+};
+
+const LIMPIEZA_KEY = "limpieza_catalogo_v12";
+
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
 // Primero lo intente en seedInsumos y la prueba lo encontro: en un dispositivo
@@ -369,6 +450,107 @@ export async function normalizarEnvasesInsumos() {
 // nube (no hay store local), asi que sin internet llega vacio. El estado tiene
 // que servir igual — por eso viaja `pedidosIncluidos`, para poder decir en
 // pantalla que la cuenta no los contempla en vez de quedarse corta en silencio.
+// Corre despues de bajar el catalogo, igual que normalizarEnvasesInsumos y por
+// el mismo motivo: estos insumos no vienen del seed, los creo la lectura de
+// facturas, asi que en un dispositivo recien instalado no existen todavia
+// cuando corre el seed.
+export async function limpiarCatalogoV12() {
+  const [insumos, recetas, movimientos, proveedorInsumos, config] = await Promise.all([
+    getAll("insumos"),
+    getAll("recetas"),
+    getAll("movimientos_insumos"),
+    getAll("proveedor_insumos"),
+    getAll("configuracion")
+  ]);
+  if (config.find(c => c.id === LIMPIEZA_KEY)?.valor) return { cambios: 0 };
+
+  const now = new Date().toISOString();
+  const insumosNuevos = [];
+  const recetasNuevas = [];
+  const movimientosNuevos = [];
+  const piNuevos = [];
+
+  for (const [id, fix] of Object.entries(LIMPIEZA_CATALOGO_V12)) {
+    const insumo = insumos.find(i => i.id === id);
+    if (!insumo) continue;
+    const cambiaLaUnidad = insumo.unidad !== fix.unidad || insumo.factorConversion !== fix.factorConversion;
+
+    if (cambiaLaUnidad || insumo.nombre !== fix.nombre) {
+      insumosNuevos.push({
+        ...insumo,
+        nombre: fix.nombre,
+        unidad: fix.unidad,
+        unidadCompra: fix.unidadCompra,
+        factorConversion: fix.factorConversion,
+        // El stock se recalcula solo desde el ledger (trigger de la migracion
+        // 012), asi que no hace falta tocarlo aca: moviendo los movimientos
+        // alcanza. Tocarlo ademas lo dejaria descuadrado contra su propia suma.
+        stockMinimo: fix.stockMinimo,
+        stockCritico: fix.stockCritico,
+        actualizadoEn: now
+      });
+    }
+
+    // La receta se LLEVA al valor correcto, venga de donde venga.
+    for (const r of recetas) {
+      if (r.insumoId !== id) continue;
+      if (Number(r.cantidadPorUnidad) === fix.recetaObjetivo) continue;
+      recetasNuevas.push({ ...r, cantidadPorUnidad: fix.recetaObjetivo, actualizadoEn: now });
+    }
+
+    // El ledger SI se escala, porque es historia y no tiene un valor objetivo
+    // que declarar. Solo cuando la unidad cambia de verdad en esta corrida: si
+    // ya estaba bien, multiplicar seria romperlo.
+    if (cambiaLaUnidad && fix.ledgerPor) {
+      for (const m of movimientos) {
+        if (m.insumoId !== id) continue;
+        movimientosNuevos.push({ ...m, cantidad: Number(m.cantidad) * fix.ledgerPor });
+      }
+    }
+  }
+
+  for (const id of INSUMOS_FUERA_V12) {
+    const insumo = insumos.find(i => i.id === id);
+    if (insumo && insumo.activo !== false) insumosNuevos.push({ ...insumo, activo: false, actualizadoEn: now });
+  }
+
+  for (const [id, insumoId] of Object.entries(PROVEEDOR_INSUMOS_V12)) {
+    const pi = proveedorInsumos.find(x => x.id === id);
+    if (pi && pi.insumoId !== insumoId) piNuevos.push({ ...pi, insumoId, actualizadoEn: now });
+  }
+  for (const id of PROVEEDOR_INSUMOS_FUERA_V12) {
+    const pi = proveedorInsumos.find(x => x.id === id);
+    if (pi && pi.activo !== false) piNuevos.push({ ...pi, activo: false, actualizadoEn: now });
+  }
+
+  for (const [id, fix] of Object.entries(PROVEEDOR_UNIDADES_V12)) {
+    const pi = proveedorInsumos.find(x => x.id === id);
+    if (!pi) continue;
+    if (pi.unidadCompra === fix.unidadCompra && pi.cantidadPorUnidad === fix.cantidadPorUnidad) continue;
+    piNuevos.push({ ...pi, unidadCompra: fix.unidadCompra, cantidadPorUnidad: fix.cantidadPorUnidad, actualizadoEn: now });
+  }
+
+  const cambios = insumosNuevos.length + recetasNuevas.length + movimientosNuevos.length + piNuevos.length;
+
+  await withStores(["insumos", "recetas", "movimientos_insumos", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
+    for (const i of insumosNuevos) stores.insumos.put(i);
+    for (const r of recetasNuevas) stores.recetas.put(r);
+    for (const m of movimientosNuevos) stores.movimientos_insumos.put(m);
+    for (const x of piNuevos) stores.proveedor_insumos.put(x);
+    stores.configuracion.put({ id: LIMPIEZA_KEY, valor: true, actualizadoEn: now });
+  });
+
+  if (cambios === 0) return { cambios: 0 };
+
+  const [insFinal, recFinal, piFinal] = await Promise.all([getAll("insumos"), getAll("recetas"), getAll("proveedor_insumos")]);
+  trySyncInsumosSnapshot(insFinal).catch(() => {});
+  if (recetasNuevas.length) trySyncRecetasSnapshot(recFinal).catch(() => {});
+  if (piNuevos.length) trySyncProveedorInsumosSnapshot(piFinal).catch(() => {});
+  if (movimientosNuevos.length) trySyncMovimientosInsumos(movimientosNuevos).catch(() => {});
+
+  return { cambios, insumos: insumosNuevos.map(i => i.nombre) };
+}
+
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
   const [insumos, movimientosLocales, proveedorInsumos, proveedores, recetas, serieNube] = await Promise.all([
     getAll("insumos"),

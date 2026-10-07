@@ -7,7 +7,7 @@ import { renderMovimientosCaja } from "../ui/render-caja-movimientos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, reconciliarStockInsumosConNube, normalizarEnvasesInsumos } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto } from "../modules/menu.js";
@@ -160,6 +160,13 @@ async function pullCatalogoCompleto() {
     reconciliarStockInsumosConNube(),
     reconciliarStockProductosConNube()
   ]);
+
+  // DESPUES de reconciliar, no antes. La limpieza encola subidas del catalogo,
+  // y reconciliarStock*ConNube arranca con un return si hay algo pendiente en
+  // la cola: puesta antes, se saltaba la reconciliacion entera en el primer
+  // arranque y el stock local quedaba viejo. Es la misma cascada que corrompio
+  // stock el 05/10, encontrada esta vez por la prueba en vez de por el dueño.
+  await limpiarCatalogoV12().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };
