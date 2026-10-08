@@ -200,12 +200,17 @@ export async function saveProveedorInsumo(data) {
     for (const receta of recetasCreadas) stores.recetas.put(receta);
   });
 
-  const proveedorInsumosFinal = await getAll("proveedor_insumos");
-  trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
+  // El ORDEN importa: proveedor_insumos y recetas referencian al insumo por
+  // FK. Encolados al reves, el primer intento del snapshot de proveedor
+  // referencia un insumo que la nube todavia no tiene, Postgres lo rechaza, y
+  // aunque la cola despues lo reordena por tiers y entra bien, el usuario ve
+  // el badge de sync en rojo por un error que no existe.
   if (insumoNuevoCreado) {
     const insumosFinal = await getAll("insumos");
     trySyncInsumosSnapshot(insumosFinal).catch(() => {});
   }
+  const proveedorInsumosFinal = await getAll("proveedor_insumos");
+  trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
   if (recetasCreadas.length > 0) {
     const recetasFinal = await getAll("recetas");
     trySyncRecetasSnapshot(recetasFinal).catch(() => {});

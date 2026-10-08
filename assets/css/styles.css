@@ -3583,3 +3583,292 @@ body.arrastrando-fila {
 .pendiente-acciones { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .pendiente-acciones .pendiente-descartar { color: var(--muted); }
 .pendiente-acciones .pendiente-descartar:hover { color: var(--out); border-color: var(--out); }
+
+/* El mensaje de confirmacion se arma con \n para separar "que pasa" de "que NO
+   pasa". Sin esto, textContent los come y queda un parrafo apelmazado. */
+#confirm-dialog-message { white-space: pre-line; line-height: 1.5; }
+
+
+/* El aviso de falta de stock se arma con saltos de linea: una linea por
+   insumo, y abajo que hacer. Sin esto queda todo pegado en un parrafo. */
+#insumo-warning-text { white-space: pre-line; line-height: 1.5; }
+
+
+/* ---------------------------------------------------------------------------
+   Seleccion de productos para la receta de un insumo (sheet de proveedores).
+   El caso comun es "este insumo va en TODOS los sandwiches": un chip por
+   categoria lo resuelve en un toque, y la lista de abajo queda para afinar.
+   Los grupos son <details> cerrados: plegados, el bloque entero mide ~300px en
+   vez de los ~1300px que ocuparia la lista completa dentro de una sheet que ya
+   era larga.
+   --------------------------------------------------------------------------- */
+
+.receta-sel {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.receta-sel-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+/* Toggle "marcar todos los de esta categoria". type="button" en el HTML: dentro
+   de un <form>, sin eso el navegador lo trata como submit. */
+.receta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 48px;
+  padding: 0 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.receta-chip-n {
+  min-width: 1.9rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 12px;
+  background: var(--page);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.receta-chip.parcial {
+  border-color: var(--primary-2);
+}
+
+.receta-chip.parcial .receta-chip-n {
+  background: var(--primary-2);
+  color: #fff;
+}
+
+.receta-chip.activo {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.receta-chip.activo .receta-chip-n {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.receta-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Cuantos quedaron marcados, siempre a la vista: con una lista larga se pierde
+   la cuenta de lo que se va a crear al guardar. */
+.receta-sel-resumen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0 0.1rem;
+}
+
+.receta-sel-total {
+  font-size: 0.95rem;
+}
+
+.receta-sel-listas {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.receta-sel-grupo {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.receta-sel-grupo-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0 0.7rem;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.receta-sel-grupo-summary::-webkit-details-marker { display: none; }
+
+.receta-sel-grupo-n {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* Tope de altura con scroll propio: 12 sandwiches a 48px son 576px y empujaban
+   el resto de la sheet fuera de alcance. Contenido para que el gesto no arrastre
+   la sheet entera cuando se llega al final. */
+.receta-sel-items {
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--line);
+}
+
+.receta-sel-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 48px;
+  padding: 0 0.7rem;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.receta-sel-item:last-child { border-bottom: none; }
+
+.receta-sel-item input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  accent-color: var(--primary-2);
+}
+
+.receta-sel-item-nombre {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Linea de receta que ya existe: se ve con su cantidad y no se puede desmarcar
+   desde aca (sacarla borraria una receta que se usa todos los dias). */
+.receta-sel-item-ya {
+  cursor: default;
+  color: var(--muted);
+}
+
+.receta-sel-item-ya-tag {
+  flex-shrink: 0;
+  padding: 0.15rem 0.45rem;
+  border-radius: 10px;
+  background: var(--page);
+  color: var(--ok);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Carrito: que la lista de productos sea lo que manda
+   ---------------------------------------------------------------------------
+   El pie del carrito ocupaba mas alto que los productos: total gigante, dos
+   botones de pago altos, el campo "Pago con" siempre visible y el contador de
+   sandwiches en su propia linea. Con 2 o 3 productos ya habia que hacer scroll
+   para ver lo que se estaba cobrando, que es lo unico que no se puede
+   equivocar.
+   Los tap targets se mantienen en 48px: lo que se recorta es relleno y tamaño
+   de tipografia, no area tocable. */
+
+.cart-items {
+  /* La lista se queda con el espacio que sobra en vez de un alto fijo. */
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin: 10px 0;
+  align-content: start;
+}
+
+.cart-footer { padding-top: 4px; }
+
+/* Total y cantidad de sandwiches en la MISMA linea. */
+.cart-footer .cart-total {
+  padding-top: 8px;
+  font-size: 1rem;
+}
+.cart-footer .cart-total strong { font-size: 1.5rem; }
+.cart-footer .cart-sandwich-count {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.cart-footer .pago-forma { padding-top: 8px; gap: 6px; }
+.cart-footer .pago-forma-button {
+  min-height: 48px;      /* se toca con el dedo: esto no se recorta */
+  padding: 0 8px;
+  font-size: 0.9rem;
+}
+
+/* "Pago con" solo sirve para calcular el vuelto en efectivo. Con tarjeta no
+   hay vuelto que calcular, asi que ocupaba alto para nada. */
+.cart-footer .cart-vuelto { padding-top: 8px; }
+.cart-footer .cart-vuelto label { font-size: 0.9rem; }
+.cart-vuelto[hidden] { display: none; }
+
+.cart-footer .confirm-button { margin-top: 10px; }
+.cart-footer #sale-message:empty { display: none; margin: 0; }
+
+/* ---------------------------------------------------------------------------
+   El Cierre como los pasos del dia
+   ---------------------------------------------------------------------------
+   El dueño lo pidio asi: apertura, pagos, retiros, cierre. El paso que toca
+   ahora se ve abierto; los que ya estan hechos, resueltos y compactos. La
+   pantalla dice sola en que punto del dia estas. */
+
+.caja-paso {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+
+.caja-paso-head { display: flex; align-items: center; gap: 10px; }
+.caja-paso-head h2 { flex: 1; margin: 0; font-size: 1.05rem; }
+
+.caja-paso-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+/* El paso que toca ahora se marca; el hecho se apaga sin desaparecer, para
+   que se pueda volver a el. */
+.caja-paso--ahora { border-color: var(--primary); border-width: 2px; }
+.caja-paso--hecho .caja-paso-num { background: var(--ok); }
+.caja-paso-resuelto { margin: 8px 0 0; }
+.caja-paso-body { margin-top: 10px; }
+.caja-paso-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.caja-paso-form .quantity-field { flex: 1 1 200px; }
+.caja-paso-form .primary-button { min-height: 48px; }
+
+/* La cuenta del mini cierre: de donde sale lo que deberia haber. Un numero
+   sin su desglose es una afirmacion que no se puede discutir. */
+.caja-cuenta {
+  background: var(--page);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.cierre-row--total {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 6px;
+  font-size: 1.05rem;
+}
+.caja-retiro-queda { margin: 8px 0 0; font-weight: 700; }
+.caja-retiro-queda.es-negativo { color: var(--out); }

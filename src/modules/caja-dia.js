@@ -17,6 +17,7 @@
 // guarda y cuándo.
 
 import { getAll } from "../db/idb.js";
+import { esperadoEnCajon, diferenciaDeArqueo } from "./caja-calculos.js";
 import { todayISO } from "../utils/format.js";
 import {
   abrirSesionCaja,
@@ -36,6 +37,53 @@ const SIN_PERSONA = "Caja";
 //    devolver siempre la misma sesión para esa fecha.
 //  - El fondo inicial arranca en 0 porque no se le pregunta. Si más adelante
 //    se quiere pedir "con cuánto arrancás", va acá y no cambia nada más.
+// ¿Ya se abrio la caja hoy? El primer paso de la pantalla depende de esto.
+export async function aperturaDelDia(fecha = todayISO()) {
+  const sesiones = await getAll("sesiones_caja");
+  const delDia = sesiones.filter((x) => String(x.fecha).slice(0, 10) === fecha);
+  if (delDia.length === 0) return null;
+  const s = delDia.sort((a, b) => (a.turno || 0) - (b.turno || 0))[delDia.length - 1];
+  return {
+    uuid: s.uuid,
+    fondoInicialCentavos: Number(s.fondoInicialCentavos) || 0,
+    abiertaPor: s.abiertaPor,
+    abiertaEn: s.abiertaEn,
+    // Una apertura "implicita" (fondo 0, sin nombre) es la que crea el sistema
+    // solo cuando alguien anota un pago sin haber abierto. La pantalla la
+    // trata distinto: sigue pidiendo con cuanto se abrio.
+    implicita: s.abiertaPor === SIN_PERSONA && (Number(s.fondoInicialCentavos) || 0) === 0
+  };
+}
+
+// Paso 1: abrir la caja con el fondo contado.
+export async function abrirCaja({ fondoInicialCentavos, fecha = todayISO(), quien = "" }) {
+  const yaAbierta = await aperturaDelDia(fecha);
+  if (yaAbierta && !yaAbierta.implicita) {
+    throw new Error("La caja de hoy ya está abierta.");
+  }
+  if (yaAbierta?.implicita) {
+    // Ya hay movimientos colgando de esa sesion: no se crea otra (quedarian
+    // huerfanos), se corrige el fondo con un ajuste, que es la forma
+    // append-only de arreglar un numero ya guardado.
+    const diferencia = (Number(fondoInicialCentavos) || 0) - yaAbierta.fondoInicialCentavos;
+    if (diferencia !== 0) {
+      await registrarMovimientoCaja({
+        sesionUuid: yaAbierta.uuid, fecha, tipo: "ajuste",
+        importeCentavos: diferencia,
+        motivo: "Fondo con el que se abrió la caja",
+        categoria: "apertura"
+      });
+    }
+    return { ...yaAbierta, fondoInicialCentavos: Number(fondoInicialCentavos) || 0 };
+  }
+  const sesion = await abrirSesionCaja({
+    fecha,
+    abiertaPor: String(quien || "").trim() || SIN_PERSONA,
+    fondoInicialCentavos: Number(fondoInicialCentavos) || 0
+  });
+  return { uuid: sesion.uuid, fondoInicialCentavos: sesion.fondoInicialCentavos, implicita: false };
+}
+
 async function sesionDelDia(fecha) {
   const locales = await getAll("sesiones_caja");
   const delDia = locales.filter((s) => String(s.fecha).slice(0, 10) === fecha);
@@ -52,6 +100,24 @@ async function sesionDelDia(fecha) {
 }
 
 // Anotar un gasto. Es el caso que más se va a usar: pagó algo del negocio.
+// Paso 2: un pago. El dueño lo describio como "que pago y a quien y que
+// compro": dos datos distintos que antes entraban apretados en un solo campo.
+// El motivo guardado los junta ("Verdura — Delicias Vegetales") porque la base
+// exige un texto no vacio y asi se lee solo en cualquier listado.
+export async function anotarPago({ importeCentavos, concepto, aQuien = "", enEfectivo = true, fecha = todayISO() }) {
+  const sesion = await sesionDelDia(fecha);
+  const quien = String(aQuien || "").trim();
+  const que = String(concepto || "").trim();
+  return await registrarMovimientoCaja({
+    sesionUuid: sesion.uuid, fecha, tipo: "gasto",
+    importeCentavos,
+    motivo: quien ? `${que} — ${quien}` : que,
+    categoria: quien || null,
+    afectaCajon: enEfectivo !== false
+  });
+}
+
+// Se mantiene el nombre viejo para no romper lo que ya lo llamaba.
 export async function anotarGasto({ importeCentavos, motivo, categoria = null, afectaCajon = true, fecha = todayISO() }) {
   const sesion = await sesionDelDia(fecha);
   return await registrarMovimientoCaja({
@@ -82,6 +148,34 @@ export async function anotarIngreso({ importeCentavos, motivo, fecha = todayISO(
 // solo. Es lo que va a pedir Hacienda cuando llegue.
 export async function anularMovimiento(uuid, { motivo = "" } = {}) {
   return await anularMovimientoCaja(uuid, { motivo });
+}
+
+// Paso 3: la foto del cajón ANTES de retirar. El dueño lo pidio asi: "se hace
+// un mini cierre, de se retiro tanto, queda tanto, y deberia dar lo facturado
+// con lo que hay, mas que nada en cash".
+//
+// No guarda nada: es para mostrar en el momento de decidir cuanto sacar.
+export async function fotoDelCajon({ fecha = todayISO(), ventas = [], retiroCentavos = 0 } = {}) {
+  const [sesion, { movimientos }] = await Promise.all([
+    aperturaDelDia(fecha),
+    cargarCajaDelDia(fecha)
+  ]);
+  const esperado = esperadoEnCajon({
+    sesion: sesion ? { fondoInicialCentavos: sesion.fondoInicialCentavos } : { fondoInicialCentavos: 0 },
+    movimientos,
+    ventas
+  });
+  const retiro = Math.abs(Number(retiroCentavos) || 0);
+  return {
+    fondoCentavos: sesion?.fondoInicialCentavos || 0,
+    ventasEfectivoCentavos: esperado.ventasEfectivoCentavos,
+    movimientosCentavos: esperado.movimientosCentavos,
+    esperadoCentavos: esperado.esperadoCentavos,
+    retiroCentavos: retiro,
+    quedaCentavos: esperado.esperadoCentavos - retiro,
+    // Si al retirar se cuenta el efectivo, esto dice si cuadra.
+    compararCon: (contadoCentavos) => diferenciaDeArqueo({ contadoCentavos, esperadoCentavos: esperado.esperadoCentavos })
+  };
 }
 
 // Lo que se anotó hoy, listo para mostrar en una lista.

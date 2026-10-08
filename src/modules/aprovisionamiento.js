@@ -2,7 +2,7 @@ import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/id
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, getPendingSyncCount } from "./sync.js";
-import { fetchInsumosCatalogo, fetchStockInsumos } from "../db/supabase.js";
+import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
@@ -592,6 +592,30 @@ export async function descartarInsumo(insumoId) {
   if (suyas.length > 0) trySyncProveedorInsumosSnapshot(piFinal).catch(() => {});
 
   return { nombre: insumo.nombre, lineasProveedor: suyas.length };
+}
+
+// Sacar un insumo de la receta de un producto.
+//
+// Esto SI borra la fila: una linea de receta no es historia, es configuracion
+// — dice cuanto lleva un producto hoy. Lo que queda registrado es el consumo
+// que ya ocurrio (movimientos_insumos), y eso no se toca.
+//
+// El snapshot de recetas es un upsert y no borra lo que falta, asi que la fila
+// hay que sacarla tambien de la nube. Si no, vuelve en el proximo
+// "Actualizar catalogo".
+export async function eliminarLineaReceta(recetaId) {
+  const receta = await getOne("recetas", recetaId);
+  if (!receta) return { borrada: false };
+
+  await withStores(["recetas"], "readwrite", (stores) => {
+    stores.recetas.delete(recetaId);
+  });
+
+  await deleteRecetaRemota(recetaId).catch(() => {});
+  const recetasFinal = await getAll("recetas");
+  trySyncRecetasSnapshot(recetasFinal).catch(() => {});
+
+  return { borrada: true, productoId: receta.productoId, insumoId: receta.insumoId };
 }
 
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
@@ -1313,7 +1337,13 @@ export async function previewProduccionInsumos(productId, cantidadProducida) {
         insumoId: insumo.id,
         nombre: insumo.nombre,
         unidad: insumo.unidad,
+        unidadCompra: insumo.unidadCompra,
+        factorConversion: insumo.factorConversion,
         stockActual: insumo.stockActual,
+        necesita: total,
+        // Lo que hay que comprar o cargar. Es el numero accionable: el
+        // "quedaria en -150" describe el sintoma, este dice que hacer.
+        falta: Math.abs(stockResultante),
         stockResultante
       });
     }

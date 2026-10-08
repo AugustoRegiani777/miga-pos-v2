@@ -104,21 +104,7 @@ export function renderCierre(container, datos) {
   container.innerHTML = `
     ${aviso}
     <section class="panel-card">
-      <h2>Ventas del sistema</h2>
-      <div class="cierre-ventas">
-        <div><small>Total del día</small><strong>${centsToMoney(ventasTotal)}</strong></div>
-        <div><small>Tickets</small><strong>${datos.ventas.length}</strong></div>
-      </div>
-      <p class="cierre-nota">Según cómo se cobró cada venta en la Caja: 💵 ${centsToMoney(sistema.efectivoCentavos)} · 💳 ${centsToMoney(sistema.tarjetaCentavos)}. Es solo una referencia: el total real de tarjeta es el del cierre de Postnet, de abajo.</p>
-      ${tgtg.length ? `
-        <label class="cierre-check">
-          <input type="checkbox" id="cierre-tgtg-cajon" ${v?.tgtgEnCajon ? "checked" : ""}>
-          <span>Too Good To Go: ${tgtg.length} paquete${tgtg.length > 1 ? "s" : ""} (${centsToMoney(tgtgTotal)}). Marcá si se cobró en el local; si lo cobra la app no entra al cajón.</span>
-        </label>` : ""}
-    </section>
-
-    <section class="panel-card">
-      <h2>Lo que contaste</h2>
+      <h2><span class="caja-paso-num">4</span> Cerrar el día</h2>
       <div class="cierre-form">
         ${campoDinero("cierre-fondo", "Fondo con el que abriste (€)", centavosAInput(fondo ?? 0), datos.fondoSugeridoCentavos !== null && !v ? "Propuesto: lo que dejaste en el último cierre." : "")}
         ${campoDinero("cierre-tarjeta", "Tarjeta: total del cierre de Postnet (€)", centavosAInput(v?.tarjetaCentavos ?? null), "Si no hubo ventas con tarjeta, poné 0.")}
@@ -136,6 +122,20 @@ export function renderCierre(container, datos) {
       <div id="cierre-resultado" class="cierre-resultado"></div>
       ${vigenteHtml}
       <button type="button" class="primary-button" id="cierre-guardar">Cerrar caja</button>
+    </section>
+
+    <section class="panel-card">
+      <h2>Ventas del sistema</h2>
+      <div class="cierre-ventas">
+        <div><small>Total del día</small><strong>${centsToMoney(ventasTotal)}</strong></div>
+        <div><small>Tickets</small><strong>${datos.ventas.length}</strong></div>
+      </div>
+      <p class="cierre-nota">Según cómo se cobró cada venta en la Caja: 💵 ${centsToMoney(sistema.efectivoCentavos)} · 💳 ${centsToMoney(sistema.tarjetaCentavos)}. Es solo una referencia: el total real de tarjeta es el del cierre de Postnet, de abajo.</p>
+      ${tgtg.length ? `
+        <label class="cierre-check">
+          <input type="checkbox" id="cierre-tgtg-cajon" ${v?.tgtgEnCajon ? "checked" : ""}>
+          <span>Too Good To Go: ${tgtg.length} paquete${tgtg.length > 1 ? "s" : ""} (${centsToMoney(tgtgTotal)}). Marcá si se cobró en el local; si lo cobra la app no entra al cajón.</span>
+        </label>` : ""}
     </section>
 
     <section class="panel-card">

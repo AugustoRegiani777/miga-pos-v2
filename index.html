@@ -151,9 +151,8 @@
           </div>
           <div id="cart-items" class="cart-items empty">Sin productos.</div>
           <div class="cart-footer">
-            <p class="cart-sandwich-count" id="cart-sandwich-count">Sandwiches en carrito: 0</p>
             <div class="cart-total">
-              <span>Total</span>
+              <span class="cart-sandwich-count" id="cart-sandwich-count">Sandwiches: 0</span>
               <strong id="cart-total">0,00 EUR</strong>
             </div>
             <div class="pago-forma" role="group" aria-label="Forma de pago">
@@ -293,7 +292,7 @@
       <section class="form-section stock-adjust-sheet" id="insumo-warning-sheet" aria-hidden="true">
         <div class="production-sheet-header">
           <div>
-            <h2>Falta stock de insumos</h2>
+            <h2>Te falta cargar stock</h2>
             <p id="insumo-warning-text"></p>
           </div>
           <button type="button" class="ghost-button compact" id="close-insumo-warning" aria-label="Cerrar">Cerrar</button>
@@ -412,46 +411,62 @@
         <p>Tarjeta del cierre de Postnet, efectivo contado, y cuánto debería haber en el cajón.</p>
       </section>
 
-      <section class="form-section" id="caja-movimientos-bloque">
-        <div class="section-heading">
-          <h2>Movimientos del d&iacute;a</h2>
-          <button class="primary-button compact" type="button" id="caja-anotar">+ Anotar</button>
-        </div>
-        <p class="form-instruccion">Anot&aacute; lo que pagu&eacute;s o saques del caj&oacute;n <strong>cuando pasa</strong>, y al cerrar el d&iacute;a ya est&aacute; todo contado. Si lo carg&aacute;s mal, se anula.</p>
-        <div id="caja-movimientos-lista"></div>
-      </section>
 
-      <!-- Sheet: anotar un movimiento de caja -->
-      <section class="production-sheet-backdrop" id="caja-mov-backdrop" hidden></section>
-      <section class="form-section stock-adjust-sheet" id="caja-mov-sheet" aria-hidden="true">
-        <form id="caja-mov-form" class="stock-form" novalidate>
+      <!-- Sheet: anotar un PAGO (paso 2) -->
+      <section class="production-sheet-backdrop" id="caja-pago-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="caja-pago-sheet" aria-hidden="true">
+        <form id="caja-pago-form" class="stock-form" novalidate>
           <div class="production-sheet-header">
-            <div><h2>Anotar movimiento</h2></div>
-            <button type="button" class="ghost-button compact" id="close-caja-mov">Cerrar</button>
+            <div><h2>Anotar un pago</h2></div>
+            <button type="button" class="ghost-button compact" id="close-caja-pago">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
+            <label class="quantity-field">
+              <span>&iquest;Cu&aacute;nto pagaste? (&euro;)</span>
+              <input id="caja-pago-importe" type="text" inputmode="decimal" placeholder="0,00" required>
+            </label>
+            <label class="quantity-field">
+              <span>&iquest;Qu&eacute; compraste?</span>
+              <input id="caja-pago-concepto" type="text" placeholder="Verdura, pan, caf&eacute;..." required>
+            </label>
+            <label class="quantity-field">
+              <span>&iquest;A qui&eacute;n? <small>(opcional)</small></span>
+              <input id="caja-pago-quien" type="text" list="caja-pago-proveedores" placeholder="Delicias Vegetales, el del taxi...">
+              <datalist id="caja-pago-proveedores"></datalist>
+            </label>
             <div class="quantity-field">
-              <span>&iquest;Qu&eacute; pas&oacute;?</span>
-              <div class="caja-tipo-btns" id="caja-mov-tipo">
-                <button type="button" class="tipo-btn active" data-tipo="gasto">Pagu&eacute; algo</button>
-                <button type="button" class="tipo-btn" data-tipo="retiro">Saqu&eacute; plata</button>
-                <button type="button" class="tipo-btn" data-tipo="ingreso">Entr&oacute; plata</button>
+              <span>&iquest;C&oacute;mo lo pagaste?</span>
+              <div class="caja-tipo-btns" id="caja-pago-forma">
+                <button type="button" class="tipo-btn active" data-forma="efectivo">En efectivo</button>
+                <button type="button" class="tipo-btn" data-forma="tarjeta">Con tarjeta</button>
               </div>
+              <p class="campo-ayuda">Con tarjeta sigue siendo un gasto, pero no sale del caj&oacute;n.</p>
             </div>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Sheet: retirar plata, con el mini cierre (paso 3) -->
+      <section class="production-sheet-backdrop" id="caja-retiro-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="caja-retiro-sheet" aria-hidden="true">
+        <form id="caja-retiro-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div><h2>Retirar plata del caj&oacute;n</h2></div>
+            <button type="button" class="ghost-button compact" id="close-caja-retiro">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <div id="caja-retiro-cuenta" class="caja-cuenta"></div>
             <label class="quantity-field">
-              <span>Importe (EUR)</span>
-              <input id="caja-mov-importe" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" required>
+              <span>&iquest;Cu&aacute;nto sac&aacute;s? (&euro;)</span>
+              <input id="caja-retiro-importe" type="text" inputmode="decimal" placeholder="0,00" required>
             </label>
+            <p id="caja-retiro-queda" class="caja-retiro-queda"></p>
             <label class="quantity-field">
-              <span>&iquest;En qu&eacute;? <small>(queda guardado, as&iacute; que escrib&iacute; algo que se entienda ma&ntilde;ana)</small></span>
-              <input id="caja-mov-motivo" type="text" placeholder="Verdura, taxi, al banco..." required>
-            </label>
-            <label class="quantity-field" id="caja-mov-cajon-campo">
-              <span>&iquest;Sali&oacute; del caj&oacute;n?</span>
-              <select id="caja-mov-cajon">
-                <option value="si">S&iacute;, pagu&eacute; en efectivo</option>
-                <option value="no">No, con tarjeta o transferencia</option>
-              </select>
+              <span>&iquest;Para qu&eacute;?</span>
+              <input id="caja-retiro-motivo" type="text" placeholder="Al banco, a la caja fuerte..." required>
             </label>
           </div>
           <div class="sheet-footer">
@@ -466,6 +481,10 @@
         <button class="ghost-button compact" type="button" id="cierre-next" aria-label="Día siguiente">&rsaquo;</button>
         <button class="ghost-button compact" type="button" id="cierre-hoy">Hoy</button>
       </div>
+
+      <div id="caja-paso-apertura"></div>
+      <div id="caja-paso-pagos"></div>
+      <div id="caja-paso-retiros"></div>
 
       <section class="cierre-export" aria-label="Resumen y exportación del día">
         <strong class="cierre-export-title">Resumen del día</strong>
@@ -784,20 +803,33 @@
                 <span>Stock critico</span>
                 <input id="prov-prod-nuevo-crit" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
               </label>
-              <div class="section-heading" style="margin-top: 0.5rem;">
-                <h2 style="font-size: 0.95rem;">¿A que productos se agrega en su receta? <span class="cal-muted">(opcional, se puede agregar a varios)</span></h2>
-              </div>
-              <div id="prov-prod-receta-rows"></div>
-              <button type="button" class="ghost-button compact" id="prov-prod-add-receta-row">+ Agregar a otro producto</button>
             </div>
             <label class="quantity-field">
-              <span id="prov-prod-cantidad-label">Cantidad por unidad de compra</span>
-              <input id="prov-prod-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+              <span id="prov-prod-cantidad-label">&iquest;Cuánto trae cada unidad de compra?</span>
+              <input id="prov-prod-cantidad" type="text" inputmode="decimal" placeholder="0">
             </label>
+            <p class="campo-ayuda" id="prov-prod-cantidad-ayuda"></p>
             <label class="quantity-field">
               <span>Precio por unidad de compra (EUR)</span>
-              <input id="prov-prod-precio" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+              <input id="prov-prod-precio" type="text" inputmode="decimal" placeholder="0,00">
             </label>
+
+            <!-- A que productos se le agrega en la receta. Visible tanto al crear
+                 un insumo nuevo como al editar una linea de un insumo que ya
+                 existe (antes solo al crear, y no habia forma de enganchar un
+                 insumo existente a una receta sin irse a Gestion > Recetas). -->
+            <div id="prov-prod-receta-section" hidden>
+              <div class="section-heading" style="margin-top: 0.25rem;">
+                <h2 style="font-size: 0.95rem;">&iquest;A qu&eacute; productos se le agrega en la receta? <span class="cal-muted">(opcional)</span></h2>
+              </div>
+              <p class="campo-ayuda" id="prov-prod-receta-ayuda">Toc&aacute; una categor&iacute;a para marcar todos sus productos de una, y desmarc&aacute; los que no lo lleven. Pod&eacute;s sumar productos de varias categor&iacute;as.</p>
+              <div id="prov-prod-receta-rows"></div>
+              <label class="quantity-field" id="prov-prod-receta-cantidad-field">
+                <span>&iquest;Cu&aacute;nto lleva una unidad <small id="prov-prod-receta-cantidad-unidad">(en la unidad base de arriba)</small></span>
+                <input id="prov-prod-receta-cantidad" type="text" inputmode="decimal" autocomplete="off" placeholder="25">
+              </label>
+              <p class="campo-ayuda" id="prov-prod-receta-cantidad-ayuda">La misma cantidad para todos los que marques. Despu&eacute;s pod&eacute;s ajustar cada uno por separado en Gesti&oacute;n &rsaquo; Recetas.</p>
+            </div>
           </div>
           <div class="sheet-footer">
             <button class="primary-button" type="submit">Guardar</button>

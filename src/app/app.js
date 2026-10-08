@@ -2,14 +2,14 @@ import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, bu
 import { cargarPanel } from "../modules/panel.js";
 import { cargarCierre, guardarCierre } from "../modules/cierre.js";
 import { renderCierre, calcularDesdeFormulario } from "../ui/render-cierre.js";
-import { anotarGasto, anotarRetiro, anotarIngreso, anularMovimiento, movimientosDelDia, totalesDelDia } from "../modules/caja-dia.js";
-import { renderMovimientosCaja } from "../ui/render-caja-movimientos.js";
+import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon } from "../modules/caja-dia.js";
+import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/render-caja-pasos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
-import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows } from "../ui/render-proveedores.js";
+import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto } from "../modules/menu.js";
 import { habilitarArrastre } from "../ui/arrastrar-filas.js";
 import { revisarCicloInsumos, pendientesDelCiclo, resumenPendientes } from "../modules/ciclo-insumos.js";
@@ -252,6 +252,11 @@ let selectedProvProdId = "";
 let provProdMode = "add";
 let provEditMode = "edit";
 let provProdRecetaVinculos = [];
+// productoId -> texto de la cantidad que ese producto ya lleva de este
+// insumo ("25 ml"). Se usa al editar: esas lineas ya existen, no se vuelven
+// a crear y el campo unico de cantidad no las pisa.
+let provProdRecetaYaEnReceta = new Map();
+let insumoRecetaCargado = null;
 let provProdProductosDisponibles = [];
 let provEditSheetOpen = false;
 let provProdSheetOpen = false;
@@ -517,17 +522,26 @@ const dom = {
   provEditNotas: document.querySelector("#prov-edit-notas"),
   provEditDias: document.querySelector("#prov-edit-dias"),
   provEditLead: document.querySelector("#prov-edit-lead"),
-  cajaMovLista: document.querySelector("#caja-movimientos-lista"),
-  cajaAnotar: document.querySelector("#caja-anotar"),
-  cajaMovSheet: document.querySelector("#caja-mov-sheet"),
-  cajaMovBackdrop: document.querySelector("#caja-mov-backdrop"),
-  cajaMovForm: document.querySelector("#caja-mov-form"),
-  cajaMovTipo: document.querySelector("#caja-mov-tipo"),
-  cajaMovImporte: document.querySelector("#caja-mov-importe"),
-  cajaMovMotivo: document.querySelector("#caja-mov-motivo"),
-  cajaMovCajon: document.querySelector("#caja-mov-cajon"),
-  cajaMovCajonCampo: document.querySelector("#caja-mov-cajon-campo"),
-  closeCajaMov: document.querySelector("#close-caja-mov"),
+  cajaPasoApertura: document.querySelector("#caja-paso-apertura"),
+  cajaPasoPagos: document.querySelector("#caja-paso-pagos"),
+  cajaPasoRetiros: document.querySelector("#caja-paso-retiros"),
+  cajaPagoSheet: document.querySelector("#caja-pago-sheet"),
+  cajaPagoBackdrop: document.querySelector("#caja-pago-backdrop"),
+  cajaPagoForm: document.querySelector("#caja-pago-form"),
+  cajaPagoImporte: document.querySelector("#caja-pago-importe"),
+  cajaPagoConcepto: document.querySelector("#caja-pago-concepto"),
+  cajaPagoQuien: document.querySelector("#caja-pago-quien"),
+  cajaPagoProveedores: document.querySelector("#caja-pago-proveedores"),
+  cajaPagoForma: document.querySelector("#caja-pago-forma"),
+  closeCajaPago: document.querySelector("#close-caja-pago"),
+  cajaRetiroSheet: document.querySelector("#caja-retiro-sheet"),
+  cajaRetiroBackdrop: document.querySelector("#caja-retiro-backdrop"),
+  cajaRetiroForm: document.querySelector("#caja-retiro-form"),
+  cajaRetiroImporte: document.querySelector("#caja-retiro-importe"),
+  cajaRetiroMotivo: document.querySelector("#caja-retiro-motivo"),
+  cajaRetiroCuenta: document.querySelector("#caja-retiro-cuenta"),
+  cajaRetiroQueda: document.querySelector("#caja-retiro-queda"),
+  closeCajaRetiro: document.querySelector("#close-caja-retiro"),
   provEditEntrega: document.querySelector("#prov-edit-entrega"),
   provProdSheet: document.querySelector("#prov-prod-sheet"),
   provProdBackdrop: document.querySelector("#prov-prod-backdrop"),
@@ -544,8 +558,12 @@ const dom = {
   provProdNuevoMin: document.querySelector("#prov-prod-nuevo-min"),
   provProdNuevoCrit: document.querySelector("#prov-prod-nuevo-crit"),
   provProdRecetaRows: document.querySelector("#prov-prod-receta-rows"),
-  provProdAddRecetaRow: document.querySelector("#prov-prod-add-receta-row"),
   provProdCantidadLabel: document.querySelector("#prov-prod-cantidad-label"),
+  provProdCantidadAyuda: document.querySelector("#prov-prod-cantidad-ayuda"),
+  provProdRecetaSection: document.querySelector("#prov-prod-receta-section"),
+  provProdRecetaCantidad: document.querySelector("#prov-prod-receta-cantidad"),
+  provProdRecetaCantidadUnidad: document.querySelector("#prov-prod-receta-cantidad-unidad"),
+  provProdRecetaAyuda: document.querySelector("#prov-prod-receta-ayuda"),
   provProdCantidad: document.querySelector("#prov-prod-cantidad"),
   provProdPrecio: document.querySelector("#prov-prod-precio"),
   menuList: document.querySelector("#menu-list"),
@@ -1937,7 +1955,13 @@ async function descartarPendienteCiclo(article) {
   const error = article.querySelector(".pendiente-error");
   const insumoId = article.dataset.insumo;
   const nombre = article.querySelector("strong")?.textContent || insumoId;
-  if (!window.confirm(`¿Sacar "${nombre}" de la lista? Deja de aparecer en insumos y en la lista de compras. Se puede volver atrás.`)) return;
+  const confirmado = await confirmDialog({
+    title: `¿Ya no usás ${nombre}?`,
+    message: `Sale de tus insumos y deja de aparecer en la lista de compras.\n\nNo se borra nada: su historial queda guardado y podés volver a activarlo cuando quieras.`,
+    acceptText: "Sí, no lo uso",
+    cancelText: "Dejarlo"
+  });
+  if (!confirmado) return;
 
   const boton = article.querySelector('[data-accion="descartar"]');
   boton.disabled = true;
@@ -2097,7 +2121,49 @@ function closeProvEdit() {
 }
 
 function renderProvProdRecetaRowsView() {
-  renderProvProdRecetaRows(dom.provProdRecetaRows, provProdRecetaVinculos, provProdProductosDisponibles);
+  renderProvProdRecetaRows(dom.provProdRecetaRows, provProdRecetaVinculos, provProdProductosDisponibles, { yaEnReceta: provProdRecetaYaEnReceta });
+}
+
+// Repinta la seleccion sobre el HTML que ya esta puesto. Reconstruirlo en cada
+// tap perdia el scroll de la lista y cerraba los grupos abiertos.
+function pintarProvProdRecetaSeleccion() {
+  aplicarProvProdRecetaSeleccion(dom.provProdRecetaRows, provProdRecetaVinculos, provProdProductosDisponibles, { yaEnReceta: provProdRecetaYaEnReceta });
+}
+
+// Marca o desmarca un producto. El array es la unica fuente de verdad: el DOM
+// se deriva de el (ver aplicarProvProdRecetaSeleccion).
+function setProvProdRecetaProducto(productoId, incluir) {
+  if (!productoId || provProdRecetaYaEnReceta.has(productoId)) return;
+  const idx = provProdRecetaVinculos.findIndex((v) => v.productoId === productoId);
+  if (incluir && idx === -1) provProdRecetaVinculos.push({ productoId, cantidad: "" });
+  if (!incluir && idx !== -1) provProdRecetaVinculos.splice(idx, 1);
+}
+
+// Desmarcar una receta que YA existe no es lo mismo que no marcar una nueva:
+// borra la linea. Por eso pregunta, y por eso se aplica al instante en vez de
+// esperar al Guardar — asi el estado de la pantalla no miente sobre lo que
+// ya pasó.
+async function quitarRecetaExistente(productoId, checkbox) {
+  const insumoId = dom.provProdInsumo.value;
+  const producto = provProdProductosDisponibles.find((p) => p.id === productoId);
+  const nombre = producto?.nombre || productoId;
+  const confirmado = await confirmDialog({
+    title: `¿Sacarlo de ${nombre}?`,
+    message: `Ese producto deja de descontar este insumo al producirse o venderse.\n\nSe borra la línea de receta. El consumo que ya quedó registrado no se toca.`,
+    acceptText: "Sacarlo",
+    cancelText: "Dejarlo"
+  });
+  if (!confirmado) { checkbox.checked = true; return; }
+
+  try {
+    await eliminarLineaReceta(`${productoId}:${insumoId}`);
+    provProdRecetaYaEnReceta.delete(productoId);
+    setFlash(`Ya no se descuenta en ${nombre}.`, "success");
+    aplicarProvProdRecetaSeleccion(dom.provProdRecetaRows, provProdRecetaVinculos, provProdProductosDisponibles, { yaEnReceta: provProdRecetaYaEnReceta });
+  } catch (error) {
+    checkbox.checked = true;
+    setFlash(error.message || "No se pudo sacar de la receta.", "error");
+  }
 }
 
 function limpiarProvProdNuevoInsumoFields() {
@@ -2106,13 +2172,16 @@ function limpiarProvProdNuevoInsumoFields() {
   dom.provProdNuevoMin.value = "";
   dom.provProdNuevoCrit.value = "";
   provProdRecetaVinculos = [];
+  provProdRecetaYaEnReceta = new Map();
+  insumoRecetaCargado = null;
+  dom.provProdRecetaCantidad.value = "";
 }
 
 async function openProvProdAdd(proveedorId) {
   selectedProvId = proveedorId;
   selectedProvProdId = "";
   provProdMode = "add";
-  dom.provProdTitle.textContent = "Agregar insumo";
+  dom.provProdTitle.textContent = "Agregar lo que te vende este proveedor";
   dom.provProdContext.textContent = "";
   dom.provProdNombre.value = "";
   dom.provProdUnidad.value = "";
@@ -2122,8 +2191,7 @@ async function openProvProdAdd(proveedorId) {
   const insumos = await listInsumos();
   renderProvProdInsumoSelect(dom.provProdInsumo, insumos, "");
   provProdProductosDisponibles = await listProducts();
-  renderProvProdRecetaRowsView();
-  updateProvProdCantidadLabel();
+  await refrescarProvProdReceta();
   setProvProdSheetOpen(true);
   dom.provProdNombre.focus();
 }
@@ -2132,7 +2200,7 @@ async function openProvProdEdit(producto) {
   selectedProvId = producto.proveedorId;
   selectedProvProdId = producto.id;
   provProdMode = "edit";
-  dom.provProdTitle.textContent = "Editar insumo";
+  dom.provProdTitle.textContent = "Editar lo que te vende este proveedor";
   dom.provProdContext.textContent = producto.nombreProducto;
   dom.provProdNombre.value = producto.nombreProducto;
   dom.provProdUnidad.value = producto.unidadCompra ?? "";
@@ -2142,8 +2210,7 @@ async function openProvProdEdit(producto) {
   const insumos = await listInsumos();
   renderProvProdInsumoSelect(dom.provProdInsumo, insumos, producto.insumoId ?? "");
   provProdProductosDisponibles = await listProducts();
-  renderProvProdRecetaRowsView();
-  updateProvProdCantidadLabel();
+  await refrescarProvProdReceta();
   setProvProdSheetOpen(true);
   dom.provProdNombre.focus();
 }
@@ -2154,21 +2221,100 @@ function closeProvProd() {
   selectedProvProdId = "";
 }
 
+// La unidad de CONSUMO del insumo (la de la receta y la del stock), venga del
+// insumo que se esta creando o del que ya existe y se eligio en el selector.
+// Antes se sacaba con un regex sobre el texto de la opcion; ahora la opcion
+// trae data-unidad (ver renderProvProdInsumoSelect).
+function unidadBaseProvProd() {
+  const insumoId = dom.provProdInsumo.value;
+  if (insumoId === "__nuevo__") return dom.provProdNuevoUnidad.value.trim();
+  if (!insumoId) return "";
+  const option = dom.provProdInsumo.options[dom.provProdInsumo.selectedIndex];
+  return (option?.dataset.unidad || "").trim();
+}
+
+// "Cantidad por unidad de compra (unidades)" no se entendia, y la lectura
+// natural era la equivocada: el dueño asumio que eran los ENVASES que trae la
+// caja. Son las unidades BASE: la leche de Makro viene por caja y el valor es
+// 9000 (6 botellas x 1,5 L = 9000 ml), no 6. Poner 6 hace creer a la app que
+// una caja son 6 ml y la lista de compras pide cientos de cajas — es el mismo
+// modo de falla que hizo pedir 3862 litros de leche de soja.
+//
+// Asi que el label se arma en vivo con las dos cosas que la persona ya escribio
+// en esta misma sheet: "¿Cuántos ml trae cada caja?".
 function updateProvProdCantidadLabel() {
   const insumoId = dom.provProdInsumo.value;
   const esNuevo = insumoId === "__nuevo__";
   dom.provProdNuevoInsumoFields.hidden = !esNuevo;
-  if (!insumoId || esNuevo) {
-    dom.provProdCantidadLabel.textContent = "Cantidad por unidad de compra (unidades)";
+
+  const base = unidadBaseProvProd();
+  const compra = dom.provProdUnidad.value.trim();
+  const baseEtq = base ? etiquetaUnidad(base) : "";
+  const compraEtq = compra ? etiquetaUnidad(compra) : "";
+
+  if (baseEtq && compraEtq) {
+    dom.provProdCantidadLabel.textContent = `¿Cuántos ${baseEtq} trae cada ${compraEtq}?`;
+  } else if (baseEtq) {
+    dom.provProdCantidadLabel.textContent = `¿Cuántos ${baseEtq} trae cada unidad que te factura?`;
+  } else if (compraEtq) {
+    dom.provProdCantidadLabel.textContent = `¿Cuánto trae cada ${compraEtq}, en la unidad del insumo?`;
+  } else {
+    dom.provProdCantidadLabel.textContent = "¿Cuánto trae cada unidad de compra?";
+  }
+
+  const ejemplo = "Una caja de 6 botellas de 1,5 L son 9000 ml, no 6.";
+  dom.provProdCantidadAyuda.textContent = baseEtq && compraEtq
+    ? `Lo que hay en total dentro de cada ${compraEtq}, medido en ${baseEtq} — no cuántos envases trae. ${ejemplo}`
+    : `El total en la unidad en la que usás el insumo (g, ml, unidad...), no cuántos envases trae. ${ejemplo}`;
+}
+
+// El campo de cantidad de la receta decia solo "Cantidad": con "L" escrito
+// arriba no habia forma de saber si esos 25 eran gramos, mililitros o litros.
+// Misma redaccion que el formulario de pendientes de ciclo.
+function updateProvProdRecetaCantidadLabel() {
+  const base = unidadBaseProvProd();
+  dom.provProdRecetaCantidadUnidad.textContent = base
+    ? `(en ${etiquetaUnidad(base)})`
+    : "(en la unidad base de arriba)";
+}
+
+// Muestra u oculta el bloque de recetas y lo deja al dia. Si el insumo elegido
+// ya existe, precarga las lineas de receta que ya tiene para que se vean (y no
+// se dupliquen ni se pisen sus cantidades).
+async function refrescarProvProdReceta() {
+  updateProvProdCantidadLabel();
+  const insumoId = dom.provProdInsumo.value;
+  // Sin insumo vinculado (reventa) no hay receta posible.
+  dom.provProdRecetaSection.hidden = !insumoId;
+  if (!insumoId) {
+    provProdRecetaVinculos = [];
+    provProdRecetaYaEnReceta = new Map();
+    updateProvProdRecetaCantidadLabel();
     return;
   }
-  const option = dom.provProdInsumo.options[dom.provProdInsumo.selectedIndex];
-  const labelText = option?.text ?? "";
-  const match = labelText.match(/\(([^)]+)\)$/);
-  const unidad = match ? match[1] : "";
-  dom.provProdCantidadLabel.textContent = unidad
-    ? `Cantidad en ${unidad} por unidad de compra`
-    : "Cantidad por unidad de compra";
+
+  provProdRecetaYaEnReceta = new Map();
+  if (insumoId !== insumoRecetaCargado) {
+    // Cambiar de insumo empieza de cero: lo marcado era para el anterior.
+    provProdRecetaVinculos = [];
+    insumoRecetaCargado = insumoId;
+  }
+  if (insumoId !== "__nuevo__") {
+    const porProducto = await getRecetasDashboardData();
+    for (const entrada of porProducto) {
+      const linea = entrada.recetas.find((r) => r.insumoId === insumoId);
+      if (linea) provProdRecetaYaEnReceta.set(entrada.productoId, formatearCantidad(linea.cantidadPorUnidad, linea.unidad));
+    }
+  }
+  // Un producto que ya la lleva no puede estar tambien en "para agregar".
+  provProdRecetaVinculos = provProdRecetaVinculos.filter((v) => !provProdRecetaYaEnReceta.has(v.productoId));
+
+  dom.provProdRecetaAyuda.textContent = provProdRecetaYaEnReceta.size > 0
+    ? "Tocá una categoría para marcar todos sus productos de una. Lo que ya está en su receta aparece con su cantidad y no se toca desde acá: para sacarlo o cambiarlo, andá a Gestión › Recetas."
+    : "Tocá una categoría para marcar todos sus productos de una, y desmarcá los que no lo lleven. Podés sumar productos de varias categorías.";
+
+  renderProvProdRecetaRowsView();
+  updateProvProdRecetaCantidadLabel();
 }
 
 async function handleDeleteProveedorInsumo(producto) {
@@ -2556,31 +2702,84 @@ let cierreGuardando = false;
 const fechaDelCierre = () => cierreFecha || dom.cierreDate.value || todayISO();
 
 let cajaMovEnCurso = false;
+let cajaFotoActual = null;
 
-function tipoCajaElegido() {
-  return dom.cajaMovTipo.querySelector(".tipo-btn.active")?.dataset.tipo || "gasto";
+function setSheetOpen(sheet, backdrop, abierto) {
+  sheet.classList.toggle("open", abierto);
+  sheet.setAttribute("aria-hidden", abierto ? "false" : "true");
+  backdrop.hidden = !abierto;
+  backdrop.classList.toggle("open", abierto);
 }
 
-function setCajaMovSheetOpen(abierto) {
-  dom.cajaMovSheet.classList.toggle("open", abierto);
-  dom.cajaMovSheet.setAttribute("aria-hidden", abierto ? "false" : "true");
-  dom.cajaMovBackdrop.hidden = !abierto;
-  dom.cajaMovBackdrop.classList.toggle("open", abierto);
+function formaPagoElegida() {
+  return dom.cajaPagoForma.querySelector(".tipo-btn.active")?.dataset.forma || "efectivo";
 }
 
-// Solo un gasto puede ser "no salio del cajon" (pagado con tarjeta). Un retiro
-// o un ingreso son efectivo por definicion, y ofrecer la opcion ahi solo
-// invita a cargarlo mal.
-function actualizarCampoCajon() {
-  dom.cajaMovCajonCampo.hidden = tipoCajaElegido() !== "gasto";
+// Los tres pasos se dibujan juntos: cada uno depende de lo que pasó en el
+// anterior (el fondo de la apertura entra en la cuenta del retiro).
+// Anular es la misma accion en los dos pasos (pagos y retiros), asi que el
+// manejador es uno solo. No borra: appendea el importe al reves, enlazado al
+// original. Los dos quedan a la vista y el total da bien solo.
+async function manejarAnular(event) {
+  const btn = event.target.closest("[data-anular]");
+  if (!btn || cajaMovEnCurso) return;
+  const confirmado = await confirmDialog({
+    title: "\u00bfAnular este movimiento?",
+    message: "Deja de contar en los totales del d\u00eda.\n\nQueda anotado que se anul\u00f3, tachado en la lista: no se borra, para que el d\u00eda siga siendo auditable.",
+    acceptText: "Anular",
+    cancelText: "Dejarlo"
+  });
+  if (!confirmado) return;
+  try {
+    cajaMovEnCurso = true;
+    await anularMovimiento(btn.dataset.anular, { motivo: "anulado desde el cierre" });
+    setFlash("Movimiento anulado.", "success");
+    await refrescarPasosCaja();
+    await renderCierreView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo anular.", "error");
+  } finally { cajaMovEnCurso = false; }
 }
 
-async function refrescarMovimientosCaja() {
-  const [movimientos, totales] = await Promise.all([
+// El mini cierre del retiro: cuanto deberia haber, cuanto se saca, cuanto
+// queda. Se repinta mientras se tipea, que es cuando sirve para decidir.
+function pintarCuentaRetiro() {
+  if (!cajaFotoActual) { dom.cajaRetiroCuenta.innerHTML = ""; dom.cajaRetiroQueda.textContent = ""; return; }
+  const f = cajaFotoActual;
+  const fila = (texto, valor) => `<div class="cierre-row"><span>${texto}</span><strong>${valor}</strong></div>`;
+  dom.cajaRetiroCuenta.innerHTML =
+    fila("Abriste con", centsToMoney(f.fondoCentavos)) +
+    fila("Cobraste en efectivo", "+" + centsToMoney(f.ventasEfectivoCentavos)) +
+    fila("Pagos y retiros de hoy", centsToMoney(f.movimientosCentavos)) +
+    `<div class="cierre-row cierre-row--total"><span>Deber\u00eda haber ahora</span><strong>${centsToMoney(f.esperadoCentavos)}</strong></div>`;
+
+  const euros = parseDecimal(dom.cajaRetiroImporte.value);
+  if (!Number.isFinite(euros) || euros <= 0) { dom.cajaRetiroQueda.textContent = ""; return; }
+  const saca = Math.round(euros * 100);
+  const queda = f.esperadoCentavos - saca;
+  dom.cajaRetiroQueda.textContent = `Si sac\u00e1s ${centsToMoney(saca)}, en el caj\u00f3n quedan ${centsToMoney(queda)}.`;
+  dom.cajaRetiroQueda.classList.toggle("es-negativo", queda < 0);
+}
+
+async function refrescarPasosCaja() {
+  const [apertura, movimientos, totales] = await Promise.all([
+    aperturaDelDia(cierreFecha),
     movimientosDelDia(cierreFecha),
     totalesDelDia(cierreFecha)
   ]);
-  renderMovimientosCaja(dom.cajaMovLista, { movimientos, totales, soloLectura: isModoConsulta() });
+  const vivos = movimientos.filter((m) => m.tipo !== "ajuste" || m.categoria === "apertura" ? m.tipo !== "ajuste" : true);
+  renderPasoApertura(dom.cajaPasoApertura, { apertura });
+  renderPasoPagos(dom.cajaPasoPagos, {
+    pagos: vivos.filter((m) => m.tipo === "gasto"),
+    totalCentavos: totales.gastosCentavos
+  });
+
+  const ventas = cierreDatos?.ventas || [];
+  cajaFotoActual = await fotoDelCajon({ fecha: cierreFecha, ventas }).catch(() => null);
+  renderPasoRetiros(dom.cajaPasoRetiros, {
+    retiros: vivos.filter((m) => m.tipo === "retiro"),
+    foto: cajaFotoActual
+  });
 }
 
 async function renderCierreView() {
@@ -2593,7 +2792,7 @@ async function renderCierreView() {
   cierreCargando = true;
   try {
     cierreDatos = await cargarCierre(cierreFecha);
-    await refrescarMovimientosCaja().catch(() => {});
+    await refrescarPasosCaja().catch(() => {});
     if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos);
   } catch (error) {
     dom.cierreRoot.textContent = `No se pudo cargar el cierre: ${error.message || error}`;
@@ -3045,9 +3244,18 @@ function bindEvents() {
         const faltantes = await previewProduccionInsumos(selectedProductionProductId, cantidad);
         if (faltantes.length > 0) {
           pendingProduction = { productId: selectedProductionProductId, quantityRaw, faltantes };
-          dom.insumoWarningText.textContent = faltantes
-            .map((f) => `${f.nombre}: quedaria en ${f.stockResultante}${f.unidad}.`)
-            .join(" ");
+          // Antes decia "leche: quedaria en -150ml", que describe el sintoma.
+          // Lo que la persona necesita saber es QUE le falta cargar y CUANTO,
+          // en la unidad en que lo compra ("1 botella"), no en la base.
+          const envaseDe = (f) => ({ nombre: f.unidadCompra, equivale: f.factorConversion });
+          const lineas = faltantes.map((f) => {
+            const tenes = formatearConEnvase(f.stockActual, f.unidad, envaseDe(f));
+            const falta = formatearConEnvase(f.falta, f.unidad, envaseDe(f));
+            return `${f.nombre}: tenés ${tenes} y te faltan ${falta}.`;
+          });
+          dom.insumoWarningText.textContent =
+            `Esta producción necesita más de lo que tenés cargado.\n\n${lineas.join("\n")}\n\n` +
+            `Si ya lo compraste y no lo cargaste, tocá "Actualizar stock". Si producís igual, el stock queda en negativo hasta que lo cargues.`;
           setInsumoWarningSheetOpen(true);
           return;
         }
@@ -3469,30 +3677,49 @@ function bindEvents() {
   dom.closeProvProd.addEventListener("click", closeProvProd);
   dom.provProdBackdrop.addEventListener("click", closeProvProd);
 
-  dom.provProdInsumo.addEventListener("change", updateProvProdCantidadLabel);
+  dom.provProdInsumo.addEventListener("change", () => { refrescarProvProdReceta().catch(() => {}); });
 
-  dom.provProdAddRecetaRow.addEventListener("click", () => {
-    provProdRecetaVinculos.push({ productoId: "", cantidad: "" });
-    renderProvProdRecetaRowsView();
-  });
-
-  dom.provProdRecetaRows.addEventListener("input", (e) => {
-    const idx = Number(e.target.dataset.idx);
-    if (Number.isNaN(idx) || !provProdRecetaVinculos[idx]) return;
-    if (e.target.classList.contains("prov-prod-receta-cantidad-input")) provProdRecetaVinculos[idx].cantidad = e.target.value;
+  // Los dos campos de los que sale el texto de los labels de cantidad. En vivo:
+  // la persona escribe el nombre, despues la unidad, y despues baja a cargar
+  // las cantidades — si el label solo se armara al abrir la sheet, llegaria
+  // tarde.
+  dom.provProdUnidad.addEventListener("input", updateProvProdCantidadLabel);
+  dom.provProdNuevoUnidad.addEventListener("input", () => {
+    updateProvProdCantidadLabel();
+    updateProvProdRecetaCantidadLabel();
   });
 
   dom.provProdRecetaRows.addEventListener("change", (e) => {
-    const idx = Number(e.target.dataset.idx);
-    if (Number.isNaN(idx) || !provProdRecetaVinculos[idx]) return;
-    if (e.target.classList.contains("prov-prod-receta-producto-select")) provProdRecetaVinculos[idx].productoId = e.target.value;
+    const chk = e.target.closest(".receta-sel-check");
+    if (!chk) return;
+    // Desmarcar una receta que YA existe borra la linea: va por otro camino,
+    // con confirmacion, y se aplica al instante.
+    if (chk.dataset.ya === "1" && !chk.checked) { quitarRecetaExistente(chk.dataset.productoId, chk); return; }
+    setProvProdRecetaProducto(chk.dataset.productoId, chk.checked);
+    pintarProvProdRecetaSeleccion();
   });
 
   dom.provProdRecetaRows.addEventListener("click", (e) => {
-    const btn = e.target.closest('[data-action="quitar-receta-row"]');
-    if (!btn) return;
-    provProdRecetaVinculos.splice(Number(btn.dataset.idx), 1);
-    renderProvProdRecetaRowsView();
+    const chip = e.target.closest('[data-action="toggle-categoria"]');
+    if (chip) {
+      const grupo = dom.provProdRecetaRows.querySelector(`details[data-grupo="${chip.dataset.grupo}"]`);
+      if (!grupo) return;
+      const ids = [...grupo.querySelectorAll(".receta-sel-check")]
+        .filter((c) => c.dataset.ya !== "1")
+        .map((c) => c.dataset.productoId);
+      if (!ids.length) return;
+      // Acumulativo: el chip solo toca su categoria, nunca borra lo marcado en
+      // otra. Si ya estaban todos, el segundo toque los suelta.
+      const todos = ids.every((id) => provProdRecetaVinculos.some((v) => v.productoId === id));
+      for (const id of ids) setProvProdRecetaProducto(id, !todos);
+      if (!todos) grupo.open = true; // abierto para poder desmarcar los que no van
+      pintarProvProdRecetaSeleccion();
+      return;
+    }
+    if (e.target.closest('[data-action="limpiar-seleccion"]')) {
+      provProdRecetaVinculos = [];
+      pintarProvProdRecetaSeleccion();
+    }
   });
 
   dom.provEditEntrega.addEventListener("click", (event) => {
@@ -3549,6 +3776,19 @@ function bindEvents() {
       const insumoId = dom.provProdInsumo.value || null;
       const cantidad = parseDecimal(dom.provProdCantidad.value) || 1;
       const esInsumoNuevo = insumoId === "__nuevo__";
+
+      // Una sola cantidad para todos los productos marcados: si el insumo va en
+      // los 12 sandwiches es la misma, y pedirla 12 veces no tenia sentido.
+      // Cada una se puede afinar despues en Gestion > Recetas.
+      const productosMarcados = provProdRecetaVinculos
+        .map((v) => v.productoId)
+        .filter((id) => id && !provProdRecetaYaEnReceta.has(id));
+      const recetaCantidad = parseDecimal(dom.provProdRecetaCantidad.value);
+      if (productosMarcados.length > 0 && !(recetaCantidad > 0)) {
+        throw new Error(`Marcaste ${productosMarcados.length} producto${productosMarcados.length === 1 ? "" : "s"} para la receta: poné cuánto lleva una unidad.`);
+      }
+      const recetasVinculadas = productosMarcados.map((productoId) => ({ productoId, cantidad: recetaCantidad }));
+
       await saveProveedorInsumo({
         id: provProdMode === "edit" ? selectedProvProdId : undefined,
         proveedorId: selectedProvId,
@@ -3564,10 +3804,23 @@ function bindEvents() {
             stockMinimo: dom.provProdNuevoMin.value,
             stockCritico: dom.provProdNuevoCrit.value
           },
-          recetasVinculadas: provProdRecetaVinculos
+          recetasVinculadas
         } : {})
       });
-      setFlash(provProdMode === "edit" ? "Producto actualizado." : "Producto agregado.", "success");
+
+      // Insumo que ya existia: saveProveedorInsumo solo engancha recetas cuando
+      // crea el insumo, asi que las altas van aparte con crearLineaReceta (que
+      // ya sube su snapshot de recetas).
+      if (!esInsumoNuevo && insumoId) {
+        for (const linea of recetasVinculadas) {
+          await crearLineaReceta({ productoId: linea.productoId, insumoId, cantidadPorUnidad: linea.cantidad });
+        }
+      }
+
+      const sufijoReceta = recetasVinculadas.length
+        ? ` Se agregó a la receta de ${recetasVinculadas.length} producto${recetasVinculadas.length === 1 ? "" : "s"}.`
+        : "";
+      setFlash((provProdMode === "edit" ? "Producto actualizado." : "Producto agregado.") + sufijoReceta, "success");
       closeProvProd();
       await renderProveedoresView();
     } catch (error) {
@@ -3753,75 +4006,128 @@ function bindEvents() {
   });
 
   dom.cierreDate.addEventListener("change", () => setCierreFecha(dom.cierreDate.value));
-  // --- Movimientos de caja del dia -----------------------------------------
-  dom.cajaAnotar.addEventListener("click", () => {
-    dom.cajaMovForm.reset();
-    dom.cajaMovTipo.querySelectorAll(".tipo-btn").forEach((b, i) => b.classList.toggle("active", i === 0));
-    actualizarCampoCajon();
-    setCajaMovSheetOpen(true);
-    dom.cajaMovImporte.focus();
-  });
-  dom.closeCajaMov.addEventListener("click", () => setCajaMovSheetOpen(false));
-  dom.cajaMovBackdrop.addEventListener("click", () => setCajaMovSheetOpen(false));
+  // --- Los cuatro pasos del día: apertura, pagos, retiros, cierre ---------
+  //
+  // Un boton por intencion en vez de uno generico con tres opciones: el dueño
+  // no piensa "voy a anotar un movimiento de tipo gasto", piensa "pagué la
+  // verdura". La sheet que se abre ya es la correcta.
 
-  dom.cajaMovTipo.addEventListener("click", (e) => {
+  // Paso 1: abrir caja.
+  dom.cajaPasoApertura.addEventListener("click", async (event) => {
+    const abrir = event.target.closest("#caja-abrir");
+    const corregir = event.target.closest("#caja-corregir-apertura");
+    if (corregir) {
+      const actual = await aperturaDelDia(cierreFecha);
+      const texto = window.prompt("¿Con cuánta plata abriste? (€)", centavosAInput(actual?.fondoInicialCentavos ?? 0));
+      if (texto === null) return;
+      const euros = parseDecimal(texto);
+      if (!Number.isFinite(euros) || euros < 0) { setFlash("Poné un importe válido.", "error"); return; }
+      try {
+        await abrirCaja({ fondoInicialCentavos: Math.round(euros * 100), fecha: cierreFecha });
+        setFlash("Fondo de apertura corregido.", "success");
+        await refrescarPasosCaja();
+      } catch (e) { setFlash(e.message || "No se pudo corregir.", "error"); }
+      return;
+    }
+    if (!abrir || cajaMovEnCurso) return;
+    const euros = parseDecimal(document.querySelector("#caja-apertura-monto")?.value);
+    if (!Number.isFinite(euros) || euros < 0) { setFlash("Poné con cuánta plata abrís, aunque sea 0.", "error"); return; }
+    try {
+      cajaMovEnCurso = true;
+      await abrirCaja({ fondoInicialCentavos: Math.round(euros * 100), fecha: cierreFecha });
+      setFlash("Caja abierta.", "success");
+      await refrescarPasosCaja();
+      await renderCierreView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo abrir la caja.", "error");
+    } finally { cajaMovEnCurso = false; }
+  });
+
+  // Paso 2: pagos.
+  dom.cajaPasoPagos.addEventListener("click", async (event) => {
+    if (event.target.closest("#caja-nuevo-pago")) {
+      dom.cajaPagoForm.reset();
+      dom.cajaPagoForma.querySelectorAll(".tipo-btn").forEach((b, i) => b.classList.toggle("active", i === 0));
+      // Los proveedores que ya existen, como sugerencia: no hace falta
+      // escribir "Delicias Vegetales" entero cada vez.
+      const proveedores = await getAll("proveedores").catch(() => []);
+      dom.cajaPagoProveedores.innerHTML = proveedores
+        .filter((x) => x.activo !== false)
+        .map((x) => `<option value="${String(x.nombre).replace(/"/g, "&quot;")}"></option>`).join("");
+      setSheetOpen(dom.cajaPagoSheet, dom.cajaPagoBackdrop, true);
+      dom.cajaPagoImporte.focus();
+      return;
+    }
+    await manejarAnular(event);
+  });
+  dom.closeCajaPago.addEventListener("click", () => setSheetOpen(dom.cajaPagoSheet, dom.cajaPagoBackdrop, false));
+  dom.cajaPagoBackdrop.addEventListener("click", () => setSheetOpen(dom.cajaPagoSheet, dom.cajaPagoBackdrop, false));
+  dom.cajaPagoForma.addEventListener("click", (e) => {
     const btn = e.target.closest(".tipo-btn");
-    if (!btn) return;
-    dom.cajaMovTipo.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b === btn));
-    actualizarCampoCajon();
+    if (btn) dom.cajaPagoForma.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b === btn));
   });
 
-  dom.cajaMovForm.addEventListener("submit", async (event) => {
+  dom.cajaPagoForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (cajaMovEnCurso) return;
     try {
       cajaMovEnCurso = true;
-      // El importe se escribe en euros y se guarda en centavos enteros: con
-      // flotantes, 0.1 + 0.2 no da 0.3 y eso termina siendo un descuadre de
-      // caja que nadie sabe explicar.
-      const euros = parseFloat(String(dom.cajaMovImporte.value).replace(",", "."));
-      if (!Number.isFinite(euros) || euros <= 0) throw new Error("Poné un importe mayor que cero.");
-      const importeCentavos = Math.round(euros * 100);
-      const motivo = dom.cajaMovMotivo.value.trim();
-      if (!motivo) throw new Error("Escribí en qué fue, aunque sea corto.");
-
-      const tipo = tipoCajaElegido();
-      if (tipo === "gasto") {
-        await anotarGasto({ importeCentavos, motivo, fecha: cierreFecha, afectaCajon: dom.cajaMovCajon.value !== "no" });
-      } else if (tipo === "retiro") {
-        await anotarRetiro({ importeCentavos, motivo, fecha: cierreFecha });
-      } else {
-        await anotarIngreso({ importeCentavos, motivo, fecha: cierreFecha });
-      }
-
-      setFlash("Movimiento anotado.", "success");
-      setCajaMovSheetOpen(false);
-      await refrescarMovimientosCaja();
+      // En centavos enteros: con flotantes, 0.1 + 0.2 no da 0.3 y eso termina
+      // siendo un descuadre de caja que nadie sabe explicar.
+      const euros = parseDecimal(dom.cajaPagoImporte.value);
+      if (!Number.isFinite(euros) || euros <= 0) throw new Error("Poné cuánto pagaste.");
+      const concepto = dom.cajaPagoConcepto.value.trim();
+      if (!concepto) throw new Error("Escribí qué compraste, aunque sea corto.");
+      await anotarPago({
+        importeCentavos: Math.round(euros * 100),
+        concepto,
+        aQuien: dom.cajaPagoQuien.value,
+        enEfectivo: formaPagoElegida() === "efectivo",
+        fecha: cierreFecha
+      });
+      setFlash("Pago anotado.", "success");
+      setSheetOpen(dom.cajaPagoSheet, dom.cajaPagoBackdrop, false);
+      await refrescarPasosCaja();
       await renderCierreView();
     } catch (error) {
       setFlash(error.message || "No se pudo anotar.", "error");
-    } finally {
-      cajaMovEnCurso = false;
-    }
+    } finally { cajaMovEnCurso = false; }
   });
 
-  // Anular no borra: appendea el importe al reves, enlazado al original. Los
-  // dos quedan a la vista y el total da bien solo.
-  dom.cajaMovLista.addEventListener("click", async (event) => {
-    const btn = event.target.closest("[data-anular]");
-    if (!btn || cajaMovEnCurso) return;
-    if (!window.confirm("¿Anular este movimiento? Queda anotado que se anuló, no se borra.")) return;
+  // Paso 3: retiros, con el mini cierre.
+  dom.cajaPasoRetiros.addEventListener("click", async (event) => {
+    if (event.target.closest("#caja-nuevo-retiro")) {
+      dom.cajaRetiroForm.reset();
+      pintarCuentaRetiro();
+      setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, true);
+      dom.cajaRetiroImporte.focus();
+      return;
+    }
+    await manejarAnular(event);
+  });
+  dom.closeCajaRetiro.addEventListener("click", () => setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, false));
+  dom.cajaRetiroBackdrop.addEventListener("click", () => setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, false));
+  // "Se retiró tanto, queda tanto": el numero se actualiza mientras se tipea,
+  // que es cuando sirve para decidir cuanto sacar.
+  dom.cajaRetiroImporte.addEventListener("input", pintarCuentaRetiro);
+
+  dom.cajaRetiroForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (cajaMovEnCurso) return;
     try {
       cajaMovEnCurso = true;
-      await anularMovimiento(btn.dataset.anular, { motivo: "anulado desde el cierre" });
-      setFlash("Movimiento anulado.", "success");
-      await refrescarMovimientosCaja();
+      const euros = parseDecimal(dom.cajaRetiroImporte.value);
+      if (!Number.isFinite(euros) || euros <= 0) throw new Error("Poné cuánto sacás.");
+      const motivo = dom.cajaRetiroMotivo.value.trim();
+      if (!motivo) throw new Error("Escribí para qué lo sacás.");
+      await anotarRetiro({ importeCentavos: Math.round(euros * 100), motivo, fecha: cierreFecha });
+      setFlash("Retiro anotado.", "success");
+      setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, false);
+      await refrescarPasosCaja();
       await renderCierreView();
     } catch (error) {
-      setFlash(error.message || "No se pudo anular.", "error");
-    } finally {
-      cajaMovEnCurso = false;
-    }
+      setFlash(error.message || "No se pudo anotar el retiro.", "error");
+    } finally { cajaMovEnCurso = false; }
   });
 
   dom.cierrePrev.addEventListener("click", () => setCierreFecha(sumarDias(cierreFecha || todayISO(), -1)));

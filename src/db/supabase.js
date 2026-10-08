@@ -474,6 +474,31 @@ export async function pushRecetasSnapshot(recetas) {
 // verificarlo leyendo despues. Si esta funcion se quedara con el 204, la app
 // diria "eliminado" y el producto volveria en el proximo "Actualizar
 // catalogo" sin que nadie entienda por que.
+// Sacar UNA linea de receta de la nube.
+//
+// Hace falta porque el snapshot de recetas es un upsert: no borra lo que falta.
+// Sin esto, la linea que se saca en el dispositivo vuelve en el proximo
+// "Actualizar catalogo".
+//
+// Se relee despues de borrar, igual que deleteProductoRemoto y por el mismo
+// motivo: un DELETE que RLS no permite responde 204 como si hubiera borrado.
+// Creerle a ese 204 fue lo que hizo decir "eliminado" sobre un producto que
+// seguia ahi.
+export async function deleteRecetaRemota(recetaId) {
+  const q = encodeURIComponent(recetaId);
+  await sbFetch(`/historial_recetas?receta_id=eq.${q}`, "DELETE").catch(() => {});
+  await sbFetch(`/recetas?id=eq.${q}`, "DELETE");
+
+  const quedan = await sbFetch(`/recetas?id=eq.${q}&select=id`);
+  if (quedan?.length) {
+    const error = new Error(
+      "Supabase acepto el borrado pero la linea de receta sigue en la nube. Falta la politica de RLS de DELETE sobre recetas (migracion 021). Sin eso volveria en el proximo \"Actualizar catalogo\"."
+    );
+    error.sinPermisoDelete = true;
+    throw error;
+  }
+}
+
 export async function deleteProductoRemoto(productoId) {
   const q = encodeURIComponent(productoId);
   // Orden obligatorio por las FK. Cada uno es idempotente, asi que reintentar
