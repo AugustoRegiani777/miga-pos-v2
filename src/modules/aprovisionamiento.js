@@ -6,6 +6,7 @@ import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota } from "../
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
+import { getGruposVariantes, saveGrupoVariante } from "./variantes.js";
 import { sugerirCompra, clasificarUrgencia, variabilidadDiaria, tasaBaseDiaria,
          perfilSemanalDelLocal, perfilSemanalMezclado, alphaDiariaDesde } from "./compras-calculos.js";
 import { serieDeConsumo } from "./estado-stock.js";
@@ -352,6 +353,101 @@ const PROVEEDOR_UNIDADES_V12 = {
 
 const LIMPIEZA_KEY = "limpieza_catalogo_v12";
 
+// ---------------------------------------------------------------------------
+// Limpieza v13 — lo que encontro la auditoria de unidades
+// ---------------------------------------------------------------------------
+// Tres cosas que estaban rotas en datos, no en codigo, y que el dueño confirmo
+// uno por uno. Mismo criterio que la v12: se DECLARA el destino, nunca se
+// calcula desde un punto de partida que no se puede conocer.
+//
+// 1. `salami-tio-d-oro-c-kg` era el segundo caso "mortadela": entro por
+//    factura con el titulo del proveedor como nombre y su codigo "K" como
+//    unidad base. Se descontaba 0,45 "K" por Salame y, con minimos en 0, nunca
+//    iba a pedir reposicion: fallaba en silencio. Tiene 0 movimientos, asi que
+//    cambiarle la unidad es seguro.
+// 2. `salame:queso-gouda` decia 0,35 g de queso cuando los otros ocho
+//    sandwiches llevan 25. Este es peor que el del salami justamente porque NO
+//    salta a la vista: no da un numero absurdo, da un consumo 70 veces mas
+//    chico, y el gouda nunca parece bajar.
+// 3. La linea de proveedor de la leche de soja seguia diciendo que un litro
+//    son 1 ml — el bug original, que se arreglo en el insumo y se olvido en el
+//    proveedor. Hoy la lista pide 3000 L.
+const LIMPIEZA_V13 = {
+  insumos: {
+    "salami-tio-d-oro-c-kg": {
+      nombre: "Salami", unidad: "g", unidadCompra: "kg", factorConversion: 1000,
+      stockMinimo: 500, stockCritico: 250,
+      // Sin movimientos: no hay ledger que reexpresar.
+      ledgerPor: null
+    }
+  },
+  // Cantidades de receta, por id de receta. El dueño las dio una por una.
+  recetas: {
+    "salame:salami-tio-d-oro-c-kg": 40,
+    "salame:queso-gouda": 25
+  },
+  // El dueño: "los de crema con cinnamon roll no lo se, pero no es algo que
+  // mediria de momento la crema... borralo".
+  recetasABorrar: ["cinnamon-roll:crema"],
+  proveedores: {
+    "jasa:salami-tio-d-oro-c-kg": { unidadCompra: "kg", cantidadPorUnidad: 1000 },
+    // SUPUESTO, a confirmar: la linea dice "L" a 1,50 EUR, que es precio de
+    // litro suelto, asi que 1 unidad de compra = 1000 ml. Si Delicias lo
+    // vendiera por caja, este numero cambia.
+    "delicias-vegetales:leche-de-soja": { unidadCompra: "L", cantidadPorUnidad: 1000 }
+  }
+};
+
+const LIMPIEZA_V13_KEY = "limpieza_catalogo_v13";
+
+// ---------------------------------------------------------------------------
+// v14 — una sola leche por cafe, y los productos de reventa
+// ---------------------------------------------------------------------------
+// A) El cafe con leche descontaba las TRES leches a la vez (entera 210 +
+//    avena 200 + soja 250), y el capuccino dos. La receta tiene que tener UNA
+//    sola —la de por defecto— y el grupo de variante la cambia por la que
+//    elige el cliente al cobrar. Las lineas de mas se cargaron como receta
+//    porque la soja no era una opcion del grupo; se agrega como opcion.
+const LECHES_DE_MAS_V14 = [
+  "cafe-con-leche:leche-avena",
+  "cafe-con-leche:leche-de-soja",
+  "capuccino:leche-sin-lactosa"
+];
+const OPCION_SOJA_V14 = { nombre: "Soja", insumoId: "leche-de-soja" };
+
+// B) Bebidas y bolleria: se compran hechas y se venden por unidad. El dueño:
+//    "cada coca vendida, descuenta directamente 1 insumo de coca cola".
+//    Tecnicamente es una receta de 1 unidad — la misma maquinaria de siempre,
+//    sin inventar un camino nuevo — y asi entran en la lista de compras con su
+//    proveedor y su precio, que es lo que se gana.
+//
+//    El insumo lleva el MISMO id que el producto: no hay ambiguedad posible y
+//    en la lista de compras se lee solo ("Coca cola, pedir 12").
+//
+//    El minimo es un arranque razonable, no un dato: el dueño lo ajusta. Pero
+//    no puede ser 0: un insumo con minimo 0 nunca pide reposicion y falla en
+//    silencio (es lo que pasaba con el salami).
+const REVENTA_V14 = [
+  { id: "coca-cola",        nombre: "Coca cola",        minimo: 12 },
+  { id: "sprite",           nombre: "Sprite",           minimo: 12 },
+  { id: "agua",             nombre: "Agua",             minimo: 12 },
+  { id: "aquiaros",         nombre: "Aquarius",         minimo: 12 },
+  { id: "nestea",           nombre: "Nestea",           minimo: 12 },
+  { id: "jugo",             nombre: "Zumo",             minimo: 12 },
+  { id: "cerveza",          nombre: "Cerveza",          minimo: 12 },
+  { id: "medialunas",       nombre: "Medialunas",       minimo: 10 },
+  { id: "croissant",        nombre: "Croissant",        minimo: 10 },
+  { id: "mini-croissant",   nombre: "Mini croissant",   minimo: 10 },
+  { id: "pain-au-chocolat", nombre: "Pain au chocolat", minimo: 10 },
+  { id: "cinnamon-roll",    nombre: "Cinnamon roll",    minimo: 10 },
+  { id: "cookies",          nombre: "Cookies",          minimo: 10 },
+  { id: "chipa",            nombre: "Chipa",            minimo: 10 },
+  { id: "alfajor-havana",   nombre: "Alfajor Havana",   minimo: 10 },
+  { id: "galletitas",       nombre: "Galletitas",       minimo: 10 }
+];
+
+const LIMPIEZA_V14_KEY = "limpieza_catalogo_v14";
+
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
 // Primero lo intente en seedInsumos y la prueba lo encontro: en un dispositivo
@@ -616,6 +712,161 @@ export async function eliminarLineaReceta(recetaId) {
   trySyncRecetasSnapshot(recetasFinal).catch(() => {});
 
   return { borrada: true, productoId: receta.productoId, insumoId: receta.insumoId };
+}
+
+// Corre despues de bajar el catalogo, por el mismo motivo que las anteriores:
+// estos insumos no vienen del seed y en un dispositivo nuevo recien existen
+// despues del pull.
+export async function limpiarCatalogoV13() {
+  const [insumos, recetas, movimientos, proveedorInsumos, config] = await Promise.all([
+    getAll("insumos"), getAll("recetas"), getAll("movimientos_insumos"),
+    getAll("proveedor_insumos"), getAll("configuracion")
+  ]);
+  if (config.find(c => c.id === LIMPIEZA_V13_KEY)?.valor) return { cambios: 0 };
+
+  const now = new Date().toISOString();
+  const insumosNuevos = [];
+  const recetasNuevas = [];
+  const recetasBorradas = [];
+  const movimientosNuevos = [];
+  const piNuevos = [];
+
+  for (const [id, fix] of Object.entries(LIMPIEZA_V13.insumos)) {
+    const insumo = insumos.find(i => i.id === id);
+    if (!insumo) continue;
+    const yaEstaba = insumo.unidad === fix.unidad && insumo.factorConversion === fix.factorConversion && insumo.nombre === fix.nombre;
+    if (yaEstaba) continue;
+
+    const conMovimientos = movimientos.filter(m => m.insumoId === id);
+    // La regla que la auditoria pidio promover de caso particular a invariante:
+    // cambiar la unidad base con el ledger escrito en la vieja corrompe el
+    // stock. Si hay movimientos y nadie declaro como reexpresarlos, no se toca.
+    if (conMovimientos.length > 0 && !fix.ledgerPor) continue;
+
+    insumosNuevos.push({
+      ...insumo, nombre: fix.nombre, unidad: fix.unidad,
+      unidadCompra: fix.unidadCompra, factorConversion: fix.factorConversion,
+      stockMinimo: fix.stockMinimo, stockCritico: fix.stockCritico,
+      actualizadoEn: now
+    });
+    if (fix.ledgerPor) {
+      for (const m of conMovimientos) movimientosNuevos.push({ ...m, cantidad: Number(m.cantidad) * fix.ledgerPor });
+    }
+  }
+
+  for (const [recetaId, objetivo] of Object.entries(LIMPIEZA_V13.recetas)) {
+    const receta = recetas.find(r => r.id === recetaId);
+    if (!receta || Number(receta.cantidadPorUnidad) === objetivo) continue;
+    recetasNuevas.push({ ...receta, cantidadPorUnidad: objetivo, esEstimado: false, actualizadoEn: now });
+  }
+
+  for (const recetaId of LIMPIEZA_V13.recetasABorrar) {
+    if (recetas.some(r => r.id === recetaId)) recetasBorradas.push(recetaId);
+  }
+
+  for (const [id, fix] of Object.entries(LIMPIEZA_V13.proveedores)) {
+    const pi = proveedorInsumos.find(x => x.id === id);
+    if (!pi) continue;
+    if (pi.unidadCompra === fix.unidadCompra && pi.cantidadPorUnidad === fix.cantidadPorUnidad) continue;
+    piNuevos.push({ ...pi, unidadCompra: fix.unidadCompra, cantidadPorUnidad: fix.cantidadPorUnidad, actualizadoEn: now });
+  }
+
+  const cambios = insumosNuevos.length + recetasNuevas.length + recetasBorradas.length + movimientosNuevos.length + piNuevos.length;
+
+  await withStores(["insumos", "recetas", "movimientos_insumos", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
+    for (const i of insumosNuevos) stores.insumos.put(i);
+    for (const r of recetasNuevas) stores.recetas.put(r);
+    for (const id of recetasBorradas) stores.recetas.delete(id);
+    for (const m of movimientosNuevos) stores.movimientos_insumos.put(m);
+    for (const x of piNuevos) stores.proveedor_insumos.put(x);
+    stores.configuracion.put({ id: LIMPIEZA_V13_KEY, valor: true, actualizadoEn: now });
+  });
+
+  if (cambios === 0) return { cambios: 0 };
+
+  // Una receta borrada hay que sacarla tambien de la nube: el snapshot es un
+  // upsert y no borra lo que falta, asi que volveria en el proximo refresco.
+  for (const id of recetasBorradas) await deleteRecetaRemota(id).catch(() => {});
+
+  const [insFinal, recFinal, piFinal] = await Promise.all([getAll("insumos"), getAll("recetas"), getAll("proveedor_insumos")]);
+  trySyncInsumosSnapshot(insFinal).catch(() => {});
+  trySyncRecetasSnapshot(recFinal).catch(() => {});
+  trySyncProveedorInsumosSnapshot(piFinal).catch(() => {});
+  if (movimientosNuevos.length) trySyncMovimientosInsumos(movimientosNuevos).catch(() => {});
+
+  return { cambios, insumos: insumosNuevos.map(i => i.nombre), recetas: recetasNuevas.length, borradas: recetasBorradas };
+}
+
+export async function limpiarCatalogoV14() {
+  const [insumos, recetas, productos, config] = await Promise.all([
+    getAll("insumos"), getAll("recetas"), getAll("productos"), getAll("configuracion")
+  ]);
+  if (config.find(c => c.id === LIMPIEZA_V14_KEY)?.valor) return { cambios: 0 };
+
+  const now = new Date().toISOString();
+  const recetasBorradas = LECHES_DE_MAS_V14.filter(id => recetas.some(r => r.id === id));
+
+  // Los insumos de reventa y su receta 1:1, solo para los productos que
+  // existen en este dispositivo.
+  const insumosNuevos = [];
+  const recetasNuevas = [];
+  for (const art of REVENTA_V14) {
+    const producto = productos.find(p => p.id === art.id);
+    if (!producto) continue;
+    if (!insumos.some(i => i.id === art.id)) {
+      insumosNuevos.push({
+        id: art.id, nombre: art.nombre, unidad: "unidad",
+        // Sin envase: cuantos trae la caja lo sabe el dueño, y el campo ya se
+        // puede completar desde la pantalla de insumos.
+        unidadCompra: "unidad", factorConversion: 1,
+        stockActual: 0, stockMinimo: art.minimo, stockCritico: Math.round(art.minimo / 2),
+        esEstimado: false, activo: true, creadoEn: now, actualizadoEn: now
+      });
+    }
+    const recetaId = `${art.id}:${art.id}`;
+    if (!recetas.some(r => r.id === recetaId)) {
+      recetasNuevas.push({
+        id: recetaId, productoId: art.id, insumoId: art.id,
+        cantidadPorUnidad: 1, esEstimado: false, creadoEn: now, actualizadoEn: now
+      });
+    }
+  }
+
+  // La soja tiene que ser una OPCION del grupo, no una receta aparte: es
+  // justamente por no estar en el grupo que alguien la cargo como linea suelta
+  // y el cafe termino descontando tres leches.
+  let grupoActualizado = null;
+  const grupos = await getGruposVariantes().catch(() => []);
+  const grupoLeche = grupos.find((g) => g.opciones?.some((o) => o.insumoId === "leche-normal"));
+  if (grupoLeche && !grupoLeche.opciones.some((o) => o.insumoId === OPCION_SOJA_V14.insumoId)
+      && insumos.some((i) => i.id === OPCION_SOJA_V14.insumoId)) {
+    grupoActualizado = { ...grupoLeche, opciones: [...grupoLeche.opciones, { ...OPCION_SOJA_V14 }] };
+  }
+
+  const cambios = recetasBorradas.length + insumosNuevos.length + recetasNuevas.length + (grupoActualizado ? 1 : 0);
+
+  await withStores(["insumos", "recetas", "configuracion"], "readwrite", (stores) => {
+    for (const id of recetasBorradas) stores.recetas.delete(id);
+    for (const i of insumosNuevos) stores.insumos.put(i);
+    for (const r of recetasNuevas) stores.recetas.put(r);
+    stores.configuracion.put({ id: LIMPIEZA_V14_KEY, valor: true, actualizadoEn: now });
+  });
+
+  if (cambios === 0) return { cambios: 0 };
+
+  // El snapshot de recetas es un upsert y no borra lo que falta: las leches de
+  // mas hay que sacarlas tambien de la nube o vuelven en el proximo refresco.
+  for (const id of recetasBorradas) await deleteRecetaRemota(id).catch(() => {});
+
+  // saveGrupoVariante hace su propia escritura y su propio sync, asi que va
+  // despues de la transaccion de arriba y no adentro.
+  if (grupoActualizado) await saveGrupoVariante(grupoActualizado).catch(() => {});
+
+  const [insFinal, recFinal] = await Promise.all([getAll("insumos"), getAll("recetas")]);
+  trySyncInsumosSnapshot(insFinal).catch(() => {});
+  trySyncRecetasSnapshot(recFinal).catch(() => {});
+
+  return { cambios, borradas: recetasBorradas, reventa: insumosNuevos.map(i => i.nombre), soja: Boolean(grupoActualizado) };
 }
 
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
