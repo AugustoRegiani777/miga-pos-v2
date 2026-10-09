@@ -14,6 +14,11 @@ const STAGING_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhY
 const esLocal = typeof location !== "undefined" && ["localhost", "127.0.0.1"].includes(location.hostname);
 const usarStaging = esLocal && STAGING_URL;
 
+// Hay migraciones que solo tienen sentido en la base de prueba (ej. dejar
+// visible todo el catalogo para probar). En la tablet real esto es false
+// siempre, por lo mismo que arriba: no corre en localhost.
+export const ENTORNO_DE_PRUEBA = Boolean(usarStaging);
+
 const SUPABASE_URL = usarStaging ? STAGING_URL : PROD_URL;
 const SUPABASE_ANON_KEY = usarStaging ? STAGING_ANON_KEY : PROD_ANON_KEY;
 

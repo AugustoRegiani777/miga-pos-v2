@@ -1,8 +1,8 @@
 import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, getPendingSyncCount } from "./sync.js";
-import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota } from "../db/supabase.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, getPendingSyncCount } from "./sync.js";
+import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
@@ -448,6 +448,79 @@ const REVENTA_V14 = [
 
 const LIMPIEZA_V14_KEY = "limpieza_catalogo_v14";
 
+// ---------------------------------------------------------------------------
+// Set completo para probar — SOLO contra la base de prueba
+// ---------------------------------------------------------------------------
+// Staging tiene los mismos productos que produccion, pero 33 quedaron ocultos
+// cuando se armo el dataset simulado: la caja mostraba 8 y no se podia probar
+// el menu de verdad.
+//
+// Por que es una migracion de codigo y no un UPDATE a la nube: en cada
+// arranque `subidaDeArranque` (app.js) sube el catalogo LOCAL entero, asi que
+// lo que se corrija en Supabase lo vuelve a pisar el dispositivo en el
+// siguiente boot. Ya paso: el 07/10 los active en la nube y volvieron a
+// ocultarse solos.
+//
+// Y por que solo en la base de prueba: en produccion `activo` es una decision
+// real del dueño — lo que no se vende hoy esta oculto a proposito (ahi mismo
+// hay 5 ocultos). Despertar productos en la tablet del local seria cambiarle
+// el menu sin que lo haya pedido.
+const CATALOGO_COMPLETO_PRUEBA = [
+  // Sandwiches
+  "jamon-queso", "pasta-oliva-queso", "pimiento-gouda-philp", "pesto-tomate-queso",
+  "berenjena-brie", "mortadela-pesto-queso", "jamon-serrano-rucula", "atun-palta-queso",
+  "huevo-jamon", "huevo-queso", "salame", "especial-semanal",
+  "promo-bebida", "promo-cafe-con-leche",
+  // Bolleria
+  "croissant", "mini-croissant", "mini-croissant-ddl", "pain-au-chocolat",
+  "chipa", "alfajor-havana", "cookies", "medialunas", "cinnamon-roll", "galletitas",
+  // Cafe
+  "expresso-30ml", "cortado", "latte", "cafe-con-leche", "capuccino",
+  "americano", "flat-white", "ice-latte", "ice-caramel",
+  // Bebidas
+  "cerveza", "coca-cola", "sprite", "nestea", "aquiaros", "jugo", "agua", "fanta"
+];
+
+// Tres cosas que saltan al ponerlos visibles, porque hasta ahora nadie los veia:
+//
+// 1) "fanta" y "galletitas" estan escritos en minuscula. En la caja el nombre
+//    se lee tal cual, al lado de "Coca cola" y "Cookies".
+const NOMBRES_A_CORREGIR_PRUEBA = { fanta: "Fanta", galletitas: "Galletitas" };
+
+// 2) Fanta no tenia receta: es una bebida de reventa como las demas, descuenta
+//    1 por venta (mismo criterio que REVENTA_V14).
+const REVENTA_PRUEBA = [{ id: "fanta", nombre: "Fanta", minimo: 12 }];
+
+// 3) "Especial semanal" y "Promo bebida" no descontaban NADA. Un producto
+//    activo sin receta es una fuga silenciosa de stock, asi que:
+//    - al especial se le pone el pan, que lo lleva sea cual sea el relleno de
+//      la semana (0.5 rebanada, igual que todos los sandwiches). El relleno lo
+//      carga el dueño cada semana desde Gestion > Menu.
+//    - la promo de bebida descuenta una bebida, y cual la elige el cliente en
+//      caja: es exactamente el mecanismo del grupo de variante que ya usa la
+//      leche, no hace falta nada nuevo.
+const RECETAS_FALTANTES_PRUEBA = [
+  { id: "especial-semanal:miga", productoId: "especial-semanal", insumoId: "miga", cantidad: 0.5 },
+  { id: "promo-bebida:coca-cola", productoId: "promo-bebida", insumoId: "coca-cola", cantidad: 1 }
+];
+const GRUPO_BEBIDA_PRUEBA = {
+  id: "bebida",
+  nombre: "Bebida",
+  titulo: "¿Qué bebida?",
+  opciones: [
+    { nombre: "Coca cola", insumoId: "coca-cola" },
+    { nombre: "Sprite", insumoId: "sprite" },
+    { nombre: "Fanta", insumoId: "fanta" },
+    { nombre: "Nestea", insumoId: "nestea" },
+    { nombre: "Aquarius", insumoId: "aquiaros" },
+    { nombre: "Zumo", insumoId: "jugo" },
+    { nombre: "Agua", insumoId: "agua" }
+  ],
+  productoIds: ["promo-bebida"]
+};
+
+const SET_PRUEBA_KEY = "set_completo_prueba_v1";
+
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
 // Primero lo intente en seedInsumos y la prueba lo encontro: en un dispositivo
@@ -867,6 +940,95 @@ export async function limpiarCatalogoV14() {
   trySyncRecetasSnapshot(recFinal).catch(() => {});
 
   return { cambios, borradas: recetasBorradas, reventa: insumosNuevos.map(i => i.nombre), soja: Boolean(grupoActualizado) };
+}
+
+export async function activarSetCompletoDePrueba() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+
+  const [productos, insumos, recetas, config] = await Promise.all([
+    getAll("productos"), getAll("insumos"), getAll("recetas"), getAll("configuracion")
+  ]);
+  if (config.find((c) => c.id === SET_PRUEBA_KEY)?.valor) return { cambios: 0 };
+
+  const now = new Date().toISOString();
+
+  // Se declara el destino (visible) en vez de calcularlo: asi correrla dos
+  // veces da el mismo resultado y no depende de como estaba antes.
+  const aMostrar = productos.filter((p) => CATALOGO_COMPLETO_PRUEBA.includes(p.id) && p.activo === false);
+  const aRenombrar = productos.filter((p) => NOMBRES_A_CORREGIR_PRUEBA[p.id] && p.nombre !== NOMBRES_A_CORREGIR_PRUEBA[p.id]);
+
+  const insumosNuevos = [];
+  const recetasNuevas = [];
+  for (const art of REVENTA_PRUEBA) {
+    if (!productos.some((p) => p.id === art.id)) continue;
+    if (!insumos.some((i) => i.id === art.id)) {
+      insumosNuevos.push({
+        id: art.id, nombre: art.nombre, unidad: "unidad",
+        unidadCompra: "unidad", factorConversion: 1,
+        stockActual: 0, stockMinimo: art.minimo, stockCritico: Math.round(art.minimo / 2),
+        esEstimado: false, activo: true, creadoEn: now, actualizadoEn: now
+      });
+    }
+    const recetaId = `${art.id}:${art.id}`;
+    if (!recetas.some((r) => r.id === recetaId)) {
+      recetasNuevas.push({
+        id: recetaId, productoId: art.id, insumoId: art.id,
+        cantidadPorUnidad: 1, esEstimado: false, creadoEn: now, actualizadoEn: now
+      });
+    }
+  }
+  for (const r of RECETAS_FALTANTES_PRUEBA) {
+    if (!productos.some((p) => p.id === r.productoId)) continue;
+    if (recetas.some((x) => x.id === r.id)) continue;
+    recetasNuevas.push({
+      id: r.id, productoId: r.productoId, insumoId: r.insumoId,
+      cantidadPorUnidad: r.cantidad, esEstimado: true, creadoEn: now, actualizadoEn: now
+    });
+  }
+
+  const grupos = await getGruposVariantes().catch(() => []);
+  const faltaGrupoBebida = !grupos.some((g) => g.id === GRUPO_BEBIDA_PRUEBA.id);
+
+  const cambios = aMostrar.length + aRenombrar.length + insumosNuevos.length
+    + recetasNuevas.length + (faltaGrupoBebida ? 1 : 0);
+
+  await withStores(["productos", "insumos", "recetas", "configuracion"], "readwrite", (stores) => {
+    for (const p of aMostrar) stores.productos.put({ ...p, activo: true, actualizadoEn: now });
+    for (const p of aRenombrar) {
+      const visible = aMostrar.some((x) => x.id === p.id);
+      stores.productos.put({ ...p, activo: visible ? true : p.activo, nombre: NOMBRES_A_CORREGIR_PRUEBA[p.id], actualizadoEn: now });
+    }
+    for (const i of insumosNuevos) stores.insumos.put(i);
+    for (const r of recetasNuevas) stores.recetas.put(r);
+    stores.configuracion.put({ id: SET_PRUEBA_KEY, valor: true, actualizadoEn: now });
+  });
+
+  if (cambios === 0) return { cambios: 0 };
+
+  // saveGrupoVariante escribe y sincroniza por su cuenta: va despues de la
+  // transaccion de arriba, nunca adentro.
+  if (faltaGrupoBebida) {
+    const hayBebidas = GRUPO_BEBIDA_PRUEBA.opciones.filter(
+      (o) => insumos.some((i) => i.id === o.insumoId) || insumosNuevos.some((i) => i.id === o.insumoId)
+    );
+    if (hayBebidas.length >= 2) {
+      await saveGrupoVariante({ ...GRUPO_BEBIDA_PRUEBA, opciones: hayBebidas }).catch(() => {});
+    }
+  }
+
+  const [catFinal, prodFinal, insFinal, recFinal] = await Promise.all([
+    getAll("categorias"), getAll("productos"), getAll("insumos"), getAll("recetas")
+  ]);
+  trySyncCatalogoSnapshot(catFinal, prodFinal).catch(() => {});
+  trySyncInsumosSnapshot(insFinal).catch(() => {});
+  trySyncRecetasSnapshot(recFinal).catch(() => {});
+
+  return {
+    cambios,
+    visibles: aMostrar.map((p) => p.nombre),
+    renombrados: aRenombrar.map((p) => NOMBRES_A_CORREGIR_PRUEBA[p.id]),
+    recetas: recetasNuevas.length
+  };
 }
 
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
