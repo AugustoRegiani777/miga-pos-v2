@@ -519,7 +519,31 @@ const GRUPO_BEBIDA_PRUEBA = {
   productoIds: ["promo-bebida"]
 };
 
-const SET_PRUEBA_KEY = "set_completo_prueba_v1";
+// Al poner visibles los 33 productos aparecio el reverso del mismo problema:
+// 12 insumos de sus recetas estaban APAGADOS, por el mismo motivo (se desactivaron
+// al armar el dataset simulado, cuando esos sandwiches no se vendian).
+//
+// Un insumo apagado no es inocuo: deductInsumosInTx lo saltea
+// (`if (!insumo || !insumo.activo) continue;`), asi que la linea de receta existe
+// pero no descuenta NADA. Vender un "Berenjena y queso brie" no movia ni la
+// berenjena ni el brie, en silencio — la misma fuga muda que se tapo en el
+// Especial semanal, pero entrando por la otra puerta.
+const INSUMOS_A_DESPERTAR_PRUEBA = [
+  "atun",             // Atun, palta y queso
+  "palta",
+  "berenjena",        // Berenjena y queso brie
+  "queso-brie",
+  "pimientos-asados", // Pimiento asado, gouda, philp
+  "queso-crema",
+  "jamon-serrano",    // Jamon serrano y rucula
+  "rucula",
+  "pesto",            // Pesto tomate y queso / Mortadela pesto y queso
+  "tomate",
+  "pasta-aceituna",   // Pasta Oliva y queso
+  "dulce-de-leche"    // Mini croissant ddl
+];
+
+const SET_PRUEBA_KEY = "set_completo_prueba_v2";
 
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
@@ -956,6 +980,7 @@ export async function activarSetCompletoDePrueba() {
   // veces da el mismo resultado y no depende de como estaba antes.
   const aMostrar = productos.filter((p) => CATALOGO_COMPLETO_PRUEBA.includes(p.id) && p.activo === false);
   const aRenombrar = productos.filter((p) => NOMBRES_A_CORREGIR_PRUEBA[p.id] && p.nombre !== NOMBRES_A_CORREGIR_PRUEBA[p.id]);
+  const aDespertar = insumos.filter((i) => INSUMOS_A_DESPERTAR_PRUEBA.includes(i.id) && i.activo === false);
 
   const insumosNuevos = [];
   const recetasNuevas = [];
@@ -989,8 +1014,8 @@ export async function activarSetCompletoDePrueba() {
   const grupos = await getGruposVariantes().catch(() => []);
   const faltaGrupoBebida = !grupos.some((g) => g.id === GRUPO_BEBIDA_PRUEBA.id);
 
-  const cambios = aMostrar.length + aRenombrar.length + insumosNuevos.length
-    + recetasNuevas.length + (faltaGrupoBebida ? 1 : 0);
+  const cambios = aMostrar.length + aRenombrar.length + aDespertar.length
+    + insumosNuevos.length + recetasNuevas.length + (faltaGrupoBebida ? 1 : 0);
 
   await withStores(["productos", "insumos", "recetas", "configuracion"], "readwrite", (stores) => {
     for (const p of aMostrar) stores.productos.put({ ...p, activo: true, actualizadoEn: now });
@@ -998,6 +1023,7 @@ export async function activarSetCompletoDePrueba() {
       const visible = aMostrar.some((x) => x.id === p.id);
       stores.productos.put({ ...p, activo: visible ? true : p.activo, nombre: NOMBRES_A_CORREGIR_PRUEBA[p.id], actualizadoEn: now });
     }
+    for (const i of aDespertar) stores.insumos.put({ ...i, activo: true, actualizadoEn: now });
     for (const i of insumosNuevos) stores.insumos.put(i);
     for (const r of recetasNuevas) stores.recetas.put(r);
     stores.configuracion.put({ id: SET_PRUEBA_KEY, valor: true, actualizadoEn: now });
@@ -1027,6 +1053,7 @@ export async function activarSetCompletoDePrueba() {
     cambios,
     visibles: aMostrar.map((p) => p.nombre),
     renombrados: aRenombrar.map((p) => NOMBRES_A_CORREGIR_PRUEBA[p.id]),
+    despertados: aDespertar.map((i) => i.nombre),
     recetas: recetasNuevas.length
   };
 }
