@@ -7,7 +7,7 @@ import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/re
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto } from "../modules/menu.js";
@@ -170,6 +170,7 @@ async function pullCatalogoCompleto() {
   await limpiarCatalogoV13().catch(() => ({ cambios: 0 }));
   await limpiarCatalogoV14().catch(() => ({ cambios: 0 }));
   await activarSetCompletoDePrueba().catch(() => ({ cambios: 0 }));
+  await afinarCatalogoDePrueba().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };

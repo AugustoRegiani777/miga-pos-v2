@@ -1,7 +1,7 @@
 import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, getPendingSyncCount } from "./sync.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, getPendingSyncCount } from "./sync.js";
 import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
@@ -545,6 +545,100 @@ const INSUMOS_A_DESPERTAR_PRUEBA = [
 
 const SET_PRUEBA_KEY = "set_completo_prueba_v2";
 
+// ---------------------------------------------------------------------------
+// Afinado del catalogo de prueba — SOLO contra la base de prueba
+// ---------------------------------------------------------------------------
+// Con los 41 productos a la vista se pudo auditar el catalogo entero por
+// primera vez. Esto corrige lo que la auditoria encontro y se puede decidir
+// sin preguntar. Lo que necesita un dato del negocio queda afuera, a proposito.
+
+// 1) El orden del menu. "Berenjena" y "Mortadela" compartian el 5, "Salame" y
+//    "Especial" el 10, y en Cafe no habia ningun 5: con ordenes repetidos el
+//    menu queda a merced de como vengan las filas. Se declara el orden entero.
+const ORDEN_PRUEBA = {
+  sandwiches: ["jamon-queso", "pasta-oliva-queso", "pimiento-gouda-philp", "pesto-tomate-queso",
+    "berenjena-brie", "mortadela-pesto-queso", "jamon-serrano-rucula", "atun-palta-queso",
+    "huevo-jamon", "huevo-queso", "salame", "especial-semanal", "promo-bebida", "promo-cafe-con-leche"],
+  bolleria: ["croissant", "mini-croissant", "mini-croissant-ddl", "pain-au-chocolat", "chipa",
+    "alfajor-havana", "cookies", "medialunas", "cinnamon-roll", "galletitas"],
+  cafe: ["expresso-30ml", "cortado", "latte", "cafe-con-leche", "capuccino", "americano",
+    "flat-white", "ice-latte", "ice-caramel"],
+  bebidas: ["cerveza", "coca-cola", "sprite", "nestea", "aquiaros", "jugo", "agua", "fanta"]
+};
+
+// 2) Dos nombres que se leen en la caja tal cual estan escritos.
+const NOMBRES_PRODUCTO_V3 = { "promo-bebida": "Promo bebida", "aquiaros": "Aquarius" };
+
+// 3) Insumos de prueba que el dueño creo probando el alta y quedaron colgados:
+//    "leche de sanguche" (que ademas se habia metido en la receta de la
+//    berenjena, 150 ml de leche en un sandwich) y "crema" (la del cinnamon
+//    roll, que el dueño pidio sacar). Se descartan, no se borran: si manana
+//    aparece un movimiento viejo, el ledger sigue cerrando.
+const INSUMOS_A_DESCARTAR_V3 = ["leche-de-sanguche", "crema"];
+const RECETAS_A_BORRAR_V3 = ["berenjena-brie:leche-de-sanguche"];
+
+// 4) Tres recetas incompletas:
+//    - el Salame no llevaba ni mezcla ni mayonesa; los otros 10 sandwiches si,
+//      y el dueño ya dijo que lleva "lo mismo que todos los otros".
+//    - el "Mini croissant ddl" descontaba el dulce de leche pero NO el
+//      croissant: vendias uno y el stock de mini croissants no se movia.
+const RECETAS_FALTANTES_V3 = [
+  { id: "salame:mezcla", productoId: "salame", insumoId: "mezcla", cantidad: 5 },
+  { id: "salame:mayonesa", productoId: "salame", insumoId: "mayonesa", cantidad: 5 },
+  { id: "mini-croissant-ddl:mini-croissant", productoId: "mini-croissant-ddl", insumoId: "mini-croissant", cantidad: 1 }
+];
+
+// 5) Lineas de proveedor con insumoId null: quedaron del seed, de cuando esos
+//    insumos todavia no existian. Ahora existen, asi que en vez de tirarlas se
+//    reapuntan — y de paso el Alfajor Havanna y las Galletitas dejan de estar
+//    sin proveedor.
+const PI_A_REAPUNTAR_V3 = {
+  "tropicalia:alfajor-choc": "alfajor-havana",
+  "pampa:alfajor-choc": "alfajor-havana",
+  "tropicalia:chocolinas": "galletitas"
+};
+
+// 6) Y las que no tienen insumo al que apuntar, o duplican otra, se desactivan:
+//    almidon, granola, mantequilla y sirope de vainilla no los usa ningun
+//    producto; las otras dos cajas de alfajor son variedades del mismo alfajor
+//    (con una alcanza para comparar precio); "paleta-sandwich" es el mismo
+//    jamon york que ya esta cargado, al mismo precio; y el salmon y la crema
+//    siguen a sus insumos.
+const PI_A_DESACTIVAR_V3 = [
+  "tropicalia:almidon", "makro:granola", "makro:mantequilla", "makro:sirope-vainilla",
+  "tropicalia:alfajor-mer", "tropicalia:alfajor-mix",
+  "jasa:paleta-sandwich", "jasa:salmon",
+  "delicias-vegetales:leche-de-sanguche", "delicias-vegetales:custom-1791203548136"
+];
+
+// 7) Proveedores y lineas que faltaban, con los precios reales de las facturas
+//    de septiembre de 2026. Sin proveedor, un insumo no entra en la lista de
+//    compras: existe, se descuenta, y nunca nadie lo manda a pedir.
+const PROVEEDORES_NUEVOS_V3 = [
+  { id: "cocacola", nombre: "Coca-Cola EP", tel: "900 246 500", email: "www.tuportalcocacolaep.es",
+    notas: "Bebidas. Minimo 5 paquetes de 24 (se pueden mezclar). Domiciliacion SEPA.",
+    diasCiclo: 14, leadTimeDias: 2, diasEntrega: null, activo: true },
+  { id: "massaro", nombre: "Messialuncitas", tel: "611 262 419", email: "massarocarlamicaela@gmail.com",
+    notas: "Medialunas. Lote de 24 unidades, se pasa a retirar. Transferencia.",
+    diasCiclo: 23, leadTimeDias: 2, diasEntrega: null, activo: true }
+];
+const PI_NUEVOS_V3 = [
+  { id: "cocacola:coca-cola", proveedorId: "cocacola", insumoId: "coca-cola", nombreProducto: "COCACOLA LATA33 C24", unidadCompra: "caja", cantidadPorUnidad: 24, precioUnitarioCentavos: 1719 },
+  { id: "cocacola:agua", proveedorId: "cocacola", insumoId: "agua", nombreProducto: "AQUABONA PET50 C24", unidadCompra: "caja", cantidadPorUnidad: 24, precioUnitarioCentavos: 737 },
+  { id: "cocacola:aquiaros", proveedorId: "cocacola", insumoId: "aquiaros", nombreProducto: "AQUARIUS LATA33 C24", unidadCompra: "caja", cantidadPorUnidad: 24, precioUnitarioCentavos: 1813 },
+  { id: "cocacola:nestea", proveedorId: "cocacola", insumoId: "nestea", nombreProducto: "FUZE LIMON LATA33 CCO8 C24", unidadCompra: "caja", cantidadPorUnidad: 24, precioUnitarioCentavos: 1730 },
+  { id: "mercadona:cerveza", proveedorId: "mercadona", insumoId: "cerveza", nombreProducto: "Cerveza Heineken / clasica / tostada / Amstel", unidadCompra: "unidad", cantidadPorUnidad: 1, precioUnitarioCentavos: 62 },
+  { id: "mercadona:jugo", proveedorId: "mercadona", insumoId: "jugo", nombreProducto: "Zumo de naranja pura", unidadCompra: "envase", cantidadPorUnidad: 1, precioUnitarioCentavos: 168 },
+  { id: "massaro:medialunas", proveedorId: "massaro", insumoId: "medialunas", nombreProducto: "Medialuna unidad mayorista", unidadCompra: "unidad", cantidadPorUnidad: 1, precioUnitarioCentavos: 100 }
+];
+
+// 8) Dias de entrega reales (0 = domingo). Solo JASA y Makro tienen dias fijos;
+//    los demas entregan "al dia siguiente" o "en 24/48 h", que no es un dia de
+//    la semana y por eso se deja vacio a proposito.
+const DIAS_ENTREGA_V3 = { jasa: [1, 2, 6], makro: [1, 2] };
+
+const AFINADO_PRUEBA_KEY = "afinado_catalogo_prueba_v1";
+
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
 // Primero lo intente en seedInsumos y la prueba lo encontro: en un dispositivo
@@ -1056,6 +1150,116 @@ export async function activarSetCompletoDePrueba() {
     despertados: aDespertar.map((i) => i.nombre),
     recetas: recetasNuevas.length
   };
+}
+
+export async function afinarCatalogoDePrueba() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+
+  const [productos, insumos, recetas, proveedores, provInsumos, config] = await Promise.all([
+    getAll("productos"), getAll("insumos"), getAll("recetas"),
+    getAll("proveedores"), getAll("proveedor_insumos"), getAll("configuracion")
+  ]);
+  if (config.find((c) => c.id === AFINADO_PRUEBA_KEY)?.valor) return { cambios: 0 };
+
+  const now = new Date().toISOString();
+
+  // --- productos: orden y nombre (destino declarado, no calculado) ---
+  const productosFinales = new Map();
+  const ponerProducto = (p, campos) => productosFinales.set(p.id, { ...(productosFinales.get(p.id) || p), ...campos, actualizadoEn: now });
+  for (const [categoriaId, ids] of Object.entries(ORDEN_PRUEBA)) {
+    ids.forEach((id, i) => {
+      const p = productos.find((x) => x.id === id);
+      if (p && (p.orden !== i + 1 || p.categoriaId !== categoriaId)) ponerProducto(p, { orden: i + 1 });
+    });
+  }
+  for (const [id, nombre] of Object.entries(NOMBRES_PRODUCTO_V3)) {
+    const p = productos.find((x) => x.id === id);
+    if (p && p.nombre !== nombre) ponerProducto(p, { nombre });
+  }
+
+  // --- insumos a descartar ---
+  const insumosDescartados = insumos.filter((i) => INSUMOS_A_DESCARTAR_V3.includes(i.id) && i.activo !== false);
+
+  // --- recetas ---
+  const recetasBorradas = RECETAS_A_BORRAR_V3.filter((id) => recetas.some((r) => r.id === id));
+  const recetasNuevas = RECETAS_FALTANTES_V3
+    .filter((r) => productos.some((p) => p.id === r.productoId) && insumos.some((i) => i.id === r.insumoId))
+    .filter((r) => !recetas.some((x) => x.id === r.id))
+    .map((r) => ({ id: r.id, productoId: r.productoId, insumoId: r.insumoId,
+      cantidadPorUnidad: r.cantidad, esEstimado: true, creadoEn: now, actualizadoEn: now }));
+
+  // --- proveedores ---
+  const proveedoresNuevos = PROVEEDORES_NUEVOS_V3
+    .filter((p) => !proveedores.some((x) => x.id === p.id))
+    .map((p) => ({ ...p, creadoEn: now, actualizadoEn: now }));
+  const proveedoresConDias = proveedores
+    .filter((p) => DIAS_ENTREGA_V3[p.id] && JSON.stringify(p.diasEntrega) !== JSON.stringify(DIAS_ENTREGA_V3[p.id]))
+    .map((p) => ({ ...p, diasEntrega: DIAS_ENTREGA_V3[p.id], actualizadoEn: now }));
+
+  // --- lineas de proveedor ---
+  const idsInsumo = new Set([...insumos.map((i) => i.id)]);
+  const piFinales = new Map();
+  const ponerPi = (x, campos) => piFinales.set(x.id, { ...(piFinales.get(x.id) || x), ...campos, actualizadoEn: now });
+  for (const [id, insumoId] of Object.entries(PI_A_REAPUNTAR_V3)) {
+    const x = provInsumos.find((y) => y.id === id);
+    if (x && x.insumoId !== insumoId && idsInsumo.has(insumoId)) ponerPi(x, { insumoId, activo: true });
+  }
+  for (const id of PI_A_DESACTIVAR_V3) {
+    const x = provInsumos.find((y) => y.id === id);
+    if (x && x.activo !== false) ponerPi(x, { activo: false });
+  }
+  const piNuevos = PI_NUEVOS_V3
+    .filter((x) => idsInsumo.has(x.insumoId))
+    .filter((x) => !provInsumos.some((y) => y.id === x.id))
+    .map((x) => ({ ...x, activo: true, creadoEn: now, actualizadoEn: now }));
+
+  // RECETAS_A_BORRAR_V3 suma siempre: el borrado remoto tiene que intentarse
+  // aunque en este dispositivo no quede nada local que borrar.
+  const cambios = productosFinales.size + insumosDescartados.length + RECETAS_A_BORRAR_V3.length
+    + recetasNuevas.length + proveedoresNuevos.length + proveedoresConDias.length
+    + piFinales.size + piNuevos.length;
+
+  await withStores(["productos", "insumos", "recetas", "proveedores", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
+    for (const p of productosFinales.values()) stores.productos.put(p);
+    for (const i of insumosDescartados) stores.insumos.put({ ...i, activo: false, actualizadoEn: now });
+    for (const id of recetasBorradas) stores.recetas.delete(id);
+    for (const r of recetasNuevas) stores.recetas.put(r);
+    for (const p of proveedoresNuevos) stores.proveedores.put(p);
+    for (const p of proveedoresConDias) stores.proveedores.put(p);
+    for (const x of piFinales.values()) stores.proveedor_insumos.put(x);
+    for (const x of piNuevos) stores.proveedor_insumos.put(x);
+    stores.configuracion.put({ id: AFINADO_PRUEBA_KEY, valor: true, actualizadoEn: now });
+  });
+
+  if (cambios === 0) return { cambios: 0 };
+
+  // El snapshot de recetas es un upsert: lo borrado hay que sacarlo tambien de
+  // la nube o vuelve en el proximo refresco.
+  //
+  // Se piden SIEMPRE las borradas que declara la tabla, no solo las que
+  // estaban en esta copia local. Es lo que fallo la primera vez:
+  // "berenjena-brie:leche-de-sanguche" existia en la nube pero no en el
+  // dispositivo, asi que no entraba en recetasBorradas y nadie pedia su
+  // borrado — quedaba viva en la nube para siempre. Un DELETE de algo que ya
+  // no esta no cuesta nada; no pedirlo cuesta una linea fantasma.
+  for (const id of RECETAS_A_BORRAR_V3) await deleteRecetaRemota(id).catch(() => {});
+
+  const [catF, prodF, insF, recF, provF, piF] = await Promise.all([
+    getAll("categorias"), getAll("productos"), getAll("insumos"),
+    getAll("recetas"), getAll("proveedores"), getAll("proveedor_insumos")
+  ]);
+  // Orden: insumos y proveedores ANTES que proveedor_insumos, que los referencia
+  // por clave foranea — al reves Supabase rechaza el lote con un 409.
+  trySyncCatalogoSnapshot(catF, prodF).catch(() => {});
+  await Promise.all([
+    trySyncInsumosSnapshot(insF).catch(() => {}),
+    trySyncProveedoresSnapshot(provF).catch(() => {})
+  ]);
+  trySyncRecetasSnapshot(recF).catch(() => {});
+  trySyncProveedorInsumosSnapshot(piF).catch(() => {});
+
+  return { cambios, productos: productosFinales.size, recetas: recetasNuevas.length,
+           proveedores: proveedoresNuevos.length, lineasProveedor: piFinales.size + piNuevos.length };
 }
 
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
