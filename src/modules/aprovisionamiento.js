@@ -42,6 +42,22 @@ export function construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, 
   const envaseTrae = parseFloat(String(factorConversion ?? "").replace(",", "."));
   const tieneEnvase = Boolean(envaseNombre) && Number.isFinite(envaseTrae) && envaseTrae > 1;
 
+  // Un minimo en 0 NO es un minimo: es un insumo que nunca va a pedir
+  // reposicion y que ademas se muestra en rojo "critico" para siempre, porque
+  // cualquier stock es <= 0. Le paso al salami, y le volvio a pasar a la
+  // "lengua carne" que el dueño cargo probando: dejo los campos vacios y el
+  // `|| 0` de aca abajo los convirtio en cero sin decir nada.
+  //
+  // Cuando no viene un numero se pone un piso razonable segun la unidad —un
+  // kilo, un litro, una docena— que es un mal dato pero visible y corregible,
+  // a diferencia del cero, que es un mal dato invisible. La pantalla que crea
+  // el insumo ademas lo propone calculado desde la receta (ver render-menu.js),
+  // asi que este piso es la ultima red, no el camino normal.
+  const PISO_MINIMO = { g: 1000, ml: 1000, unidad: 12, rebanada: 24 };
+  const pedido = (v) => { const n = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
+  const minimoFinal = pedido(stockMinimo) ?? PISO_MINIMO[unidadFinal] ?? 1;
+  const criticoFinal = pedido(stockCritico) ?? Math.round((minimoFinal / 2) * 100) / 100;
+
   return {
     id,
     nombre: nombreLimpio,
@@ -49,8 +65,8 @@ export function construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, 
     unidadCompra: tieneEnvase ? envaseNombre : unidadFinal,
     factorConversion: tieneEnvase ? envaseTrae : 1,
     stockActual: 0,
-    stockMinimo: parseFloat(String(stockMinimo ?? "").replace(",", ".")) || 0,
-    stockCritico: parseFloat(String(stockCritico ?? "").replace(",", ".")) || 0,
+    stockMinimo: minimoFinal,
+    stockCritico: criticoFinal,
     activo: true,
     creadoEn: now,
     actualizadoEn: now
@@ -659,7 +675,21 @@ const PI_COCACOLA_V3 = [
   { id: "cocacola:fanta", proveedorId: "cocacola", insumoId: "fanta", nombreProducto: "FANTA LATA33 C24 (precio a confirmar)", unidadCompra: "caja", cantidadPorUnidad: 24, precioUnitarioCentavos: 1719 }
 ];
 
-const AFINADO_PRUEBA_KEY = "afinado_catalogo_prueba_v2";
+// 11) El "vittel tone" que cargo el dueño probando el alta desde Menu. Quedo
+//     con lengua, mayonesa y gouda, pero sin la miga ni la mezcla, que llevan
+//     los otros once sandwiches: cada uno que vendiera no descontaba pan. Y la
+//     "lengua carne" quedo con minimo y critico en 0 — nunca pide reposicion y
+//     se muestra en rojo para siempre. El piso de construirInsumoNuevo evita
+//     que vuelva a pasar; esto arregla el que ya quedo mal.
+const RECETAS_VITTEL_V3 = [
+  { id: "vittel-tone:miga", productoId: "vittel-tone", insumoId: "miga", cantidad: 0.5 },
+  { id: "vittel-tone:mezcla", productoId: "vittel-tone", insumoId: "mezcla", cantidad: 5 }
+];
+// 1500 g = 30 g por sandwich x 50 sandwiches, el mismo criterio que ahora
+// propone el formulario. El dueño lo ajusta cuando sepa cuanto gasta de verdad.
+const MINIMOS_V3 = { "lengua-carne": { minimo: 1500, critico: 750 } };
+
+const AFINADO_PRUEBA_KEY = "afinado_catalogo_prueba_v3";
 
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
@@ -1201,10 +1231,11 @@ export async function afinarCatalogoDePrueba() {
 
   // --- insumos a descartar ---
   const insumosDescartados = insumos.filter((i) => INSUMOS_A_DESCARTAR_V3.includes(i.id) && i.activo !== false);
+  const insumosConMinimo = insumos.filter((i) => MINIMOS_V3[i.id] && !(Number(i.stockMinimo) > 0));
 
   // --- recetas ---
   const recetasBorradas = RECETAS_A_BORRAR_V3.filter((id) => recetas.some((r) => r.id === id));
-  const recetasNuevas = RECETAS_FALTANTES_V3
+  const recetasNuevas = [...RECETAS_FALTANTES_V3, ...RECETAS_VITTEL_V3]
     .filter((r) => productos.some((p) => p.id === r.productoId) && insumos.some((i) => i.id === r.insumoId))
     .filter((r) => !recetas.some((x) => x.id === r.id))
     .map((r) => ({ id: r.id, productoId: r.productoId, insumoId: r.insumoId,
@@ -1248,11 +1279,13 @@ export async function afinarCatalogoDePrueba() {
   // aunque en este dispositivo no quede nada local que borrar.
   const cambios = productosFinales.size + insumosDescartados.length + RECETAS_A_BORRAR_V3.length
     + recetasNuevas.length + proveedoresNuevos.length + proveedoresConDias.length
-    + piFinales.size + piNuevos.length + INSUMOS_A_BORRAR_V3.length + PI_A_BORRAR_V3.length;
+    + piFinales.size + piNuevos.length + INSUMOS_A_BORRAR_V3.length + PI_A_BORRAR_V3.length
+    + insumosConMinimo.length;
 
   await withStores(["productos", "insumos", "recetas", "proveedores", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
     for (const p of productosFinales.values()) stores.productos.put(p);
     for (const i of insumosDescartados) stores.insumos.put({ ...i, activo: false, actualizadoEn: now });
+    for (const i of insumosConMinimo) stores.insumos.put({ ...i, stockMinimo: MINIMOS_V3[i.id].minimo, stockCritico: MINIMOS_V3[i.id].critico, actualizadoEn: now });
     for (const id of recetasBorradas) stores.recetas.delete(id);
     for (const r of recetasNuevas) stores.recetas.put(r);
     for (const p of proveedoresNuevos) stores.proveedores.put(p);

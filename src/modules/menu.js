@@ -1,6 +1,6 @@
 import { getAll, getOne, putOne, withStores, requestToPromise } from "../db/idb.js";
 import { slugify } from "../utils/format.js";
-import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot, trySyncProductoEliminado, hayPendientesDeTipo } from "./sync.js";
+import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot, trySyncProveedorInsumosSnapshot, trySyncProductoEliminado, hayPendientesDeTipo } from "./sync.js";
 import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo, contarReferenciasProducto, deleteProductoRemoto } from "../db/supabase.js";
 import { construirInsumoNuevo } from "./aprovisionamiento.js";
 import { getInsumoAGrupoVariante, setProductoGrupoVariante } from "./variantes.js";
@@ -58,6 +58,33 @@ function proximoOrden(productos, categoriaId) {
 // lineas de receta que apunten a un insumo inexistente lo crean ahi mismo —
 // mismo mecanismo de slugify + resolucion de colision que ya usa
 // confirmarFactura() en facturas.js.
+// La linea de proveedor que sale del alta de un insumo nuevo en Menu. Solo se
+// crea si estan los cuatro datos que la hacen util: sin precio o sin cuanto
+// trae, la lista de compras no puede ni comparar ni calcular, y seria una
+// linea que ensucia sin servir. Si falta algo se ignora en silencio y el
+// insumo queda "sin proveedor", que es lo que el aviso de Insumos ya marca.
+function construirLineaProveedor(linea, insumo, now) {
+  const proveedorId = String(linea.nuevoProveedorId || "").trim();
+  if (!proveedorId) return null;
+  const num = (v) => { const n = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
+  const trae = num(linea.nuevoProveedorTrae);
+  const precio = num(linea.nuevoProveedorPrecio);
+  const unidadCompra = String(linea.nuevoProveedorUnidad || "").trim();
+  if (!trae || !precio || !unidadCompra) return null;
+  return {
+    id: `${proveedorId}:${insumo.id}`,
+    proveedorId,
+    insumoId: insumo.id,
+    nombreProducto: String(linea.nuevoProveedorProducto || "").trim() || insumo.nombre,
+    unidadCompra,
+    cantidadPorUnidad: trae,
+    precioUnitarioCentavos: Math.round(precio * 100),
+    activo: true,
+    creadoEn: now,
+    actualizadoEn: now
+  };
+}
+
 export async function saveProducto({ id, categoriaId, nombre, precioCentavos, controlaStock, umbralBajo, sandwichTipo, activo, lineasReceta }) {
   const now = new Date().toISOString();
   const [productosActuales, insumosActuales, recetasActuales] = await Promise.all([
@@ -95,6 +122,7 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
 
   const idsInsumoUsados = new Set(insumosActuales.map(i => i.id));
   const insumosNuevos = [];
+  const provInsumosNuevos = [];
 
   const cantidadDecimal = (l) => parseFloat(String(l.cantidad ?? "").replace(",", "."));
 
@@ -122,6 +150,12 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
           stockCritico: l.nuevoStockCritico
         });
         insumosNuevos.push(insumoNuevo);
+        // Si en el mismo formulario se eligio a quien comprarselo, la linea de
+        // proveedor se crea aca y no en otra pantalla. Un insumo sin proveedor
+        // no entra nunca en la lista de compras, y hasta ahora habia que
+        // acordarse de ir a cargarlo aparte.
+        const lineaProv = construirLineaProveedor(l, insumoNuevo, now);
+        if (lineaProv) provInsumosNuevos.push(lineaProv);
         return { insumoId: insumoNuevo.id, cantidadPorUnidad: cantidadDecimal(l), variantesCantidad };
       }
       return { insumoId: l.insumoId, cantidadPorUnidad: cantidadDecimal(l), variantesCantidad };
@@ -131,9 +165,10 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
   const recetaPorId = new Map(recetasDelProducto.map(r => [r.id, r]));
   const idsFinales = new Set(lineasFinales.map(l => `${productoId}:${l.insumoId}`));
 
-  await withStores(["productos", "insumos", "recetas"], "readwrite", (stores) => {
+  await withStores(["productos", "insumos", "recetas", "proveedor_insumos"], "readwrite", (stores) => {
     stores.productos.put(producto);
     for (const insumo of insumosNuevos) stores.insumos.put(insumo);
+    for (const linea of provInsumosNuevos) stores.proveedor_insumos.put(linea);
     // Solo se borran las lineas que el usuario saco del formulario. Antes se
     // borraban TODAS y se recreaban de cero, y eso se llevaba puesto los
     // campos que esta pantalla no maneja — sobre todo recetaFija, la marca
@@ -176,7 +211,14 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
   ]);
   trySyncCatalogoSnapshot(categorias, productosFinal).catch(() => {});
   trySyncRecetasSnapshot(recetasFinal).catch(() => {});
-  if (insumosNuevos.length > 0) trySyncInsumosSnapshot(insumosFinal).catch(() => {});
+  if (insumosNuevos.length > 0) await trySyncInsumosSnapshot(insumosFinal).catch(() => {});
+  // DESPUES de los insumos, nunca antes: proveedor_insumos los referencia por
+  // clave foranea y Supabase rechaza el lote entero con un 409 si el insumo
+  // todavia no llego (paso con el modulo de proveedores, y el badge de la cola
+  // quedaba en rojo sin que nada en pantalla explicara por que).
+  if (provInsumosNuevos.length > 0) {
+    trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
+  }
 
   return producto;
 }

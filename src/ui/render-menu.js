@@ -132,7 +132,56 @@ function lineaVarianteCantidades(linea, grupos, insumos, index) {
     </div>`;
 }
 
-export function renderMenuRecetaRows(container, lineas, insumos, grupos = []) {
+// Lo que falta cuando se crea un insumo desde aca.
+//
+// El dueño creo "lengua carne" para un sandwich nuevo y el insumo quedo a
+// medias: sin minimo (los campos estaban vacios -> 0) y sin proveedor, porque
+// habia que ir a OTRA pantalla a asignarselo. Sus palabras: "podria haberme
+// ofrecido antes que le asigne proveedor". Tenia razon: el dato se pide donde
+// se crea la cosa, no en otro lado y mas tarde.
+//
+// El minimo se PROPONE calculado, no se pide en frio: nadie sabe de memoria
+// cuantos gramos de lengua quiere tener siempre, pero todos saben que hacen
+// mas o menos 50 sandwiches de ese tipo antes de reponer. cantidad x 50, y el
+// critico a la mitad. Se muestran en el campo para que se vean y se puedan
+// cambiar — no es un default escondido.
+const SANDWICHES_ANTES_DE_REPONER = 50;
+function minimoSugerido(cantidad) {
+  const n = parseFloat(String(cantidad ?? "").replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const crudo = n * SANDWICHES_ANTES_DE_REPONER;
+  // Redondeo a algo que se lea bien: 1500, no 1487,5.
+  const paso = crudo >= 1000 ? 100 : crudo >= 100 ? 10 : 1;
+  return Math.max(paso, Math.round(crudo / paso) * paso);
+}
+
+function bloqueProveedorNuevo(linea, index, proveedores) {
+  const elegido = linea.nuevoProveedorId || "";
+  const opciones = proveedores
+    .map((v) => `<option value="${v.id}" ${v.id === elegido ? "selected" : ""}>${v.nombre}</option>`)
+    .join("");
+  return `
+    <div class="menu-receta-nuevo-prov">
+      <label class="menu-receta-nuevo-prov-quien">
+        <span>¿A quién se lo comprás?</span>
+        <select class="menu-receta-nuevo-proveedor" data-idx="${index}">
+          <option value="" ${elegido ? "" : "selected"}>— Lo cargo después —</option>
+          ${opciones}
+        </select>
+      </label>
+      ${elegido ? `
+        <div class="menu-receta-nuevo-fields">
+          <input class="menu-receta-nuevo-prov-nombre" data-idx="${index}" type="text" placeholder="Cómo figura en su factura" value="${linea.nuevoProveedorProducto ?? ""}">
+          <input class="menu-receta-nuevo-prov-unidad" data-idx="${index}" type="text" placeholder="Cómo te lo factura (kg, caja...)" value="${linea.nuevoProveedorUnidad ?? ""}">
+        </div>
+        <div class="menu-receta-nuevo-fields">
+          <input class="menu-receta-nuevo-prov-trae" data-idx="${index}" type="text" inputmode="decimal" placeholder="Cuánto trae (en ${linea.nuevaUnidad || "la unidad del insumo"})" value="${linea.nuevoProveedorTrae ?? ""}">
+          <input class="menu-receta-nuevo-prov-precio" data-idx="${index}" type="text" inputmode="decimal" placeholder="Precio de esa unidad (€)" value="${linea.nuevoProveedorPrecio ?? ""}">
+        </div>` : ""}
+    </div>`;
+}
+
+export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], proveedores = []) {
   if (!lineas.length) {
     container.innerHTML = "<p class='cal-muted' style='padding:0.25rem 0'>Sin insumos agregados todavia.</p>";
     return;
@@ -140,6 +189,7 @@ export function renderMenuRecetaRows(container, lineas, insumos, grupos = []) {
 
   container.innerHTML = lineas.map((linea, index) => {
     const esNuevo = linea.insumoId === "__nuevo__";
+    const sugerido = esNuevo ? minimoSugerido(linea.cantidad) : null;
     return `
       <div class="menu-receta-row" data-idx="${index}">
         <div class="menu-receta-row-main">
@@ -153,9 +203,13 @@ export function renderMenuRecetaRows(container, lineas, insumos, grupos = []) {
             <input class="menu-receta-nuevo-unidad" data-idx="${index}" type="text" placeholder="Unidad (g, ml, unidad...)" value="${linea.nuevaUnidad ?? ""}">
           </div>
           <div class="menu-receta-nuevo-fields">
-            <input class="menu-receta-nuevo-min" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Stock minimo" value="${linea.nuevoStockMinimo ?? ""}">
-            <input class="menu-receta-nuevo-critico" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Stock critico" value="${linea.nuevoStockCritico ?? ""}">
-          </div>` : ""}
+            <input class="menu-receta-nuevo-min" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Mínimo${sugerido ? `: ${sugerido}` : ""}" value="${linea.nuevoStockMinimo ?? (sugerido ?? "")}">
+            <input class="menu-receta-nuevo-critico" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Crítico${sugerido ? `: ${Math.round(sugerido / 2)}` : ""}" value="${linea.nuevoStockCritico ?? (sugerido ? Math.round(sugerido / 2) : "")}">
+          </div>
+          <p class="menu-receta-nuevo-ayuda cal-muted">${sugerido
+            ? `Calculado para ${SANDWICHES_ANTES_DE_REPONER} unidades antes de reponer. Cambialo si querés.`
+            : "Poné primero la cantidad y te propongo un mínimo."}</p>
+          ${bloqueProveedorNuevo(linea, index, proveedores)}` : ""}
         ${lineaVarianteCantidades(linea, grupos, insumos, index)}
       </div>`;
   }).join("");

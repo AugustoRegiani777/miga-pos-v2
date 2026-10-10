@@ -274,6 +274,7 @@ let menuProductoEditando = null;
 let menuEliminarInProgress = false;
 let menuRecetaLineas = [];
 let menuInsumosDisponibles = [];
+let menuProveedoresDisponibles = [];
 let menuGruposVarianteDisponibles = [];
 const pedidoCart = new Map();
 const expandedPedidoIds = new Set();
@@ -2374,7 +2375,7 @@ function setMenuEditSheetOpen(isOpen) {
 }
 
 function renderMenuRecetaEditorView() {
-  renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles, menuGruposVarianteDisponibles);
+  renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles, menuGruposVarianteDisponibles, menuProveedoresDisponibles);
 }
 
 // Los inputs numericos son type="number", pero en la tablet a veces dejan
@@ -2415,6 +2416,9 @@ async function openMenuProductoAdd(categoriaId) {
   dom.menuEditActivo.checked = true;
   menuRecetaLineas = [];
   menuInsumosDisponibles = await listInsumos();
+  menuProveedoresDisponibles = (await getAll("proveedores"))
+    .filter((p) => p.activo !== false)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
   menuGruposVarianteDisponibles = await getGruposVariantes();
   const categorias = await listCategories();
   dom.menuEditCategoria.innerHTML = categorias
@@ -2440,6 +2444,9 @@ async function openMenuProductoEdit(producto) {
   dom.menuEditSandwichTipo.value = producto.sandwichTipo === "premium" ? "premium" : "basico";
   dom.menuEditActivo.checked = !!producto.activo;
   menuInsumosDisponibles = await listInsumos();
+  menuProveedoresDisponibles = (await getAll("proveedores"))
+    .filter((p) => p.activo !== false)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
   const [categorias, recetas, grupos, grupoActual] = await Promise.all([listCategories(), getAll("recetas"), getGruposVariantes(), getGrupoDeProducto(producto.id)]);
   menuGruposVarianteDisponibles = grupos;
   dom.menuEditCategoria.innerHTML = categorias
@@ -3870,6 +3877,10 @@ function bindEvents() {
     if (e.target.classList.contains("menu-receta-nuevo-unidad")) menuRecetaLineas[idx].nuevaUnidad = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-min")) menuRecetaLineas[idx].nuevoStockMinimo = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-critico")) menuRecetaLineas[idx].nuevoStockCritico = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-prov-nombre")) menuRecetaLineas[idx].nuevoProveedorProducto = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-prov-unidad")) menuRecetaLineas[idx].nuevoProveedorUnidad = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-prov-trae")) menuRecetaLineas[idx].nuevoProveedorTrae = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-prov-precio")) menuRecetaLineas[idx].nuevoProveedorPrecio = e.target.value;
     if (e.target.classList.contains("menu-receta-variante-cantidad")) {
       const opcion = e.target.dataset.opcion;
       if (!menuRecetaLineas[idx].variantesCantidad) menuRecetaLineas[idx].variantesCantidad = {};
@@ -3888,6 +3899,19 @@ function bindEvents() {
       menuRecetaLineas[idx].insumoId = e.target.value;
       renderMenuRecetaEditorView();
     }
+    // Elegir proveedor despliega sus tres campos, asi que hay que repintar.
+    if (e.target.classList.contains("menu-receta-nuevo-proveedor")) {
+      menuRecetaLineas[idx].nuevoProveedorId = e.target.value;
+      // El nombre con el que figura en la factura arranca igual al del insumo:
+      // es lo mas probable, y si no se corrige ahi mismo. Vacio obligaria a
+      // escribirlo dos veces en el caso normal.
+      if (e.target.value && !menuRecetaLineas[idx].nuevoProveedorProducto) {
+        menuRecetaLineas[idx].nuevoProveedorProducto = menuRecetaLineas[idx].nuevoNombre || "";
+      }
+      renderMenuRecetaEditorView();
+    }
+    // Al salir del campo de cantidad se recalcula el minimo sugerido.
+    if (e.target.classList.contains("menu-receta-cantidad")) renderMenuRecetaEditorView();
   });
 
   dom.menuRecetaRows.addEventListener("click", (e) => {
