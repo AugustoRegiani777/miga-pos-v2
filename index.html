@@ -890,8 +890,56 @@
                   <p class="cal-muted">Lo que consume UNA unidad. Sin esto, venderlo no descuenta nada.</p>
                 </div>
               </div>
-              <div id="menu-receta-rows"></div>
-              <button type="button" class="ghost-button compact" id="menu-add-receta-row">+ Agregar insumo</button>
+
+              <!-- Como se consigue el producto. Son tres situaciones reales y las
+                   tres valen: lo preparan ellos (receta), lo compran hecho y lo
+                   venden tal cual (como la Coca-Cola), o todavia no saben —lo
+                   estan probando—. La tercera es valida a proposito: obligar a
+                   inventar una receta para poder guardar un producto es lo que
+                   llena el sistema de datos falsos. Solo se muestra al crear, o
+                   al editar un producto que todavia no tiene receta; uno que ya
+                   la tiene no se puede pasar a otro modo desde aca por error. -->
+              <div id="menu-modo-wrap" class="menu-modo" role="radiogroup" aria-label="Cómo se consigue este producto">
+                <label class="menu-modo-opcion"><input type="radio" name="menu-modo" value="receta" checked><span>Lo preparamos<small>con una receta</small></span></label>
+                <label class="menu-modo-opcion"><input type="radio" name="menu-modo" value="reventa"><span>Se compra hecho<small>y se vende tal cual</small></span></label>
+                <label class="menu-modo-opcion"><input type="radio" name="menu-modo" value="pendiente"><span>Lo estoy probando<small>lo defino después</small></span></label>
+              </div>
+
+              <div id="menu-receta-bloque">
+                <div id="menu-receta-rows"></div>
+                <button type="button" class="ghost-button compact" id="menu-add-receta-row">+ Agregar insumo</button>
+                <p class="cal-muted menu-sin-receta-aviso" id="menu-sin-receta-aviso" hidden>Sin insumos: el producto queda <strong>en prueba</strong> hasta que le cargues la receta.</p>
+              </div>
+
+              <div id="menu-reventa-bloque" hidden>
+                <p class="cal-muted">Cada venta descuenta 1 unidad. Entra en la lista de compras con su proveedor y su precio.</p>
+                <label class="quantity-field">
+                  <span>¿A quién se lo comprás?</span>
+                  <select id="menu-reventa-proveedor"></select>
+                </label>
+                <div id="menu-reventa-detalle" hidden>
+                  <label class="quantity-field">
+                    <span>Cómo figura en su factura</span>
+                    <input id="menu-reventa-nombre" type="text">
+                  </label>
+                  <label class="quantity-field">
+                    <span>Cómo te lo factura <small class="cal-muted">(caja, bolsa, unidad...)</small></span>
+                    <input id="menu-reventa-unidad" type="text" placeholder="caja">
+                  </label>
+                  <label class="quantity-field">
+                    <span>Cuántas unidades trae</span>
+                    <input id="menu-reventa-trae" type="text" inputmode="decimal" placeholder="24">
+                  </label>
+                  <label class="quantity-field">
+                    <span>Precio de esa caja o bolsa (€)</span>
+                    <input id="menu-reventa-precio" type="text" inputmode="decimal" placeholder="0,00">
+                  </label>
+                </div>
+              </div>
+
+              <div id="menu-prueba-bloque" hidden>
+                <p class="menu-prueba-texto"><strong>Producto en prueba.</strong> Se puede producir y vender como cualquier otro, pero no descuenta ningún insumo hasta que lo definas. Queda anotado en <strong>Insumos → Completar</strong> para que no se olvide, sin molestar.</p>
+              </div>
 
               <div class="section-heading" style="margin-top: 1.2rem;">
                 <div>

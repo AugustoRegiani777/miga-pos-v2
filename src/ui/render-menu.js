@@ -12,6 +12,11 @@ export function renderMenuList(el, categorias, callbacks = {}) {
     const filas = categoria.productos.map((producto, index) => {
       const ocultoBadge = producto.activo ? "" : '<span class="prov-badge prov-badge-muted">oculto</span>';
       const premiumBadge = producto.sandwichTipo === "premium" ? '<span class="prov-badge">de la casa</span>' : "";
+      // "En prueba": se vende y se produce normal, pero todavia no se definio de
+      // donde sale (ni receta, ni se compra hecho). Un producto oculto no la lleva.
+      const pruebaBadge = producto.activo && producto.tieneReceta === false
+        ? '<span class="prov-badge prov-badge-prueba" title="Todavía no tiene receta: no descuenta ningún insumo">en prueba</span>'
+        : "";
       const recetaTag = producto.recetaResumen.length
         ? `<span class="cal-muted prov-insumo-tag">${producto.recetaResumen.join(", ")}</span>`
         : "";
@@ -25,6 +30,7 @@ export function renderMenuList(el, categorias, callbacks = {}) {
             ${producto.nombre}
             ${premiumBadge}
             ${ocultoBadge}
+            ${pruebaBadge}
             ${recetaTag}
           </td>
           <td class="prov-num">${fmtEur(producto.precioCentavos)}</td>

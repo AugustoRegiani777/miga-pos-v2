@@ -443,6 +443,12 @@ const OPCION_SOJA_V14 = { nombre: "Soja", insumoId: "leche-de-soja" };
 //    El minimo es un arranque razonable, no un dato: el dueño lo ajusta. Pero
 //    no puede ser 0: un insumo con minimo 0 nunca pide reposicion y falla en
 //    silencio (es lo que pasaba con el salami).
+// OJO: aca NO estan croissant, mini croissant, pain au chocolat, cinnamon roll,
+// cookies ni chipa. Se pensaron como "se compra hecho" y no es asi: los hacen en
+// casa y todavia no tienen receta. Crearles un insumo espejo con su mismo nombre
+// los hacia aparecer como "insumo sin proveedor", que es un pendiente falso: el
+// pendiente es del PRODUCTO (esta "en prueba"), no de un insumo que no existe
+// en ningun proveedor. Siguen sin receta y se definen desde Insumos > Completar.
 const REVENTA_V14 = [
   { id: "coca-cola",        nombre: "Coca cola",        minimo: 12 },
   { id: "sprite",           nombre: "Sprite",           minimo: 12 },
@@ -452,12 +458,6 @@ const REVENTA_V14 = [
   { id: "jugo",             nombre: "Zumo",             minimo: 12 },
   { id: "cerveza",          nombre: "Cerveza",          minimo: 12 },
   { id: "medialunas",       nombre: "Medialunas",       minimo: 10 },
-  { id: "croissant",        nombre: "Croissant",        minimo: 10 },
-  { id: "mini-croissant",   nombre: "Mini croissant",   minimo: 10 },
-  { id: "pain-au-chocolat", nombre: "Pain au chocolat", minimo: 10 },
-  { id: "cinnamon-roll",    nombre: "Cinnamon roll",    minimo: 10 },
-  { id: "cookies",          nombre: "Cookies",          minimo: 10 },
-  { id: "chipa",            nombre: "Chipa",            minimo: 10 },
   { id: "alfajor-havana",   nombre: "Alfajor Havana",   minimo: 10 },
   { id: "galletitas",       nombre: "Galletitas",       minimo: 10 }
 ];
@@ -691,6 +691,24 @@ const MINIMOS_V3 = { "lengua-carne": { minimo: 1500, critico: 750 } };
 
 const AFINADO_PRUEBA_KEY = "afinado_catalogo_prueba_v3";
 
+// 12) Los seis productos que hacen en casa y todavia no tienen receta. Hasta
+//     ahora tenian un insumo espejo (un "Croissant" que no lo vende ningun
+//     proveedor) y una receta de 1 a 1 con el. Era un dato inventado, y por su
+//     culpa aparecian 6 "insumos sin proveedor". Se pasan a "en prueba": sin
+//     receta y sin insumos.
+//
+//     El insumo no se borra: tiene movimientos en el ledger (compras y consumos
+//     del set de prueba) y borrarlo dejaria esos movimientos apuntando al
+//     vacio. Se DESACTIVA, que es lo que la app ya hace con un insumo con
+//     historial (descartarInsumo).
+//
+//     El "Mini croissant ddl" llevaba el croissant y el dulce de leche; sin el
+//     insumo croissant, queda solo con el dulce de leche, que si es un insumo
+//     real con proveedor.
+const PRODUCTOS_EN_PRUEBA_V4 = ["croissant", "mini-croissant", "pain-au-chocolat", "cinnamon-roll", "cookies", "chipa"];
+const RECETAS_ESPEJO_EXTRA_V4 = ["mini-croissant-ddl:mini-croissant"];
+const EN_PRUEBA_KEY = "productos_en_prueba_v4";
+
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
 // Primero lo intente en seedInsumos y la prueba lo encontro: en un dispositivo
@@ -855,7 +873,13 @@ export async function limpiarCatalogoV12() {
 
   for (const [id, insumoId] of Object.entries(PROVEEDOR_INSUMOS_V12)) {
     const pi = proveedorInsumos.find(x => x.id === id);
-    if (pi && pi.insumoId !== insumoId) piNuevos.push({ ...pi, insumoId, actualizadoEn: now });
+    // Solo si el insumo destino EXISTE en este dispositivo. "jasa:salmon" se
+    // reapuntaba a "salmon" aunque ese insumo ya se hubiera borrado: en un
+    // dispositivo nuevo quedaba una linea huerfana y Supabase rechazaba el lote
+    // entero de lineas de proveedor con un 409 (violacion de clave foranea).
+    if (pi && pi.insumoId !== insumoId && insumos.some(i => i.id === insumoId)) {
+      piNuevos.push({ ...pi, insumoId, actualizadoEn: now });
+    }
   }
   for (const id of PROVEEDOR_INSUMOS_FUERA_V12) {
     const pi = proveedorInsumos.find(x => x.id === id);
@@ -1333,6 +1357,31 @@ export async function afinarCatalogoDePrueba() {
   return { cambios, productos: productosFinales.size, recetas: recetasNuevas.length,
            proveedores: proveedoresNuevos.length, lineasProveedor: piFinales.size + piNuevos.length,
            borrados: insumosBorrados };
+}
+
+export async function pasarProductosAEnPrueba() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+  const [insumos, recetas, config] = await Promise.all([getAll("insumos"), getAll("recetas"), getAll("configuracion")]);
+  if (config.find((c) => c.id === EN_PRUEBA_KEY)?.valor) return { cambios: 0 };
+
+  const now = new Date().toISOString();
+  const idsReceta = [...PRODUCTOS_EN_PRUEBA_V4.map((id) => `${id}:${id}`), ...RECETAS_ESPEJO_EXTRA_V4];
+  const recetasABorrar = idsReceta.filter((id) => recetas.some((r) => r.id === id));
+  const insumosADesactivar = insumos.filter((i) => PRODUCTOS_EN_PRUEBA_V4.includes(i.id) && i.activo !== false);
+
+  await withStores(["insumos", "recetas", "configuracion"], "readwrite", (stores) => {
+    for (const id of recetasABorrar) stores.recetas.delete(id);
+    for (const i of insumosADesactivar) stores.insumos.put({ ...i, activo: false, actualizadoEn: now });
+    stores.configuracion.put({ id: EN_PRUEBA_KEY, valor: true, actualizadoEn: now });
+  });
+
+  // El snapshot de recetas es un upsert y no borra: lo borrado hay que sacarlo
+  // tambien de la nube, y se pide aunque en este dispositivo no estuviera
+  // (misma leccion que con "leche de sanguche").
+  for (const id of idsReceta) await deleteRecetaRemota(id).catch(() => {});
+  trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
+  trySyncRecetasSnapshot(await getAll("recetas")).catch(() => {});
+  return { cambios: recetasABorrar.length + insumosADesactivar.length, recetas: recetasABorrar.length, insumos: insumosADesactivar.length };
 }
 
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {

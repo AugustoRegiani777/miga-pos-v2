@@ -43,7 +43,10 @@ export async function getMenuDashboardData() {
           const recetaResumen = (recetasPorProducto.get(producto.id) || [])
             .map(r => insumoAGrupo.get(r.insumoId) ?? insumosById.get(r.insumoId)?.nombre)
             .filter(Boolean);
-          return { ...producto, recetaResumen };
+          // recetaResumen sale vacio tambien cuando la receta apunta a un insumo
+          // que ya no existe; "en prueba" es otra cosa: no tener NINGUNA linea.
+          const tieneReceta = (recetasPorProducto.get(producto.id) || []).length > 0;
+          return { ...producto, recetaResumen, tieneReceta };
         });
       return { ...categoria, productos: productosCategoria };
     });
@@ -58,6 +61,74 @@ function proximoOrden(productos, categoriaId) {
 // lineas de receta que apunten a un insumo inexistente lo crean ahi mismo —
 // mismo mecanismo de slugify + resolucion de colision que ya usa
 // confirmarFactura() en facturas.js.
+// Un producto que se compra hecho y se vende tal cual (la Coca-Cola, la
+// medialuna que trae Messialuncitas) es, a la vez, su propio insumo: hay UN
+// insumo con el mismo id que el producto, y una receta de una unidad. No es un
+// camino nuevo — es la misma maquinaria de siempre (receta -> insumo ->
+// proveedor), y es lo que lo hace entrar en la lista de compras con su
+// proveedor y su precio.
+//
+// El insumo se cuenta en unidades sueltas; cuantas trae una caja lo dice la
+// linea de proveedor, no el insumo (CLAUDE.md 7: el envase del insumo y como lo
+// vende el proveedor son dos cosas distintas y no se mezclan).
+//
+// Si el insumo ya existe (un producto que se dejo "en prueba" despues de haber
+// sido de reventa, o viceversa) se REACTIVA en vez de crear otro: su historial
+// de stock vive en el ledger y tiene que seguir siendo el mismo.
+export function construirEspejoReventa({ producto, datos, insumoExistente, now }) {
+  const insumo = insumoExistente
+    ? { ...insumoExistente, activo: true, actualizadoEn: now }
+    : { ...construirInsumoNuevo(producto.nombre, new Set(), { unidad: "unidad" }), id: producto.id };
+  const receta = {
+    id: `${producto.id}:${producto.id}`,
+    productoId: producto.id,
+    insumoId: insumo.id,
+    cantidadPorUnidad: 1,
+    esEstimado: false,
+    creadoEn: now,
+    actualizadoEn: now
+  };
+  const lineaProveedor = construirLineaProveedor({
+    nuevoProveedorId: datos?.proveedorId,
+    nuevoProveedorProducto: datos?.nombreProducto,
+    nuevoProveedorUnidad: datos?.unidadCompra,
+    nuevoProveedorTrae: datos?.cantidadPorUnidad,
+    nuevoProveedorPrecio: datos?.precio
+  }, insumo, now);
+  return { insumo, receta, lineaProveedor };
+}
+
+// Define como "se compra hecho" un producto que todavia no tenia receta. Se usa
+// desde el aviso "En prueba" de Insumos; el alta de producto hace lo mismo
+// dentro de saveProducto.
+export async function definirProductoComoReventa({ productoId, datos }) {
+  const [producto, insumos, recetas] = await Promise.all([
+    getOne("productos", productoId), getAll("insumos"), getAll("recetas")
+  ]);
+  if (!producto) throw new Error("Ese producto ya no existe.");
+  if (recetas.some((r) => r.productoId === productoId)) {
+    throw new Error("Este producto ya tiene receta. Para cambiarla, editalo desde Menú.");
+  }
+  const now = new Date().toISOString();
+  const { insumo, receta, lineaProveedor } = construirEspejoReventa({
+    producto, datos, insumoExistente: insumos.find((i) => i.id === productoId), now
+  });
+
+  await withStores(["insumos", "recetas", "proveedor_insumos"], "readwrite", (stores) => {
+    stores.insumos.put(insumo);
+    stores.recetas.put(receta);
+    if (lineaProveedor) stores.proveedor_insumos.put(lineaProveedor);
+  });
+
+  // En este orden y esperando: la receta y la linea de proveedor referencian al
+  // insumo por clave foranea, y Supabase rechaza el lote entero con un 409 si
+  // el insumo todavia no llego.
+  await trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
+  await trySyncRecetasSnapshot(await getAll("recetas")).catch(() => {});
+  if (lineaProveedor) trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
+  return { insumo, lineaProveedor: Boolean(lineaProveedor) };
+}
+
 // La linea de proveedor que sale del alta de un insumo nuevo en Menu. Solo se
 // crea si estan los cuatro datos que la hacen util: sin precio o sin cuanto
 // trae, la lista de compras no puede ni comparar ni calcular, y seria una
@@ -85,7 +156,13 @@ function construirLineaProveedor(linea, insumo, now) {
   };
 }
 
-export async function saveProducto({ id, categoriaId, nombre, precioCentavos, controlaStock, umbralBajo, sandwichTipo, activo, lineasReceta }) {
+// `modo` dice como se consigue el producto:
+//   "receta"    (o sin modo) -> lo que venga en lineasReceta, como siempre
+//   "reventa"   -> se compra hecho: crea su insumo espejo con su proveedor
+//   "pendiente" -> "lo estoy probando": sin receta y sin insumos. Se puede
+//                  producir y vender normal; solo no descuenta nada hasta que
+//                  se lo defina. No es un error, y no rompe nada.
+export async function saveProducto({ id, categoriaId, nombre, precioCentavos, controlaStock, umbralBajo, sandwichTipo, activo, lineasReceta, modo, reventa }) {
   const now = new Date().toISOString();
   const [productosActuales, insumosActuales, recetasActuales] = await Promise.all([
     getAll("productos"),
@@ -138,6 +215,15 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
     }
     return resultado;
   };
+
+  // "pendiente" y "reventa" ignoran las lineas del formulario: en pendiente no
+  // hay receta, y en reventa la receta es la del insumo espejo (se arma aparte,
+  // abajo). Ninguna de las dos puede BORRAR una receta que ya existia — si el
+  // producto tiene lineas, el modo no aplica y se respeta lo que traiga el
+  // formulario, para que cambiar de modo por error nunca tire una receta hecha.
+  const yaTieneReceta = recetasActuales.some((r) => r.productoId === productoId);
+  const modoEfectivo = yaTieneReceta ? "receta" : (modo || "receta");
+  if (modoEfectivo !== "receta") lineasReceta = [];
 
   const lineasFinales = (lineasReceta || [])
     .filter(l => (l.insumoId === "__nuevo__" ? l.nuevoNombre?.trim() : l.insumoId) && cantidadDecimal(l) > 0)
@@ -218,6 +304,13 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
   // quedaba en rojo sin que nada en pantalla explicara por que).
   if (provInsumosNuevos.length > 0) {
     trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
+  }
+
+  // Se compra hecho: ahora que el producto existe, se arma su insumo espejo.
+  // Va despues y por separado porque la receta referencia al producto por
+  // clave foranea, y el snapshot del catalogo ya quedo en la cola de arriba.
+  if (modoEfectivo === "reventa") {
+    await definirProductoComoReventa({ productoId, datos: reventa || {} });
   }
 
   return producto;

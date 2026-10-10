@@ -71,6 +71,57 @@ function formularioReceta(p, productos) {
 // tocas, y queda abierto o cerrado como lo dejaste (ver MOSTRAR_CICLO_KEY en
 // app.js) — si no, guardar un pendiente lo volveria a cerrar justo cuando
 // estas resolviendolos de a uno.
+// Un producto en prueba se resuelve de dos maneras, y las dos son un toque:
+//   "Se compra hecho"  -> pide proveedor y precio aca mismo y lo conecta
+//   "Lo preparamos"    -> abre su hoja de edicion para armarle la receta
+// No hay un "Guardar" suelto: el formulario de la compra aparece recien al
+// elegir "Se compra hecho". Y "dejarlo asi" no es una accion: es no hacer nada,
+// que es lo que el dueño quiere mientras sigue probando.
+function articuloProducto(p, proveedores) {
+  return `
+      <article class="pendiente pendiente-producto" data-producto="${esc(p.productoId)}" data-falta="producto">
+        <header class="pendiente-head">
+          <div>
+            <strong>${esc(p.productoNombre)}</strong>
+            <span class="pendiente-falta">${esc(p.titulo)}</span>
+          </div>
+          <div class="pendiente-acciones">
+            <button type="button" class="ghost-button compact" data-accion="producto-receta">Lo preparamos</button>
+            <button type="button" class="ghost-button compact" data-accion="producto-reventa-abrir">Se compra hecho</button>
+          </div>
+        </header>
+        <p class="pendiente-porque">${esc(p.porQue)}</p>
+        <div class="pendiente-form pendiente-reventa" hidden>
+          <label>
+            <span>¿A quién se lo comprás?</span>
+            <select data-campo="proveedorId">
+              ${proveedores.map((v) => `<option value="${esc(v.id)}">${esc(v.nombre)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            <span>Cómo figura en su factura</span>
+            <input type="text" data-campo="nombreProducto" value="${esc(p.productoNombre)}">
+          </label>
+          <label>
+            <span>Cómo te lo factura <small>(caja, bolsa, unidad...)</small></span>
+            <input type="text" data-campo="unidadCompra" placeholder="caja">
+          </label>
+          <label>
+            <span>Cuántas unidades trae</span>
+            <input type="text" inputmode="decimal" data-campo="cantidadPorUnidad" placeholder="24">
+          </label>
+          <label>
+            <span>Precio de esa caja o bolsa (€)</span>
+            <input type="text" inputmode="decimal" data-campo="precio" placeholder="0,00">
+          </label>
+          <div class="pendiente-acciones" style="grid-column: 1 / -1;">
+            <button type="button" class="ghost-button compact" data-accion="producto-reventa-guardar">Guardar</button>
+          </div>
+        </div>
+        <p class="pendiente-error" hidden></p>
+      </article>`;
+}
+
 export function renderPendientesCiclo(container, { pendientes, resumen, proveedores, productos, abierto = false }) {
   if (pendientes.length === 0) {
     container.hidden = true;
@@ -84,8 +135,8 @@ export function renderPendientesCiclo(container, { pendientes, resumen, proveedo
         <span class="aviso-ciclo-conteo">${esc(resumen)}</span>
         <span class="aviso-ciclo-abrir">Completar</span>
       </summary>
-      <p class="aviso-ciclo-ayuda">Cargalos cuando tengas el dato. Hasta entonces el insumo funciona igual: lo único que no hace es entrar en la lista de compras.</p>
-    ${pendientes.map((p) => `
+      <p class="aviso-ciclo-ayuda">Cargalos cuando tengas el dato. Hasta entonces todo funciona igual: un insumo sin proveedor no entra en la lista de compras, y un producto en prueba se vende pero no descuenta insumos.</p>
+    ${pendientes.map((p) => p.falta === "producto" ? articuloProducto(p, proveedores) : `
       <article class="pendiente" data-insumo="${esc(p.insumoId)}" data-falta="${esc(p.falta)}">
         <header class="pendiente-head">
           <div>

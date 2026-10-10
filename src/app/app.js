@@ -7,10 +7,10 @@ import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/re
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
-import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto } from "../modules/menu.js";
+import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
 import { habilitarArrastre } from "../ui/arrastrar-filas.js";
 import { revisarCicloInsumos, pendientesDelCiclo, resumenPendientes } from "../modules/ciclo-insumos.js";
 import { renderPendientesCiclo, leerPendiente } from "../ui/render-ciclo.js";
@@ -60,7 +60,7 @@ import {
   TOGOO_FLAT_TOTAL_CENTAVOS,
   datosRemotosDelDia
 } from "../modules/business.js";
-import { seedDatabase, getAll } from "../db/idb.js";
+import { seedDatabase, getAll, getOne } from "../db/idb.js";
 import { todayISO, centsToMoney, slugify, avanzarFechaSimulada } from "../utils/format.js";
 import {
   filterProductButtons,
@@ -171,6 +171,7 @@ async function pullCatalogoCompleto() {
   await limpiarCatalogoV14().catch(() => ({ cambios: 0 }));
   await activarSetCompletoDePrueba().catch(() => ({ cambios: 0 }));
   await afinarCatalogoDePrueba().catch(() => ({ cambios: 0 }));
+  await pasarProductosAEnPrueba().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };
@@ -278,6 +279,9 @@ let menuProveedoresDisponibles = [];
 // La variante que se esta creando dentro del alta de un producto. null = el
 // desplegable esta en un grupo que ya existe (o en "Ninguna").
 let menuVarianteNueva = null;
+// Como se consigue el producto que se esta creando/editando: "receta",
+// "reventa" (se compra hecho) o "pendiente" (en prueba). Ver index.html.
+let menuModo = "receta";
 let menuGruposVarianteDisponibles = [];
 const pedidoCart = new Map();
 const expandedPedidoIds = new Set();
@@ -600,6 +604,17 @@ const dom = {
   menuEditActivo: document.querySelector("#menu-edit-activo"),
   menuRecetaRows: document.querySelector("#menu-receta-rows"),
   menuVarianteNueva: document.querySelector("#menu-variante-nueva"),
+  menuModoWrap: document.querySelector("#menu-modo-wrap"),
+  menuRecetaBloque: document.querySelector("#menu-receta-bloque"),
+  menuReventaBloque: document.querySelector("#menu-reventa-bloque"),
+  menuPruebaBloque: document.querySelector("#menu-prueba-bloque"),
+  menuSinRecetaAviso: document.querySelector("#menu-sin-receta-aviso"),
+  menuReventaProveedor: document.querySelector("#menu-reventa-proveedor"),
+  menuReventaDetalle: document.querySelector("#menu-reventa-detalle"),
+  menuReventaNombre: document.querySelector("#menu-reventa-nombre"),
+  menuReventaUnidad: document.querySelector("#menu-reventa-unidad"),
+  menuReventaTrae: document.querySelector("#menu-reventa-trae"),
+  menuReventaPrecio: document.querySelector("#menu-reventa-precio"),
   menuAddRecetaRow: document.querySelector("#menu-add-receta-row"),
   variantesGruposList: document.querySelector("#variantes-grupos-list"),
   varianteAddGrupo: document.querySelector("#variante-add-grupo"),
@@ -1959,7 +1974,7 @@ async function renderAvisoCiclo() {
     getAll("insumos"), getAll("recetas"), getAll("proveedor_insumos"), getAll("proveedores"), listProducts()
   ]);
   const pendientes = pendientesDelCiclo(revisarCicloInsumos({
-    insumos, recetas, proveedorInsumos, gruposVariantes: gruposVariantesActual
+    insumos, recetas, proveedorInsumos, gruposVariantes: gruposVariantesActual, productos
   }));
   renderPendientesCiclo(dom.avisoCiclo, {
     pendientes,
@@ -2000,6 +2015,45 @@ async function descartarPendienteCiclo(article) {
     error.hidden = false;
     boton.disabled = false;
   }
+}
+
+// "Se compra hecho", desde el aviso de productos en prueba.
+async function definirReventaDesdeAviso(article) {
+  const error = article.querySelector(".pendiente-error");
+  const valor = (campo) => article.querySelector(`[data-campo="${campo}"]`)?.value?.trim() ?? "";
+  const datos = {
+    proveedorId: valor("proveedorId"),
+    nombreProducto: valor("nombreProducto"),
+    unidadCompra: valor("unidadCompra"),
+    cantidadPorUnidad: parseDecimal(valor("cantidadPorUnidad")),
+    precio: parseDecimal(valor("precio"))
+  };
+  const motivo = !datos.proveedorId ? "Elegí el proveedor."
+    : !datos.unidadCompra ? "Poné cómo te lo factura (caja, bolsa, unidad...)."
+    : !(datos.cantidadPorUnidad > 0) ? "Falta cuántas unidades trae."
+    : !(datos.precio > 0) ? "Falta el precio." : "";
+  if (motivo) { error.textContent = motivo; error.hidden = false; return; }
+  error.hidden = true;
+  const boton = article.querySelector('[data-accion="producto-reventa-guardar"]');
+  boton.disabled = true;
+  try {
+    await definirProductoComoReventa({ productoId: article.dataset.producto, datos });
+    setFlash("Listo: ahora entra en la lista de compras y cada venta descuenta 1.", "success");
+    await renderInsumosView();
+  } catch (e) {
+    error.textContent = e.message || "No se pudo guardar.";
+    error.hidden = false;
+    boton.disabled = false;
+  }
+}
+
+// "Lo preparamos": lleva a la hoja del producto con el modo receta ya elegido.
+async function armarRecetaDesdeAviso(productoId) {
+  const producto = await getOne("productos", productoId);
+  if (!producto) { setFlash("Ese producto ya no existe.", "error"); return; }
+  showGestionSubView("menu");
+  await renderMenuView();
+  await openMenuProductoEdit(producto, { modoInicial: "receta" });
 }
 
 // Guarda un pendiente completado en el propio aviso.
@@ -2378,6 +2432,7 @@ function setMenuEditSheetOpen(isOpen) {
 }
 
 function renderMenuRecetaEditorView() {
+  actualizarAvisoSinReceta();
   renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles, menuGruposVarianteDisponibles, menuProveedoresDisponibles);
 }
 
@@ -2406,6 +2461,36 @@ function populateMenuVarianteSelect(selectedGrupoId) {
   renderMenuVarianteNueva(dom.menuVarianteNueva, menuVarianteNueva, menuInsumosDisponibles);
 }
 
+// Muestra el bloque que corresponde al modo elegido y esconde los otros.
+// El selector de modo solo aparece cuando tiene sentido: al CREAR, o al editar
+// un producto que todavia no tiene receta. Uno que ya tiene receta no se puede
+// pasar a "se compra hecho" o "en prueba" desde aca por un toque equivocado.
+function aplicarMenuModo(modo, { selectorVisible = true } = {}) {
+  menuModo = modo;
+  dom.menuModoWrap.hidden = !selectorVisible;
+  for (const radio of dom.menuModoWrap.querySelectorAll('input[name="menu-modo"]')) radio.checked = radio.value === modo;
+  dom.menuRecetaBloque.hidden = modo !== "receta";
+  dom.menuReventaBloque.hidden = modo !== "reventa";
+  dom.menuPruebaBloque.hidden = modo !== "pendiente";
+  actualizarAvisoSinReceta();
+}
+
+// En el modo receta, con cero lineas validas: avisar que el producto va a
+// quedar en prueba. No bloquea nada — es lo que se quiere cuando todavia no se
+// sabe la receta — pero que no sea una sorpresa.
+function actualizarAvisoSinReceta() {
+  const hayLineas = menuRecetaLineas.some((l) => (l.insumoId === "__nuevo__" ? l.nuevoNombre?.trim() : l.insumoId));
+  dom.menuSinRecetaAviso.hidden = !(menuModo === "receta" && !hayLineas && menuProductoMode === "add");
+}
+
+function llenarProveedoresReventa() {
+  dom.menuReventaProveedor.innerHTML =
+    `<option value="">— Lo cargo después —</option>` +
+    menuProveedoresDisponibles.map((v) => `<option value="${v.id}">${v.nombre}</option>`).join("");
+  dom.menuReventaDetalle.hidden = true;
+  for (const campo of [dom.menuReventaNombre, dom.menuReventaUnidad, dom.menuReventaTrae, dom.menuReventaPrecio]) campo.value = "";
+}
+
 async function openMenuProductoAdd(categoriaId) {
   selectedMenuProductoId = "";
   menuProductoMode = "add";
@@ -2432,12 +2517,14 @@ async function openMenuProductoAdd(categoriaId) {
   menuVarianteNueva = null;
   populateMenuVarianteSelect("");
   updateMenuTipoVisibility();
+  llenarProveedoresReventa();
+  aplicarMenuModo("receta", { selectorVisible: true });
   renderMenuRecetaEditorView();
   setMenuEditSheetOpen(true);
   dom.menuEditNombre.focus();
 }
 
-async function openMenuProductoEdit(producto) {
+async function openMenuProductoEdit(producto, { modoInicial } = {}) {
   selectedMenuProductoId = producto.id;
   menuProductoMode = "edit";
   menuProductoEditando = producto;
@@ -2470,6 +2557,11 @@ async function openMenuProductoEdit(producto) {
       nuevaUnidad: "",
       variantesCantidad: r.variantesCantidad ? { ...r.variantesCantidad } : {},
     }));
+  llenarProveedoresReventa();
+  // Con receta: el selector no aparece. Sin receta (en prueba): aparece, y arranca
+  // en "lo estoy probando" salvo que se venga a armarle la receta.
+  if (menuRecetaLineas.length > 0) aplicarMenuModo("receta", { selectorVisible: false });
+  else aplicarMenuModo(modoInicial || "pendiente", { selectorVisible: true });
   renderMenuRecetaEditorView();
   setMenuEditSheetOpen(true);
   dom.menuEditNombre.focus();
@@ -3405,6 +3497,11 @@ function bindEvents() {
     const article = btn.closest(".pendiente");
     if (btn.dataset.accion === "descartar") descartarPendienteCiclo(article);
     else if (btn.dataset.accion === "guardar") guardarPendienteCiclo(article);
+    else if (btn.dataset.accion === "producto-reventa-abrir") {
+      article.querySelector(".pendiente-reventa").hidden = !article.querySelector(".pendiente-reventa").hidden;
+    }
+    else if (btn.dataset.accion === "producto-reventa-guardar") definirReventaDesdeAviso(article);
+    else if (btn.dataset.accion === "producto-receta") armarRecetaDesdeAviso(article.dataset.producto);
   });
 
   dom.seccionCalibracion?.addEventListener("toggle", () => {
@@ -3898,6 +3995,16 @@ function bindEvents() {
   // Elegir "+ Crear variante nueva…" abre el formulario ahi mismo. Se arranca
   // con dos respuestas vacias porque una variante con una sola opcion no
   // pregunta nada.
+  dom.menuModoWrap.addEventListener("change", (e) => {
+    if (e.target.name === "menu-modo") aplicarMenuModo(e.target.value, { selectorVisible: true });
+  });
+  // Elegir proveedor muestra los datos de la compra; el nombre de factura
+  // arranca igual al del producto, que es lo mas probable.
+  dom.menuReventaProveedor.addEventListener("change", () => {
+    const conProveedor = Boolean(dom.menuReventaProveedor.value);
+    dom.menuReventaDetalle.hidden = !conProveedor;
+    if (conProveedor && !dom.menuReventaNombre.value) dom.menuReventaNombre.value = dom.menuEditNombre.value.trim();
+  });
   dom.menuEditVariante.addEventListener("change", () => {
     menuVarianteNueva = dom.menuEditVariante.value === "__nuevo__"
       ? (menuVarianteNueva || { nombre: "", opciones: [{ nombre: "", insumoId: "" }, { nombre: "", insumoId: "" }] })
@@ -4048,7 +4155,26 @@ function bindEvents() {
         if (!lleva) throw new Error("La receta tiene que llevar uno de los insumos de la variante: ese es el que se cambia según lo que elija el cliente.");
         varianteAGuardar = { nombre: v.nombre.trim(), opciones: opciones.map((o) => ({ nombre: o.nombre.trim(), insumoId: o.insumoId })) };
       }
+      // Reventa: si se eligio proveedor, hacen falta los tres datos de la compra;
+      // sin proveedor se crea igual y queda marcado "sin proveedor" en Insumos.
+      let reventa = null;
+      if (menuModo === "reventa") {
+        reventa = {
+          proveedorId: dom.menuReventaProveedor.value,
+          nombreProducto: dom.menuReventaNombre.value.trim() || nombre,
+          unidadCompra: dom.menuReventaUnidad.value.trim(),
+          cantidadPorUnidad: parseDecimal(dom.menuReventaTrae.value),
+          precio: parseDecimal(dom.menuReventaPrecio.value)
+        };
+        if (reventa.proveedorId) {
+          if (!reventa.unidadCompra) throw new Error("Poné cómo te lo factura (caja, bolsa, unidad...).");
+          if (!(reventa.cantidadPorUnidad > 0)) throw new Error("Falta cuántas unidades trae.");
+          if (!(reventa.precio > 0)) throw new Error("Falta el precio.");
+        }
+      }
       const productoGuardado = await saveProducto({
+        modo: menuModo,
+        reventa,
         id: menuProductoMode === "edit" ? selectedMenuProductoId : undefined,
         categoriaId,
         nombre,
@@ -4376,9 +4502,18 @@ async function bootApp() {
       // suben las que apuntan a un producto real.
       const idsProductos = new Set(productos.map((p) => p.id));
       const recetas = recetasLocales.filter((r) => idsProductos.has(r.productoId));
+      // Lo mismo con las lineas de proveedor: una que apunta a un insumo que ya
+      // no existe (el seed trae "jasa:salmon" y una migracion vieja la reapunta
+      // a "salmon", que despues se borro) hace que Supabase rechace el lote
+      // ENTERO con un 409 por la clave foranea. Se auto-corregia al reintentar,
+      // pero en el primer arranque de un dispositivo nuevo dejaba el badge en
+      // rojo un rato por algo que no es un problema de verdad. Las lineas sin
+      // insumo (insumoId null) si se suben: son las pendientes de asignar.
+      const idsInsumos = new Set(insumos.map((i) => i.id));
+      const lineasProveedor = proveedorInsumos.filter((x) => !x.insumoId || idsInsumos.has(x.insumoId));
       await Promise.all([
         trySyncRecetasSnapshot(recetas).catch(() => {}),
-        trySyncProveedorInsumosSnapshot(proveedorInsumos).catch(() => {})
+        trySyncProveedorInsumosSnapshot(lineasProveedor).catch(() => {})
       ]);
     } catch { /* fire-and-forget: nunca bloquea el arranque de la app */ }
   })();

@@ -3939,3 +3939,66 @@ body.arrastrando-fila {
 .menu-variante-opcion input { flex: 1; min-width: 0; }
 .menu-variante-opcion select { flex: 1.4; min-width: 0; }
 .menu-variante-opcion [data-action="quitar-opcion"] { flex-shrink: 0; }
+
+/* ---- Como se consigue un producto: receta / se compra hecho / en prueba ----
+   Tres botones grandes (tap de 48 px o mas), uno elegido a la vez. */
+.menu-modo {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.menu-modo-opcion {
+  display: block;
+  cursor: pointer;
+}
+.menu-modo-opcion input { position: absolute; opacity: 0; pointer-events: none; }
+.menu-modo-opcion span {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-align: center;
+}
+.menu-modo-opcion small { font-weight: 400; font-size: 0.78rem; color: var(--muted); }
+.menu-modo-opcion input:checked + span {
+  border-color: var(--primary-2);
+  box-shadow: inset 0 0 0 1px var(--primary-2);
+}
+.menu-modo-opcion input:focus-visible + span { outline: 2px solid var(--primary-2); outline-offset: 2px; }
+.menu-sin-receta-aviso { margin: 0.5rem 0 0; font-size: 0.86rem; }
+.menu-prueba-texto {
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border-left: 3px solid var(--low);
+  border-radius: 0 8px 8px 0;
+  background: var(--page);
+  font-size: 0.9rem;
+}
+#menu-reventa-bloque select,
+#menu-reventa-bloque input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+/* Marca "en prueba" en la lista del menu: discreta, mismo tamano que "oculto". */
+.prov-badge-prueba {
+  color: var(--low);
+  border: 1px solid var(--low);
+  background: transparent;
+}
