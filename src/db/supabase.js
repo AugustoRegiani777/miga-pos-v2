@@ -1,3 +1,5 @@
+import { esEntornoDePrueba } from "../utils/entorno.js";
+
 const PROD_URL = "https://iknytfgqkdddtqpykgab.supabase.co";
 const PROD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlrbnl0Zmdxa2RkZHRxcHlrZ2FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NjY1OTQsImV4cCI6MjA5ODI0MjU5NH0.1qAJ71w1DaZu1i0G5an6AOuLwyu4_OU-uMvms4AjM0w";
 
@@ -7,16 +9,16 @@ const PROD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const STAGING_URL = "https://yfveeikzckvqlndmhwut.supabase.co";
 const STAGING_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlmdmVlaWt6Y2t2cWxuZG1od3V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNTkxODEsImV4cCI6MjEwNTczNTE4MX0.NXywXQHsFzoa_OH4DR0Ei5nMyio-vk4ar50_ajtF2Wg";
 
-// Solo se usa staging si el codigo corre local (tu compu, localhost) Y ya
-// existe la config de arriba. En Netlify (produccion real) esto siempre da
-// false, sin importar que pase con STAGING_URL — no hay forma de que la
-// tablet real termine apuntando por error a la base de prueba.
-const esLocal = typeof location !== "undefined" && ["localhost", "127.0.0.1"].includes(location.hostname);
-const usarStaging = esLocal && STAGING_URL;
+// Se usa staging solo si la pagina se abrio desde un lugar de pruebas: tu compu,
+// una IP de tu red, o un sitio de pruebas de Netlify (ver la regla completa en
+// utils/entorno.js). La tablet real (unodemigapos.netlify.app) es SIEMPRE
+// produccion: esa direccion esta escrita ahi y gana sobre cualquier otra regla,
+// asi que no hay forma de que termine apuntando por error a la base de prueba.
+const usarStaging = typeof location !== "undefined" && esEntornoDePrueba(location.hostname) && STAGING_URL;
 
 // Hay migraciones que solo tienen sentido en la base de prueba (ej. dejar
 // visible todo el catalogo para probar). En la tablet real esto es false
-// siempre, por lo mismo que arriba: no corre en localhost.
+// siempre, por lo mismo que arriba.
 export const ENTORNO_DE_PRUEBA = Boolean(usarStaging);
 
 const SUPABASE_URL = usarStaging ? STAGING_URL : PROD_URL;

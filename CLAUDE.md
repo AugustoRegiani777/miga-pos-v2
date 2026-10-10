@@ -79,6 +79,7 @@ Misma app, mejoras grandes añadidas por capas:
 | Hosting | Netlify (`unodemigapos.netlify.app`) | Deploy automático desde GitHub, push a `main` |
 | Auth | Supabase Auth | Email + contraseña (`grant_type=password`), implementado |
 | Service Worker | No existe | Ver sección 3, punto 1 — verificado 01/09/2026, no hace falta |
+| Entornos | Producción (`unodemigapos.netlify.app`, rama `main`, Supabase real) y Pruebas (localhost / IP de red / sitio de Netlify con `staging` en el nombre, rama `arquitectura-productos-v2`, Supabase staging) | La regla vive en `src/utils/entorno.js` y la tablet real es SIEMPRE producción. Ver `COMANDOS.md` |
 
 **Principio fundamental:** Sin dependencias externas en runtime. Todo lo que corre en la tablet tiene que funcionar offline.
 

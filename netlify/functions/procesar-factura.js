@@ -21,12 +21,17 @@
 // en la app (ver src/modules/facturas.js).
 //
 // Variables de entorno requeridas en Netlify (Site settings > Environment
-// variables): ANTHROPIC_API_KEY y SUPABASE_SERVICE_ROLE_KEY.
+// variables): ANTHROPIC_API_KEY y SUPABASE_SERVICE_ROLE_KEY. Opcional: SUPABASE_URL
+// (solo en un sitio de pruebas, para apuntar a staging; sin ella usa la real).
 
 const AnthropicModule = require("@anthropic-ai/sdk");
 const Anthropic = AnthropicModule.default || AnthropicModule;
 
-const SUPABASE_URL = "https://iknytfgqkdddtqpykgab.supabase.co";
+// Por defecto, la base REAL (asi no cambia nada en la tablet). Un sitio de pruebas
+// de Netlify define SUPABASE_URL con la de staging, junto con su propia
+// SUPABASE_SERVICE_ROLE_KEY: sin esto la funcion leeria el catalogo de la base
+// real aunque la app estuviera en staging.
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://iknytfgqkdddtqpykgab.supabase.co";
 
 async function supabaseQuery(path) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

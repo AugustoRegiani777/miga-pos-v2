@@ -61,6 +61,7 @@ import {
   datosRemotosDelDia
 } from "../modules/business.js";
 import { seedDatabase, getAll, getOne } from "../db/idb.js";
+import { esEntornoDePrueba } from "../utils/entorno.js";
 import { todayISO, centsToMoney, slugify, avanzarFechaSimulada } from "../utils/format.js";
 import {
   filterProductButtons,
@@ -4527,8 +4528,8 @@ function bindAuthEvents() {
 // calcular de cero contra la fecha nueva" por sobre la suavidad de refrescar
 // sin recargar.
 function setupRelojSimulado() {
-  const esLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-  if (!esLocal) return;
+  // Solo en entornos de prueba (la misma regla que elige la base de datos).
+  if (!esEntornoDePrueba(window.location.hostname)) return;
   dom.relojSimulado.hidden = false;
   dom.relojSimuladoFecha.textContent = todayISO();
   dom.relojSimuladoAvanzar.addEventListener("click", () => {
