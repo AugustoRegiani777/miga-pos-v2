@@ -12,8 +12,24 @@
 // es momento de ponerse a definir recetas. La deuda queda visible y se salda
 // cuando haya tiempo.
 
-export function revisarCicloInsumos({ insumos, recetas, proveedorInsumos }) {
+export function revisarCicloInsumos({ insumos, recetas, proveedorInsumos, gruposVariantes = [] }) {
+  // La salida de un insumo puede venir por dos caminos, no solo por la receta:
+  //
+  //   1. una linea de receta que lo nombra, o
+  //   2. ser OPCION de un grupo de variante.
+  //
+  // La leche de avena no figura en ninguna receta — la receta del cafe nombra
+  // la entera — y sin embargo se consume cada vez que alguien pide su cafe con
+  // avena: el grupo la sustituye al cobrar. Mirando solo las recetas, el aviso
+  // la daba por "no se usa en ningun producto" y mandaba a inventarle una
+  // receta que habria hecho que el cafe descontara DOS leches. Es el mismo
+  // error que ya habia metido tres leches en la receta del cafe con leche.
   const conSalida = new Set(recetas.map((r) => r.insumoId));
+  for (const grupo of gruposVariantes) {
+    for (const opcion of grupo?.opciones || []) {
+      if (opcion?.insumoId) conSalida.add(opcion.insumoId);
+    }
+  }
   const conEntrada = new Set(proveedorInsumos.filter((pi) => pi.activo !== false && pi.insumoId).map((pi) => pi.insumoId));
 
   const activos = insumos.filter((i) => i.activo !== false);

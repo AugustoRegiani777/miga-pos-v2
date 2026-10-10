@@ -1943,7 +1943,9 @@ async function renderAvisoCiclo() {
   const [insumos, recetas, proveedorInsumos, proveedores, productos] = await Promise.all([
     getAll("insumos"), getAll("recetas"), getAll("proveedor_insumos"), getAll("proveedores"), listProducts()
   ]);
-  const pendientes = pendientesDelCiclo(revisarCicloInsumos({ insumos, recetas, proveedorInsumos }));
+  const pendientes = pendientesDelCiclo(revisarCicloInsumos({
+    insumos, recetas, proveedorInsumos, gruposVariantes: gruposVariantesActual
+  }));
   renderPendientesCiclo(dom.avisoCiclo, {
     pendientes,
     resumen: resumenPendientes(pendientes),
