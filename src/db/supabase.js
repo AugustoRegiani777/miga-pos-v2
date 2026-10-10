@@ -504,6 +504,34 @@ export async function deleteRecetaRemota(recetaId) {
   }
 }
 
+// Borrado definitivo de un insumo y de una linea de proveedor. Igual que con
+// las recetas, se vuelve a leer DESPUES de borrar: un DELETE que RLS no permite
+// contesta 204 sin error, y el que lo pidio se queda creyendo que funciono.
+export async function deleteInsumoRemoto(insumoId) {
+  const q = encodeURIComponent(insumoId);
+  await sbFetch(`/stock_insumos?id=eq.${q}`, "DELETE").catch(() => {});
+  await sbFetch(`/insumos?id=eq.${q}`, "DELETE");
+
+  const quedan = await sbFetch(`/insumos?id=eq.${q}&select=id`);
+  if (quedan?.length) {
+    const error = new Error("Supabase acepto el borrado pero el insumo sigue en la nube (falta la politica de RLS de DELETE sobre insumos).");
+    error.sinPermisoDelete = true;
+    throw error;
+  }
+}
+
+export async function deleteProveedorInsumoRemoto(lineaId) {
+  const q = encodeURIComponent(lineaId);
+  await sbFetch(`/proveedor_insumos?id=eq.${q}`, "DELETE");
+
+  const quedan = await sbFetch(`/proveedor_insumos?id=eq.${q}&select=id`);
+  if (quedan?.length) {
+    const error = new Error("Supabase acepto el borrado pero la linea de proveedor sigue en la nube (falta la politica de RLS de DELETE sobre proveedor_insumos).");
+    error.sinPermisoDelete = true;
+    throw error;
+  }
+}
+
 export async function deleteProductoRemoto(productoId) {
   const q = encodeURIComponent(productoId);
   // Orden obligatorio por las FK. Cada uno es idempotente, asi que reintentar

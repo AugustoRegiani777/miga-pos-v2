@@ -2,7 +2,7 @@ import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/id
 import { todayISO, slugify } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, getPendingSyncCount } from "./sync.js";
-import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
+import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
@@ -637,7 +637,29 @@ const PI_NUEVOS_V3 = [
 //    la semana y por eso se deja vacio a proposito.
 const DIAS_ENTREGA_V3 = { jasa: [1, 2, 6], makro: [1, 2] };
 
-const AFINADO_PRUEBA_KEY = "afinado_catalogo_prueba_v1";
+// 9) Lo que el dueño decidio sacar del todo. Estaban desactivados desde el
+//    afinado anterior; ahora se borran de verdad porque no los usa nadie:
+//    ningun movimiento, ninguna receta, ninguna opcion de variante. Si alguno
+//    llegara a tener un movimiento cargado, la migracion lo saltea sola — el
+//    stock se deriva del ledger y un insumo borrado con movimientos vivos
+//    dejaria el ledger apuntando al vacio.
+const INSUMOS_A_BORRAR_V3 = ["salmon", "crema", "leche-de-sanguche"];
+const PI_A_BORRAR_V3 = [
+  "jasa:salmon", "makro:custom-1791203570230",
+  "delicias-vegetales:custom-1791203548136", "delicias-vegetales:leche-de-sanguche"
+];
+
+// 10) Sprite y Fanta los trae Coca-Cola, igual que el resto. El formato es el
+//     de todas sus cajas (24 latas de 33 cl). El PRECIO es un supuesto: en las
+//     facturas de septiembre no hay ninguna linea de Sprite ni de Fanta, asi
+//     que se les pone el de la Coca-Cola, que es su mismo formato. El dueño lo
+//     corrige desde Gestion > Proveedores cuando llegue la proxima factura.
+const PI_COCACOLA_V3 = [
+  { id: "cocacola:sprite", proveedorId: "cocacola", insumoId: "sprite", nombreProducto: "SPRITE LATA33 C24 (precio a confirmar)", unidadCompra: "caja", cantidadPorUnidad: 24, precioUnitarioCentavos: 1719 },
+  { id: "cocacola:fanta", proveedorId: "cocacola", insumoId: "fanta", nombreProducto: "FANTA LATA33 C24 (precio a confirmar)", unidadCompra: "caja", cantidadPorUnidad: 24, precioUnitarioCentavos: 1719 }
+];
+
+const AFINADO_PRUEBA_KEY = "afinado_catalogo_prueba_v2";
 
 // Corre DESPUES de bajar el catalogo de la nube, no dentro del seed.
 //
@@ -1208,16 +1230,25 @@ export async function afinarCatalogoDePrueba() {
     const x = provInsumos.find((y) => y.id === id);
     if (x && x.activo !== false) ponerPi(x, { activo: false });
   }
-  const piNuevos = PI_NUEVOS_V3
+  const piNuevos = [...PI_NUEVOS_V3, ...PI_COCACOLA_V3]
     .filter((x) => idsInsumo.has(x.insumoId))
     .filter((x) => !provInsumos.some((y) => y.id === x.id))
     .map((x) => ({ ...x, activo: true, creadoEn: now, actualizadoEn: now }));
+
+  // Borrado definitivo. Un insumo con movimientos NO se borra: el stock se
+  // deriva del ledger, y dejarlo apuntando a un insumo que ya no existe es
+  // exactamente como se rompe el stock sin que nadie se entere.
+  const movimientos = await getAll("movimientos_insumos");
+  const conMovimiento = new Set(movimientos.map((m) => m.insumoId));
+  const insumosBorrados = INSUMOS_A_BORRAR_V3.filter((id) => !conMovimiento.has(id)
+    && !recetas.some((r) => r.insumoId === id));
+  const piBorrados = PI_A_BORRAR_V3.filter((id) => provInsumos.some((x) => x.id === id));
 
   // RECETAS_A_BORRAR_V3 suma siempre: el borrado remoto tiene que intentarse
   // aunque en este dispositivo no quede nada local que borrar.
   const cambios = productosFinales.size + insumosDescartados.length + RECETAS_A_BORRAR_V3.length
     + recetasNuevas.length + proveedoresNuevos.length + proveedoresConDias.length
-    + piFinales.size + piNuevos.length;
+    + piFinales.size + piNuevos.length + INSUMOS_A_BORRAR_V3.length + PI_A_BORRAR_V3.length;
 
   await withStores(["productos", "insumos", "recetas", "proveedores", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
     for (const p of productosFinales.values()) stores.productos.put(p);
@@ -1228,6 +1259,8 @@ export async function afinarCatalogoDePrueba() {
     for (const p of proveedoresConDias) stores.proveedores.put(p);
     for (const x of piFinales.values()) stores.proveedor_insumos.put(x);
     for (const x of piNuevos) stores.proveedor_insumos.put(x);
+    for (const id of piBorrados) stores.proveedor_insumos.delete(id);
+    for (const id of insumosBorrados) stores.insumos.delete(id);
     stores.configuracion.put({ id: AFINADO_PRUEBA_KEY, valor: true, actualizadoEn: now });
   });
 
@@ -1243,6 +1276,12 @@ export async function afinarCatalogoDePrueba() {
   // borrado — quedaba viva en la nube para siempre. Un DELETE de algo que ya
   // no esta no cuesta nada; no pedirlo cuesta una linea fantasma.
   for (const id of RECETAS_A_BORRAR_V3) await deleteRecetaRemota(id).catch(() => {});
+  // Las lineas de proveedor primero: apuntan al insumo por clave foranea.
+  for (const id of PI_A_BORRAR_V3) await deleteProveedorInsumoRemoto(id).catch(() => {});
+  for (const id of INSUMOS_A_BORRAR_V3) {
+    if (conMovimiento.has(id)) continue;
+    await deleteInsumoRemoto(id).catch(() => {});
+  }
 
   const [catF, prodF, insF, recF, provF, piF] = await Promise.all([
     getAll("categorias"), getAll("productos"), getAll("insumos"),
@@ -1259,7 +1298,8 @@ export async function afinarCatalogoDePrueba() {
   trySyncProveedorInsumosSnapshot(piF).catch(() => {});
 
   return { cambios, productos: productosFinales.size, recetas: recetasNuevas.length,
-           proveedores: proveedoresNuevos.length, lineasProveedor: piFinales.size + piNuevos.length };
+           proveedores: proveedoresNuevos.length, lineasProveedor: piFinales.size + piNuevos.length,
+           borrados: insumosBorrados };
 }
 
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
