@@ -127,13 +127,18 @@ export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = nul
   });
 
   const [insumosFinal, proveedorInsumosFinal] = await Promise.all([getAll("insumos"), getAll("proveedor_insumos")]);
-  trySyncInsumosSnapshot(insumosFinal).catch(() => {});
+  // Primero lo que otros datos REFERENCIAN, y esperando: el proveedor y el
+  // insumo antes que la linea que los une (proveedor_insumos tiene clave foranea
+  // a los dos). La cola ordena por nivel, pero solo entre lo que ya esta en ella
+  // cuando arranca el envio: antes el proveedor nuevo se encolaba ULTIMO, la
+  // linea salia primero y Supabase la rechazaba con un 409 — se auto-corregia al
+  // reintentar, pero dejaba el badge de la topbar en rojo en una factura normal.
+  if (nuevoProveedor) {
+    await trySyncProveedoresSnapshot(await getAll("proveedores")).catch(() => {});
+  }
+  await trySyncInsumosSnapshot(insumosFinal).catch(() => {});
   trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
   if (movimientosCreados.length > 0) trySyncMovimientosInsumos(movimientosCreados).catch(() => {});
-  if (nuevoProveedor) {
-    const proveedoresFinal = await getAll("proveedores");
-    trySyncProveedoresSnapshot(proveedoresFinal).catch(() => {});
-  }
 
   return { insumosActualizados: operaciones.length };
 }
