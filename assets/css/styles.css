@@ -4002,3 +4002,79 @@ body.arrastrando-fila {
   border: 1px solid var(--low);
   background: transparent;
 }
+
+/* ---- Barra de Insumos: "Qué pedir | Cargar factura | Insumo suelto" ----
+   Los botones de un mismo grupo van uno AL LADO del otro, con el titulo del
+   grupo arriba. Antes el grupo era una columna y "Insumo suelto" caia debajo
+   de "Cargar factura", en dos filas. */
+.stock-toolbar-ciclo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 24px;
+}
+.stock-toolbar-ciclo .toolbar-paso {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.stock-toolbar-ciclo .toolbar-paso-titulo { flex-basis: 100%; }
+.stock-toolbar-ciclo .toolbar-paso > .ghost-button { margin-right: 0; }
+
+/* Seccion opcional y plegada dentro de la hoja de producto. */
+.menu-opcional { margin-top: 1.1rem; border-top: 1px solid var(--line); padding-top: 0.6rem; }
+.menu-opcional > summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 1rem;
+  list-style: none;
+}
+.menu-opcional > summary::-webkit-details-marker { display: none; }
+.menu-opcional > summary::before { content: "▸"; color: var(--muted); }
+.menu-opcional[open] > summary::before { content: "▾"; }
+
+/* ---- Insumos: boton naranja "Calibrar" en cada fila, y buscador de calibracion ---- */
+.stock-row-actions { display: flex; align-items: center; gap: 10px; }
+.btn-calibrar-insumo {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.btn-calibrar-insumo:active { filter: brightness(0.9); }
+.calibrar-buscar { display: block; margin: 0.4rem 0 0.8rem; }
+.calibrar-buscar input {
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  box-sizing: border-box;
+}
+.calibrar-sin-resultados { margin: 0 0 0.8rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Respuesta de variante cuyo insumo todavia no existe: se crea ahi mismo. */
+.menu-variante-opcion-nuevo {
+  display: flex;
+  gap: 0.5rem;
+  margin: -0.15rem 0 0.7rem;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--primary-2);
+}
+.menu-variante-opcion-nuevo input { flex: 1; min-width: 0; }

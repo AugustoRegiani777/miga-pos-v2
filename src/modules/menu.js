@@ -114,7 +114,9 @@ export async function definirProductoComoReventa({ productoId, datos }) {
     producto, datos, insumoExistente: insumos.find((i) => i.id === productoId), now
   });
 
-  await withStores(["insumos", "recetas", "proveedor_insumos"], "readwrite", (stores) => {
+  await withStores(["productos", "insumos", "recetas", "proveedor_insumos"], "readwrite", (stores) => {
+    // Lo que se compra hecho deja de aparecer en Produccion.
+    stores.productos.put({ ...producto, controlaStock: false, actualizadoEn: now });
     stores.insumos.put(insumo);
     stores.recetas.put(receta);
     if (lineaProveedor) stores.proveedor_insumos.put(lineaProveedor);
@@ -123,6 +125,7 @@ export async function definirProductoComoReventa({ productoId, datos }) {
   // En este orden y esperando: la receta y la linea de proveedor referencian al
   // insumo por clave foranea, y Supabase rechaza el lote entero con un 409 si
   // el insumo todavia no llego.
+  trySyncCatalogoSnapshot(await getAll("categorias"), await getAll("productos")).catch(() => {});
   await trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
   await trySyncRecetasSnapshot(await getAll("recetas")).catch(() => {});
   if (lineaProveedor) trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
@@ -182,12 +185,23 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
     }
   }
 
+  // "pendiente" y "reventa" ignoran las lineas del formulario: en pendiente no
+  // hay receta, y en reventa la receta es la del insumo espejo (se arma aparte,
+  // abajo). Ninguna de las dos puede BORRAR una receta que ya existia — si el
+  // producto tiene lineas, el modo no aplica y se respeta lo que traiga el
+  // formulario, para que cambiar de modo por error nunca tire una receta hecha.
+  const yaTieneReceta = recetasActuales.some((r) => r.productoId === productoId);
+  const modoEfectivo = yaTieneReceta ? "receta" : (modo || "receta");
+  if (modoEfectivo !== "receta") lineasReceta = [];
+
   const producto = {
     id: productoId,
     categoriaId,
     nombre,
     precioCentavos,
-    controlaStock,
+    // Lo que se compra hecho no se produce nunca: no controla stock y no
+    // aparece en Produccion. Su stock vive en el insumo (1 por venta).
+    controlaStock: modoEfectivo === "reventa" ? false : controlaStock,
     umbralBajo: umbralBajo || 0,
     stockActual: existente?.stockActual ?? 0,
     orden: existente && existente.categoriaId === categoriaId ? existente.orden : proximoOrden(productosActuales, categoriaId),
@@ -215,15 +229,6 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
     }
     return resultado;
   };
-
-  // "pendiente" y "reventa" ignoran las lineas del formulario: en pendiente no
-  // hay receta, y en reventa la receta es la del insumo espejo (se arma aparte,
-  // abajo). Ninguna de las dos puede BORRAR una receta que ya existia — si el
-  // producto tiene lineas, el modo no aplica y se respeta lo que traiga el
-  // formulario, para que cambiar de modo por error nunca tire una receta hecha.
-  const yaTieneReceta = recetasActuales.some((r) => r.productoId === productoId);
-  const modoEfectivo = yaTieneReceta ? "receta" : (modo || "receta");
-  if (modoEfectivo !== "receta") lineasReceta = [];
 
   const lineasFinales = (lineasReceta || [])
     .filter(l => (l.insumoId === "__nuevo__" ? l.nuevoNombre?.trim() : l.insumoId) && cantidadDecimal(l) > 0)

@@ -7,7 +7,7 @@ import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/re
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -172,6 +172,7 @@ async function pullCatalogoCompleto() {
   await activarSetCompletoDePrueba().catch(() => ({ cambios: 0 }));
   await afinarCatalogoDePrueba().catch(() => ({ cambios: 0 }));
   await pasarProductosAEnPrueba().catch(() => ({ cambios: 0 }));
+  await sacarReventaDeProduccion().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };
@@ -282,6 +283,7 @@ let menuVarianteNueva = null;
 // Como se consigue el producto que se esta creando/editando: "receta",
 // "reventa" (se compra hecho) o "pendiente" (en prueba). Ver index.html.
 let menuModo = "receta";
+let menuControlaStockPrevio = true;
 let menuGruposVarianteDisponibles = [];
 const pedidoCart = new Map();
 const expandedPedidoIds = new Set();
@@ -471,6 +473,9 @@ const dom = {
   calibracionCantidad: document.querySelector("#calibracion-cantidad"),
   calibracionLabel: document.querySelector("#calibracion-label"),
   calibrarList: document.querySelector("#calibrar-list"),
+  calibracionBuscar: document.querySelector("#calibracion-buscar"),
+  calibracionSugerencias: document.querySelector("#calibracion-sugerencias"),
+  calibracionSinResultados: document.querySelector("#calibracion-sin-resultados"),
   calibracionRecetaSettings: document.querySelector("#calibracion-receta-settings"),
   recetasList: document.querySelector("#recetas-list"),
   recetaEditSheet: document.querySelector("#receta-edit-sheet"),
@@ -604,6 +609,7 @@ const dom = {
   menuEditActivo: document.querySelector("#menu-edit-activo"),
   menuRecetaRows: document.querySelector("#menu-receta-rows"),
   menuVarianteNueva: document.querySelector("#menu-variante-nueva"),
+  menuVarianteDetalles: document.querySelector("#menu-variante-detalles"),
   menuModoWrap: document.querySelector("#menu-modo-wrap"),
   menuRecetaBloque: document.querySelector("#menu-receta-bloque"),
   menuReventaBloque: document.querySelector("#menu-reventa-bloque"),
@@ -2083,7 +2089,7 @@ async function guardarPendienteCiclo(article) {
 async function renderInsumosView() {
   const insumos = await listInsumos();
   const ordenados = ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
-  renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet);
+  renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet);
   renderCalibracionAlert(dom.calibracionAlert, insumos);
   await renderAvisoCiclo();
   if (insumosListaComprasVisible) {
@@ -2092,12 +2098,36 @@ async function renderInsumosView() {
   }
 }
 
+// Filtra las tarjetas de calibracion por lo que se va escribiendo. Compara sin
+// acentos ni mayusculas ("jamon" encuentra "Jamón york"): quien escribe en la
+// tablet no pone tildes.
+function filtrarCalibracion() {
+  const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const q = norm(dom.calibracionBuscar?.value);
+  let visibles = 0;
+  const tarjetas = dom.calibrarList.querySelectorAll(".cal-card[data-nombre]");
+  tarjetas.forEach((card) => {
+    const coincide = !q || norm(card.dataset.nombre).includes(q);
+    card.hidden = !coincide;
+    if (coincide) visibles++;
+  });
+  if (dom.calibracionSinResultados) dom.calibracionSinResultados.hidden = !(q && tarjetas.length && visibles === 0);
+}
+
 async function renderCalibracionView() {
   const data = await getCalibracionDashboardData();
+  // Las sugerencias del buscador son los nombres reales de los insumos.
+  if (dom.calibracionSugerencias) {
+    dom.calibracionSugerencias.innerHTML = data
+      .slice().sort((a, b) => a.nombre.localeCompare(b.nombre))
+      .map((i) => `<option value="${String(i.nombre).replace(/"/g, "&quot;")}"></option>`).join("");
+  }
   renderCalibracionDashboard(dom.calibrarList, data, openCalibracionSheet, async (insumoId, newSettings) => {
     await saveInsumoCalibrationSettings(insumoId, newSettings);
     await renderCalibracionView();
   });
+  // Cada repintado se lleva el filtro puesto: se vuelve a aplicar.
+  filtrarCalibracion();
 }
 
 function openRecetaEditSheet(receta) {
@@ -2466,6 +2496,16 @@ function populateMenuVarianteSelect(selectedGrupoId) {
 // un producto que todavia no tiene receta. Uno que ya tiene receta no se puede
 // pasar a "se compra hecho" o "en prueba" desde aca por un toque equivocado.
 function aplicarMenuModo(modo, { selectorVisible = true } = {}) {
+  // Lo que se compra hecho no se produce: la casilla "Se produce" se apaga y se
+  // bloquea. Al volver a otro modo recupera lo que tenia.
+  if (modo === "reventa" && menuModo !== "reventa") menuControlaStockPrevio = dom.menuEditControlaStock.checked;
+  if (modo === "reventa") {
+    dom.menuEditControlaStock.checked = false;
+    dom.menuEditControlaStock.disabled = true;
+  } else {
+    if (menuModo === "reventa") dom.menuEditControlaStock.checked = menuControlaStockPrevio;
+    dom.menuEditControlaStock.disabled = false;
+  }
   menuModo = modo;
   dom.menuModoWrap.hidden = !selectorVisible;
   for (const radio of dom.menuModoWrap.querySelectorAll('input[name="menu-modo"]')) radio.checked = radio.value === modo;
@@ -2492,6 +2532,10 @@ function llenarProveedoresReventa() {
 }
 
 async function openMenuProductoAdd(categoriaId) {
+  // Estado limpio: si la hoja anterior quedo en "se compra hecho", la casilla
+  // "Se produce" estaba bloqueada y su valor guardado no es el de este producto.
+  menuModo = "receta";
+  dom.menuEditControlaStock.disabled = false;
   selectedMenuProductoId = "";
   menuProductoMode = "add";
   menuProductoEditando = null;
@@ -2516,6 +2560,7 @@ async function openMenuProductoAdd(categoriaId) {
     .join("");
   menuVarianteNueva = null;
   populateMenuVarianteSelect("");
+  dom.menuVarianteDetalles.open = false;
   updateMenuTipoVisibility();
   llenarProveedoresReventa();
   aplicarMenuModo("receta", { selectorVisible: true });
@@ -2525,6 +2570,10 @@ async function openMenuProductoAdd(categoriaId) {
 }
 
 async function openMenuProductoEdit(producto, { modoInicial } = {}) {
+  // Estado limpio: si la hoja anterior quedo en "se compra hecho", la casilla
+  // "Se produce" estaba bloqueada y su valor guardado no es el de este producto.
+  menuModo = "receta";
+  dom.menuEditControlaStock.disabled = false;
   selectedMenuProductoId = producto.id;
   menuProductoMode = "edit";
   menuProductoEditando = producto;
@@ -2547,6 +2596,8 @@ async function openMenuProductoEdit(producto, { modoInicial } = {}) {
     .join("");
   menuVarianteNueva = null;
   populateMenuVarianteSelect(grupoActual?.id || "");
+  // Plegada, salvo que el producto ya tenga una variante: ahi si hay algo que ver.
+  dom.menuVarianteDetalles.open = Boolean(grupoActual);
   updateMenuTipoVisibility();
   menuRecetaLineas = recetas
     .filter((r) => r.productoId === producto.id)
@@ -3504,6 +3555,7 @@ function bindEvents() {
     else if (btn.dataset.accion === "producto-receta") armarRecetaDesdeAviso(article.dataset.producto);
   });
 
+  dom.calibracionBuscar?.addEventListener("input", filtrarCalibracion);
   dom.seccionCalibracion?.addEventListener("toggle", () => {
     if (dom.seccionCalibracion.open) renderCalibracionView();
   });
@@ -4016,12 +4068,27 @@ function bindEvents() {
     if (e.target.classList.contains("menu-variante-nueva-nombre")) menuVarianteNueva.nombre = e.target.value;
     const i = Number(e.target.dataset.idx);
     if (Number.isNaN(i) || !menuVarianteNueva.opciones[i]) return;
-    if (e.target.classList.contains("menu-variante-opcion-nombre")) menuVarianteNueva.opciones[i].nombre = e.target.value;
+    const o = menuVarianteNueva.opciones[i];
+    if (e.target.classList.contains("menu-variante-opcion-nombre")) o.nombre = e.target.value;
+    if (e.target.classList.contains("menu-variante-nuevo-nombre")) (o.nuevoInsumo ||= {}).nombre = e.target.value;
+    if (e.target.classList.contains("menu-variante-nuevo-unidad")) (o.nuevoInsumo ||= {}).unidad = e.target.value;
   });
   dom.menuVarianteNueva.addEventListener("change", (e) => {
     if (!menuVarianteNueva || !e.target.classList.contains("menu-variante-opcion-insumo")) return;
     const i = Number(e.target.dataset.idx);
-    if (menuVarianteNueva.opciones[i]) menuVarianteNueva.opciones[i].insumoId = e.target.value;
+    const o = menuVarianteNueva.opciones[i];
+    if (!o) return;
+    o.insumoId = e.target.value;
+    if (o.insumoId === "__nuevo__") {
+      // Las respuestas de una variante son del MISMO tipo de cosa (todas leches,
+      // todas en ml): la unidad arranca igual a la de las otras respuestas, y el
+      // nombre igual a lo que se escribio como respuesta ("Soja" -> "Soja").
+      const hermana = menuVarianteNueva.opciones
+        .map((x) => menuInsumosDisponibles.find((ins) => ins.id === x.insumoId))
+        .find(Boolean);
+      o.nuevoInsumo = o.nuevoInsumo || { nombre: o.nombre || "", unidad: hermana?.unidad || "" };
+    }
+    renderMenuVarianteNueva(dom.menuVarianteNueva, menuVarianteNueva, menuInsumosDisponibles);
   });
   dom.menuVarianteNueva.addEventListener("click", (e) => {
     const boton = e.target.closest("[data-action]");
@@ -4148,12 +4215,24 @@ function bindEvents() {
         const opciones = v.opciones.filter((o) => o.nombre?.trim() && o.insumoId);
         if (!v.nombre?.trim()) throw new Error("Poné qué se pregunta (por ejemplo \"Tipo de leche\").");
         if (opciones.length < 2) throw new Error("Una variante necesita al menos dos respuestas, cada una con su insumo.");
+        for (const o of opciones) {
+          if (o.insumoId === "__nuevo__" && (!o.nuevoInsumo?.nombre?.trim() || !o.nuevoInsumo?.unidad?.trim())) {
+            throw new Error(`Falta el nombre y la unidad del insumo nuevo de "${o.nombre.trim()}".`);
+          }
+        }
         // El grupo se activa por el insumo de la receta: si ninguna linea de la
         // receta es una de las respuestas, en caja se pregunta pero no cambia nada.
-        const idsOpcion = new Set(opciones.map((o) => o.insumoId));
+        // Los insumos que se estan creando recien no cuentan: todavia no existen,
+        // asi que la receta tiene que llevar una respuesta que ya exista.
+        const idsOpcion = new Set(opciones.filter((o) => o.insumoId !== "__nuevo__").map((o) => o.insumoId));
         const lleva = lineasReceta.some((l) => idsOpcion.has(l.insumoId));
-        if (!lleva) throw new Error("La receta tiene que llevar uno de los insumos de la variante: ese es el que se cambia según lo que elija el cliente.");
-        varianteAGuardar = { nombre: v.nombre.trim(), opciones: opciones.map((o) => ({ nombre: o.nombre.trim(), insumoId: o.insumoId })) };
+        if (!lleva) throw new Error("La receta tiene que llevar uno de los insumos de la variante que ya existan: ese es el que se cambia según lo que elija el cliente.");
+        varianteAGuardar = {
+          nombre: v.nombre.trim(),
+          opciones: opciones.map((o) => o.insumoId === "__nuevo__"
+            ? { nombre: o.nombre.trim(), insumoId: "__nuevo__", nuevoInsumo: { nombre: o.nuevoInsumo.nombre.trim(), unidad: o.nuevoInsumo.unidad.trim() } }
+            : { nombre: o.nombre.trim(), insumoId: o.insumoId })
+        };
       }
       // Reventa: si se eligio proveedor, hacen falta los tres datos de la compra;
       // sin proveedor se crea igual y queda marcado "sin proveedor" en Insumos.

@@ -681,6 +681,12 @@
       <details class="gestion-seccion" id="seccion-calibracion">
         <summary><strong>Calibración</strong> <span class="gestion-seccion-hint">— verificar consumo real de cada insumo</span></summary>
         <p class="gestion-seccion-nota">Contá el stock real de un insumo y el sistema corrige solo cuánto calcula que gastás. Cuanto más lo hagas, más finas quedan las <strong>Recetas</strong>.</p>
+        <label class="calibrar-buscar">
+          <span class="visually-hidden">Buscar insumo</span>
+          <input type="search" id="calibracion-buscar" list="calibracion-sugerencias" placeholder="Buscar insumo para calibrar..." autocomplete="off">
+          <datalist id="calibracion-sugerencias"></datalist>
+        </label>
+        <p class="cal-muted calibrar-sin-resultados" id="calibracion-sin-resultados" hidden>Ningún insumo se llama así.</p>
         <div id="calibrar-list"></div>
       </details>
     </section>
@@ -886,8 +892,8 @@
                    seria 'principal' si estoy creando un producto nuevo". -->
               <div class="section-heading" style="margin-top: 1rem;">
                 <div>
-                  <h2 style="font-size: 1rem;">De qué está hecho</h2>
-                  <p class="cal-muted">Lo que consume UNA unidad. Sin esto, venderlo no descuenta nada.</p>
+                  <h2 style="font-size: 1rem;">Receta</h2>
+                  <p class="cal-muted">De qué está hecho: lo que consume UNA unidad. Sin esto, venderlo no descuenta nada.</p>
                 </div>
               </div>
 
@@ -941,23 +947,23 @@
                 <p class="menu-prueba-texto"><strong>Producto en prueba.</strong> Se puede producir y vender como cualquier otro, pero no descuenta ningún insumo hasta que lo definas. Queda anotado en <strong>Insumos → Completar</strong> para que no se olvide, sin molestar.</p>
               </div>
 
-              <div class="section-heading" style="margin-top: 1.2rem;">
-                <div>
-                  <h2 style="font-size: 1rem;">Qué se pregunta al venderlo</h2>
-                  <p class="cal-muted">Opcional. Por ejemplo "¿con qué leche?": en caja se elige y se descuenta esa.</p>
-                </div>
-              </div>
-              <label class="quantity-field">
-                <span>Variante</span>
-                <select id="menu-edit-variante">
-                  <option value="">— Ninguna —</option>
-                </select>
-              </label>
-              <!-- Se puede crear la variante ACA. Tenerla que crear antes, en
-                   otra pantalla, para despues volver a empezar el producto, es
-                   un rodeo: "crear la variante antes es un paso previo que
-                   enrosca". -->
-              <div id="menu-variante-nueva" hidden></div>
+              <!-- Opcional y PLEGADO: una variante ("¿con que leche?") no es una
+                   tarea de cada producto nuevo, es algo que solo algunos llevan.
+                   Como seccion abierta con su titulo se leia como un paso mas
+                   por hacer — sobre todo en un producto "en prueba", que ni
+                   siquiera tiene insumos para variar. Se abre sola cuando el
+                   producto YA tiene una variante. -->
+              <details id="menu-variante-detalles" class="menu-opcional">
+                <summary>Qué se pregunta al venderlo <small class="cal-muted">(opcional)</small></summary>
+                <p class="cal-muted" style="margin: .3rem 0 .6rem;">Por ejemplo "¿con qué leche?": en caja se elige y se descuenta esa.</p>
+                <label class="quantity-field">
+                  <span>Variante</span>
+                  <select id="menu-edit-variante">
+                    <option value="">— Ninguna —</option>
+                  </select>
+                </label>
+                <div id="menu-variante-nueva" hidden></div>
+              </details>
 
               <div class="section-heading" style="margin-top: 1.2rem;">
                 <div>
@@ -966,7 +972,7 @@
               </div>
               <label class="pedido-check-field">
                 <input id="menu-edit-controla-stock" type="checkbox">
-                <span>Controla stock (se descuenta al producirlo y al venderlo)</span>
+                <span id="menu-edit-controla-stock-texto">Se produce <small class="cal-muted">(aparece en Producción y lleva su stock)</small></span>
               </label>
               <label class="quantity-field">
                 <span>Umbral de stock bajo (unidades)</span>

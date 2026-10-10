@@ -160,8 +160,13 @@ export async function productionSnapshot(fecha = todayISO()) {
         movimientosProduccion: movementsByProduct.get(product.id) || [],
         vendidoHoy: soldByProduct.get(product.id) || 0
       })),
+    // Produccion es para lo que se PRODUCE (lo que controla stock). Esta lista y
+    // la del modo consulta (mas abajo) tienen que decir lo mismo: antes se
+    // mostraba TODA la bolleria y TODAS las bebidas, con su "Cargar produccion"
+    // que nunca pudo funcionar (saveDailyProduction rechaza un producto que no
+    // controla stock).
     bolleria: products
-      .filter((product) => product.categoriaId === "bolleria")
+      .filter((product) => product.categoriaId === "bolleria" && product.controlaStock)
       .map((product) => ({
         ...product,
         cantidadProducida: producedByProduct.get(product.id) || 0,
@@ -169,7 +174,7 @@ export async function productionSnapshot(fecha = todayISO()) {
         vendidoHoy: soldByProduct.get(product.id) || 0
       })),
     bebidas: products
-      .filter((product) => product.categoriaId === "bebidas")
+      .filter((product) => product.categoriaId === "bebidas" && product.controlaStock)
       .map((product) => ({
         ...product,
         cantidadProducida: producedByProduct.get(product.id) || 0,
@@ -412,8 +417,14 @@ export async function datosRemotosDelDia(fecha) {
     fecha,
     comentarios,
     sandwiches: productos.filter((p) => p.categoriaId === "sandwiches" && p.controlaStock).map(conDatos),
-    bolleria: productos.filter((p) => p.categoriaId === "bolleria").map(conDatos),
-    bebidas: productos.filter((p) => p.categoriaId === "bebidas").map(conDatos),
+    // Produccion es para lo que se PRODUCE: lo que controla stock. Antes se
+    // listaba TODA la bolleria y TODAS las bebidas sin mirar eso, y aparecian
+    // "Coca cola", "Agua", "Cerveza" con su "Cargar produccion"... que nunca
+    // pudo funcionar: saveDailyProduction rechaza un producto que no controla
+    // stock. Lo que se compra hecho y se vende directo no se produce nunca, y
+    // ensuciaba la pantalla.
+    bolleria: productos.filter((p) => p.categoriaId === "bolleria" && p.controlaStock).map(conDatos),
+    bebidas: productos.filter((p) => p.categoriaId === "bebidas" && p.controlaStock).map(conDatos),
     productionProducts: productos.filter((p) => PRODUCTION_CATEGORIES.has(p.categoriaId) && p.controlaStock).map(conDatos)
   };
 

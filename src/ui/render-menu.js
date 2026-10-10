@@ -250,7 +250,12 @@ export function renderMenuVarianteNueva(container, estado, insumos) {
       .slice()
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
       .map((i) => `<option value="${i.id}" ${i.id === seleccionado ? "selected" : ""}>${i.nombre} (${i.unidad})</option>`)
-      .join("");
+      .join("") +
+    // Si la respuesta es un insumo que todavia no existe se crea ACA, sin
+    // cancelar el producto para irse a otra pantalla. Usa el mismo camino que
+    // cualquier insumo nuevo (construirInsumoNuevo), asi que nace con minimo y
+    // queda anotado en Completar si le falta el proveedor.
+    `<option value="__nuevo__" ${seleccionado === "__nuevo__" ? "selected" : ""}>+ Crear insumo nuevo…</option>`;
 
   container.innerHTML = `
     <div class="menu-variante-nueva">
@@ -264,7 +269,12 @@ export function renderMenuVarianteNueva(container, estado, insumos) {
           <input class="menu-variante-opcion-nombre" data-idx="${i}" type="text" placeholder="${i === 0 ? "Entera" : "Avena"}" value="${o.nombre ?? ""}">
           <select class="menu-variante-opcion-insumo" data-idx="${i}">${opcionesInsumo(o.insumoId)}</select>
           <button class="ghost-button compact" type="button" data-action="quitar-opcion" data-idx="${i}" aria-label="Quitar respuesta">×</button>
-        </div>`).join("")}
+        </div>
+        ${o.insumoId === "__nuevo__" ? `
+        <div class="menu-variante-opcion-nuevo" data-idx="${i}">
+          <input class="menu-variante-nuevo-nombre" data-idx="${i}" type="text" placeholder="Nombre del insumo nuevo" value="${o.nuevoInsumo?.nombre ?? ""}">
+          <input class="menu-variante-nuevo-unidad" data-idx="${i}" type="text" placeholder="Unidad (ml, g...)" value="${o.nuevoInsumo?.unidad ?? ""}">
+        </div>` : ""}`).join("")}
       <button class="ghost-button compact" type="button" data-action="agregar-opcion">+ Agregar respuesta</button>
     </div>`;
 }

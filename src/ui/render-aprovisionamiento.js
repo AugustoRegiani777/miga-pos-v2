@@ -81,7 +81,11 @@ function stockBaseText(insumo) {
   return formatearConEnvase(insumo.stockActual, insumo.unidad, envaseDe(insumo));
 }
 
-export function renderInsumosList(container, insumos, onSelect) {
+// onCalibrar (opcional): cada fila trae su propio boton naranja "Calibrar", al
+// lado del estado del stock. Calibrar es contar lo que hay y decirselo al
+// sistema, asi que el boton tiene que estar en la fila del insumo que se tiene
+// delante, no al final de una lista aparte donde hay que ir a buscarlo.
+export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
   if (insumos.length === 0) {
     container.innerHTML = '<p class="empty-state">No hay insumos cargados.</p>';
     return;
@@ -92,9 +96,20 @@ export function renderInsumosList(container, insumos, onSelect) {
         <h2>${insumo.nombre}${insumo.esEstimado ? " ~" : ""}</h2>
         <p>${stockBaseText(insumo)}</p>
       </div>
-      <div class="stock-row-actions">${statusPill(insumo.estadoStock)}</div>
+      <div class="stock-row-actions">
+        ${onCalibrar ? `<button type="button" class="btn-calibrar-insumo" data-calibrar-fila="${insumo.id}" aria-label="Calibrar ${insumo.nombre}">Calibrar</button>` : ""}
+        ${statusPill(insumo.estadoStock)}
+      </div>
     </div>
   `).join("");
+  // El boton va DENTRO de la fila clickeable: sin stopPropagation, tocar
+  // "Calibrar" tambien abria la hoja de ajuste de stock.
+  container.querySelectorAll("[data-calibrar-fila]").forEach(btn => {
+    const insumo = insumos.find(i => i.id === btn.dataset.calibrarFila);
+    if (!insumo) return;
+    btn.addEventListener("click", e => { e.stopPropagation(); onCalibrar(insumo); });
+    btn.addEventListener("keydown", e => { e.stopPropagation(); });
+  });
   container.querySelectorAll(".stock-row[data-id]").forEach(row => {
     const insumo = insumos.find(i => i.id === row.dataset.id);
     if (!insumo) return;
@@ -211,7 +226,7 @@ export function renderCalibracionDashboard(container, data, onCalibracion, onSet
       </div>`;
 
     return `
-      <div class="cal-card${alerta ? " cal-card--alerta" : ""}">
+      <div class="cal-card${alerta ? " cal-card--alerta" : ""}" data-nombre="${String(insumo.nombre).toLowerCase()}">
         <div class="cal-card-header">
           <div class="cal-card-title">
             <strong>${insumo.nombre}</strong>

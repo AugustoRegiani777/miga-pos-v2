@@ -252,6 +252,9 @@ export function renderProduction(snapshot, selectedBox, selectedProductId, onPro
 
   if (productionLists.bolleria) {
     productionLists.bolleria.innerHTML = "";
+    // Sin productos que producir, ni el titulo de la seccion tiene sentido.
+    const seccion = productionLists.bolleria.closest("section");
+    if (seccion) seccion.hidden = snapshot.bolleria.length === 0;
     for (const product of snapshot.bolleria) {
       productionLists.bolleria.appendChild(
         renderProductionRow(product, selectedProductId, onProductionProductSelect, onAdjustStock)
@@ -261,6 +264,9 @@ export function renderProduction(snapshot, selectedBox, selectedProductId, onPro
 
   if (productionLists.bebidas) {
     productionLists.bebidas.innerHTML = "";
+    // Sin productos que producir, ni el titulo de la seccion tiene sentido.
+    const seccion = productionLists.bebidas.closest("section");
+    if (seccion) seccion.hidden = snapshot.bebidas.length === 0;
     for (const product of snapshot.bebidas) {
       productionLists.bebidas.appendChild(
         renderProductionRow(product, selectedProductId, onProductionProductSelect, onAdjustStock)

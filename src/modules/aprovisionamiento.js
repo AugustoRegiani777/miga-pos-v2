@@ -1384,6 +1384,31 @@ export async function pasarProductosAEnPrueba() {
   return { cambios: recetasABorrar.length + insumosADesactivar.length, recetas: recetasABorrar.length, insumos: insumosADesactivar.length };
 }
 
+// Los productos "se compra hecho" no se producen: no controlan stock y no
+// aparecen en Produccion. Se reconocen por su receta espejo (1 unidad de un
+// insumo con su mismo id). Medialunas y Galletitas habian quedado como
+// producidos, asi que se listaban en Produccion con su "Cargar produccion" y el
+// insumo se descontaba al "producirlas" en vez de al venderlas.
+//
+// Solo en la base de prueba: en produccion no se toca el menu del dueño sin que
+// lo pida.
+export async function sacarReventaDeProduccion() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+  const [productos, recetas, config] = await Promise.all([getAll("productos"), getAll("recetas"), getAll("configuracion")]);
+  const KEY = "reventa_fuera_de_produccion_v1";
+  if (config.find((c) => c.id === KEY)?.valor) return { cambios: 0 };
+  const now = new Date().toISOString();
+  const esEspejo = (p) => recetas.filter((r) => r.productoId === p.id).length === 1
+    && recetas.some((r) => r.id === `${p.id}:${p.id}`);
+  const aCambiar = productos.filter((p) => esEspejo(p) && p.controlaStock !== false);
+  await withStores(["productos", "configuracion"], "readwrite", (stores) => {
+    for (const p of aCambiar) stores.productos.put({ ...p, controlaStock: false, actualizadoEn: now });
+    stores.configuracion.put({ id: KEY, valor: true, actualizadoEn: now });
+  });
+  if (aCambiar.length) trySyncCatalogoSnapshot(await getAll("categorias"), await getAll("productos")).catch(() => {});
+  return { cambios: aCambiar.length, productos: aCambiar.map((p) => p.nombre) };
+}
+
 export async function listInsumos({ hoy = todayISO(), pedidos = null } = {}) {
   const [insumos, movimientosLocales, proveedorInsumos, proveedores, recetas, serieNube] = await Promise.all([
     getAll("insumos"),
