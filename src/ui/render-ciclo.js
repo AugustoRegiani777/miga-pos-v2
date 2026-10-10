@@ -55,7 +55,23 @@ function formularioReceta(p, productos) {
     </div>`;
 }
 
-export function renderPendientesCiclo(container, { pendientes, resumen, proveedores, productos }) {
+// Plegado por defecto, y a proposito.
+//
+// Esto empezo mostrando los seis formularios abiertos arriba de todo, con un
+// triangulo de alerta. El dueño: "no las tengo, entonces el sistema no puede
+// estorbarme con tantas tareas pendientes, debe ser mas discreto".
+//
+// Tenia razon. Estos pendientes son deuda que muchas veces NO se puede saldar
+// en el momento — faltan las recetas de lo que hacen ellos, y no las van a
+// inventar parados en la caja. Un aviso que ocupa media pantalla todos los
+// dias por algo que no depende de vos no se lee: se aprende a ignorar, y el
+// dia que diga algo urgente tampoco se va a leer.
+//
+// Entonces: una linea sola, sin alarma, que dice cuantos son. Se abre si lo
+// tocas, y queda abierto o cerrado como lo dejaste (ver MOSTRAR_CICLO_KEY en
+// app.js) — si no, guardar un pendiente lo volveria a cerrar justo cuando
+// estas resolviendolos de a uno.
+export function renderPendientesCiclo(container, { pendientes, resumen, proveedores, productos, abierto = false }) {
   if (pendientes.length === 0) {
     container.hidden = true;
     container.innerHTML = "";
@@ -63,7 +79,12 @@ export function renderPendientesCiclo(container, { pendientes, resumen, proveedo
   }
   container.hidden = false;
   container.innerHTML = `
-    <p class="aviso-ciclo-resumen"><strong>⚠ ${esc(resumen)}</strong> — completalos acá y quedan listos.</p>
+    <details class="aviso-ciclo-plegable"${abierto ? " open" : ""}>
+      <summary class="aviso-ciclo-resumen">
+        <span class="aviso-ciclo-conteo">${esc(resumen)}</span>
+        <span class="aviso-ciclo-abrir">Completar</span>
+      </summary>
+      <p class="aviso-ciclo-ayuda">Cargalos cuando tengas el dato. Hasta entonces el insumo funciona igual: lo único que no hace es entrar en la lista de compras.</p>
     ${pendientes.map((p) => `
       <article class="pendiente" data-insumo="${esc(p.insumoId)}" data-falta="${esc(p.falta)}">
         <header class="pendiente-head">
@@ -79,7 +100,8 @@ export function renderPendientesCiclo(container, { pendientes, resumen, proveedo
         <p class="pendiente-porque">${esc(p.porQue)} <span class="cal-muted">Si ya no lo us&aacute;s, "No lo uso" lo saca de la lista y el aviso desaparece.</span></p>
         ${p.falta === "proveedor" ? formularioProveedor(p, proveedores) : formularioReceta(p, productos)}
         <p class="pendiente-error" hidden></p>
-      </article>`).join("")}`;
+      </article>`).join("")}
+    </details>`;
 }
 
 // Lee un pendiente del DOM. Devuelve { datos } o { error } con el motivo.

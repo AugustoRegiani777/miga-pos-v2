@@ -1938,6 +1938,17 @@ function ordenarInsumosParaVista(insumos, modo) {
 // Aviso de ciclo incompleto: insumos que entran pero nunca salen (sin receta)
 // o que no tienen a quien comprarse (sin proveedor). No bloquea nada; solo
 // hace visible la deuda, que si no queda invisible para siempre.
+// Si el aviso de pendientes quedo abierto o cerrado, por dispositivo. Es una
+// preferencia de quien mira la pantalla, no un dato del negocio: va en
+// localStorage y no se sincroniza.
+const MOSTRAR_CICLO_KEY = "miga_ciclo_abierto";
+function cicloAbierto() {
+  try { return localStorage.getItem(MOSTRAR_CICLO_KEY) === "1"; } catch { return false; }
+}
+function recordarCicloAbierto(abierto) {
+  try { localStorage.setItem(MOSTRAR_CICLO_KEY, abierto ? "1" : "0"); } catch { /* sin localStorage: se abre cerrado y listo */ }
+}
+
 async function renderAvisoCiclo() {
   if (!dom.avisoCiclo) return;
   const [insumos, recetas, proveedorInsumos, proveedores, productos] = await Promise.all([
@@ -1948,10 +1959,15 @@ async function renderAvisoCiclo() {
   }));
   renderPendientesCiclo(dom.avisoCiclo, {
     pendientes,
+    abierto: cicloAbierto(),
     resumen: resumenPendientes(pendientes),
     proveedores: proveedores.filter((p) => p.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre)),
     productos: productos.filter((p) => p.controlaStock || p.categoriaId === "cafe" || p.categoriaId === "bebidas")
   });
+  // "toggle" no burbujea: hay que engancharlo al <details> recien pintado, no
+  // delegarlo en el contenedor como el resto de los eventos de la app.
+  const plegable = dom.avisoCiclo.querySelector(".aviso-ciclo-plegable");
+  if (plegable) plegable.addEventListener("toggle", () => recordarCicloAbierto(plegable.open));
 }
 
 // "No lo uso": saca el insumo de circulacion en vez de obligar a inventarle
