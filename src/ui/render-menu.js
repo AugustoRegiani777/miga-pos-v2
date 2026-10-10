@@ -219,3 +219,46 @@ export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], pr
     renderMenuInsumoSelect(select, insumos, linea.insumoId);
   });
 }
+
+// Crear la variante sin salir del alta del producto.
+//
+// Antes el desplegable solo ofrecia los grupos que ya existian: si estabas
+// creando un cafe con leche y el grupo "Tipo de leche" no existia, habia que
+// cancelar, irse a Gestion > Variantes, crearlo, y volver a empezar el
+// producto. El dueño: "crear la variante antes es un paso previo que enrosca".
+//
+// Una variante es una pregunta con respuestas, y cada respuesta dice QUE
+// insumo se descuenta en lugar del de la receta. Eso es todo lo que se pide
+// aca: el nombre de la pregunta y las respuestas. Lo fino (que productos mas
+// la usan, cantidades distintas por opcion) sigue estando en su pantalla.
+export function renderMenuVarianteNueva(container, estado, insumos) {
+  if (!estado) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  container.hidden = false;
+  const opcionesInsumo = (seleccionado) =>
+    `<option value="">— Qué insumo descuenta —</option>` +
+    insumos
+      .slice()
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+      .map((i) => `<option value="${i.id}" ${i.id === seleccionado ? "selected" : ""}>${i.nombre} (${i.unidad})</option>`)
+      .join("");
+
+  container.innerHTML = `
+    <div class="menu-variante-nueva">
+      <label class="quantity-field">
+        <span>¿Qué se pregunta? <small>(se lee tal cual en la caja)</small></span>
+        <input class="menu-variante-nueva-nombre" type="text" placeholder="Tipo de leche" value="${estado.nombre ?? ""}">
+      </label>
+      <p class="cal-muted" style="margin:.4rem 0 .2rem;">Respuestas posibles. La primera es la que lleva la receta por defecto.</p>
+      ${estado.opciones.map((o, i) => `
+        <div class="menu-variante-opcion" data-idx="${i}">
+          <input class="menu-variante-opcion-nombre" data-idx="${i}" type="text" placeholder="${i === 0 ? "Entera" : "Avena"}" value="${o.nombre ?? ""}">
+          <select class="menu-variante-opcion-insumo" data-idx="${i}">${opcionesInsumo(o.insumoId)}</select>
+          <button class="ghost-button compact" type="button" data-action="quitar-opcion" data-idx="${i}" aria-label="Quitar respuesta">×</button>
+        </div>`).join("")}
+      <button class="ghost-button compact" type="button" data-action="agregar-opcion">+ Agregar respuesta</button>
+    </div>`;
+}

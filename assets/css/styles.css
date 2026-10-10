@@ -3900,3 +3900,42 @@ body.arrastrando-fila {
 }
 .caja-retiro-queda { margin: 8px 0 0; font-weight: 700; }
 .caja-retiro-queda.es-negativo { color: var(--out); }
+
+/* ---- Alta de producto: proveedor del insumo nuevo y variante nueva ----
+   Mismos controles que la linea de receta (48 px de alto, mismo borde y
+   fondo): son campos de la misma hoja y no tienen que verse como de otra app. */
+.menu-receta-nuevo-prov { margin-top: 0.6rem; }
+.menu-receta-nuevo-prov-quien { display: block; }
+.menu-receta-nuevo-prov-quien > span { display: block; margin-bottom: 4px; font-size: 0.9rem; }
+.menu-receta-nuevo-ayuda { margin: 0.4rem 0 0; font-size: 0.82rem; }
+
+.menu-receta-nuevo-prov select,
+.menu-variante-nueva select,
+.menu-variante-nueva input {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  box-sizing: border-box;
+}
+.menu-receta-nuevo-prov-quien select { width: 100%; }
+
+.menu-variante-nueva {
+  margin-top: 0.6rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.menu-variante-nueva .quantity-field input { width: 100%; }
+.menu-variante-opcion {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.menu-variante-opcion input { flex: 1; min-width: 0; }
+.menu-variante-opcion select { flex: 1.4; min-width: 0; }
+.menu-variante-opcion [data-action="quitar-opcion"] { flex-shrink: 0; }

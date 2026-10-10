@@ -21,7 +21,7 @@ import { unidadesDisponibles, tieneConversion, aBase, desdeBase, mejorUnidad, fo
 import { getGruposVariantes, saveGrupoVariante, deleteGrupoVariante, getGrupoDeProducto, setProductoGrupoVariante, pullVariantesGruposDesdeNube } from "../modules/variantes.js";
 import { renderVariantesOpcionesRows, renderVariantesProductosChecklist, renderVariantesGruposList } from "../ui/render-variantes.js";
 import { mensajeConfirmacionEliminacion } from "../modules/menu-calculos.js";
-import { renderMenuList, renderMenuRecetaRows } from "../ui/render-menu.js";
+import { renderMenuList, renderMenuRecetaRows, renderMenuVarianteNueva } from "../ui/render-menu.js";
 import {
   trySyncVenta,
   trySyncMovimientosInsumos,
@@ -275,6 +275,9 @@ let menuEliminarInProgress = false;
 let menuRecetaLineas = [];
 let menuInsumosDisponibles = [];
 let menuProveedoresDisponibles = [];
+// La variante que se esta creando dentro del alta de un producto. null = el
+// desplegable esta en un grupo que ya existe (o en "Ninguna").
+let menuVarianteNueva = null;
 let menuGruposVarianteDisponibles = [];
 const pedidoCart = new Map();
 const expandedPedidoIds = new Set();
@@ -586,7 +589,6 @@ const dom = {
   menuComboMedia: document.querySelector("#menu-combo-media"),
   menuComboPremium: document.querySelector("#menu-combo-premium"),
   menuCombosGuardar: document.querySelector("#menu-combos-guardar"),
-  irARecetas: document.querySelector("#ir-a-recetas"),
   irAInsumosDesdeVariantes: document.querySelector("#ir-a-insumos-desde-variantes"),
   menuCombosStatus: document.querySelector("#menu-combos-status"),
   avisoCiclo: document.querySelector("#aviso-ciclo"),
@@ -597,6 +599,7 @@ const dom = {
   menuEditUmbral: document.querySelector("#menu-edit-umbral"),
   menuEditActivo: document.querySelector("#menu-edit-activo"),
   menuRecetaRows: document.querySelector("#menu-receta-rows"),
+  menuVarianteNueva: document.querySelector("#menu-variante-nueva"),
   menuAddRecetaRow: document.querySelector("#menu-add-receta-row"),
   variantesGruposList: document.querySelector("#variantes-grupos-list"),
   varianteAddGrupo: document.querySelector("#variante-add-grupo"),
@@ -2398,7 +2401,9 @@ function updateMenuTipoVisibility() {
 function populateMenuVarianteSelect(selectedGrupoId) {
   dom.menuEditVariante.innerHTML =
     `<option value="">— Ninguna —</option>` +
-    menuGruposVarianteDisponibles.map((g) => `<option value="${g.id}" ${g.id === selectedGrupoId ? "selected" : ""}>${g.nombre}</option>`).join("");
+    menuGruposVarianteDisponibles.map((g) => `<option value="${g.id}" ${g.id === selectedGrupoId ? "selected" : ""}>${g.nombre}</option>`).join("") +
+    `<option value="__nuevo__" ${selectedGrupoId === "__nuevo__" ? "selected" : ""}>+ Crear variante nueva…</option>`;
+  renderMenuVarianteNueva(dom.menuVarianteNueva, menuVarianteNueva, menuInsumosDisponibles);
 }
 
 async function openMenuProductoAdd(categoriaId) {
@@ -2424,6 +2429,7 @@ async function openMenuProductoAdd(categoriaId) {
   dom.menuEditCategoria.innerHTML = categorias
     .map((c) => `<option value="${c.id}" ${c.id === categoriaId ? "selected" : ""}>${c.nombre}</option>`)
     .join("");
+  menuVarianteNueva = null;
   populateMenuVarianteSelect("");
   updateMenuTipoVisibility();
   renderMenuRecetaEditorView();
@@ -2452,6 +2458,7 @@ async function openMenuProductoEdit(producto) {
   dom.menuEditCategoria.innerHTML = categorias
     .map((c) => `<option value="${c.id}" ${c.id === producto.categoriaId ? "selected" : ""}>${c.nombre}</option>`)
     .join("");
+  menuVarianteNueva = null;
   populateMenuVarianteSelect(grupoActual?.id || "");
   updateMenuTipoVisibility();
   menuRecetaLineas = recetas
@@ -3388,10 +3395,6 @@ function bindEvents() {
   // Enlaces entre pantallas que son el mismo dato visto de otra manera. No
   // cambian nada: solo llevan ahi y dejan la seccion abierta, para que se vea
   // que estan conectadas.
-  dom.irARecetas?.addEventListener("click", () => {
-    setMenuEditSheetOpen(false);
-    showGestionSubView("recetas");
-  });
   dom.irAInsumosDesdeVariantes?.addEventListener("click", () => {
     setVarianteGrupoSheetOpen(false);
     showGestionSubView("insumos");
@@ -3892,6 +3895,37 @@ function bindEvents() {
     }
   });
 
+  // Elegir "+ Crear variante nueva…" abre el formulario ahi mismo. Se arranca
+  // con dos respuestas vacias porque una variante con una sola opcion no
+  // pregunta nada.
+  dom.menuEditVariante.addEventListener("change", () => {
+    menuVarianteNueva = dom.menuEditVariante.value === "__nuevo__"
+      ? (menuVarianteNueva || { nombre: "", opciones: [{ nombre: "", insumoId: "" }, { nombre: "", insumoId: "" }] })
+      : null;
+    renderMenuVarianteNueva(dom.menuVarianteNueva, menuVarianteNueva, menuInsumosDisponibles);
+  });
+  dom.menuVarianteNueva.addEventListener("input", (e) => {
+    if (!menuVarianteNueva) return;
+    if (e.target.classList.contains("menu-variante-nueva-nombre")) menuVarianteNueva.nombre = e.target.value;
+    const i = Number(e.target.dataset.idx);
+    if (Number.isNaN(i) || !menuVarianteNueva.opciones[i]) return;
+    if (e.target.classList.contains("menu-variante-opcion-nombre")) menuVarianteNueva.opciones[i].nombre = e.target.value;
+  });
+  dom.menuVarianteNueva.addEventListener("change", (e) => {
+    if (!menuVarianteNueva || !e.target.classList.contains("menu-variante-opcion-insumo")) return;
+    const i = Number(e.target.dataset.idx);
+    if (menuVarianteNueva.opciones[i]) menuVarianteNueva.opciones[i].insumoId = e.target.value;
+  });
+  dom.menuVarianteNueva.addEventListener("click", (e) => {
+    const boton = e.target.closest("[data-action]");
+    if (!boton || !menuVarianteNueva) return;
+    if (boton.dataset.action === "agregar-opcion") menuVarianteNueva.opciones.push({ nombre: "", insumoId: "" });
+    if (boton.dataset.action === "quitar-opcion" && menuVarianteNueva.opciones.length > 2) {
+      menuVarianteNueva.opciones.splice(Number(boton.dataset.idx), 1);
+    }
+    renderMenuVarianteNueva(dom.menuVarianteNueva, menuVarianteNueva, menuInsumosDisponibles);
+  });
+
   dom.menuRecetaRows.addEventListener("change", (e) => {
     const idx = Number(e.target.dataset.idx);
     if (Number.isNaN(idx) || !menuRecetaLineas[idx]) return;
@@ -3998,6 +4032,22 @@ function bindEvents() {
       const lineasReceta = menuRecetaLineas
         .filter((l) => (l.insumoId === "__nuevo__" ? l.nuevoNombre?.trim() : l.insumoId) && parseDecimal(l.cantidad) > 0)
         .map((l) => ({ ...l, cantidad: parseDecimal(l.cantidad) }));
+      // Si se esta creando una variante nueva, se valida TODO antes de tocar el
+      // producto: guardar el producto y recien despues descubrir que la variante
+      // no sirve lo deja creado sin la pregunta que el dueño queria.
+      let varianteAGuardar = null;
+      if (dom.menuEditVariante.value === "__nuevo__") {
+        const v = menuVarianteNueva || { nombre: "", opciones: [] };
+        const opciones = v.opciones.filter((o) => o.nombre?.trim() && o.insumoId);
+        if (!v.nombre?.trim()) throw new Error("Poné qué se pregunta (por ejemplo \"Tipo de leche\").");
+        if (opciones.length < 2) throw new Error("Una variante necesita al menos dos respuestas, cada una con su insumo.");
+        // El grupo se activa por el insumo de la receta: si ninguna linea de la
+        // receta es una de las respuestas, en caja se pregunta pero no cambia nada.
+        const idsOpcion = new Set(opciones.map((o) => o.insumoId));
+        const lleva = lineasReceta.some((l) => idsOpcion.has(l.insumoId));
+        if (!lleva) throw new Error("La receta tiene que llevar uno de los insumos de la variante: ese es el que se cambia según lo que elija el cliente.");
+        varianteAGuardar = { nombre: v.nombre.trim(), opciones: opciones.map((o) => ({ nombre: o.nombre.trim(), insumoId: o.insumoId })) };
+      }
       const productoGuardado = await saveProducto({
         id: menuProductoMode === "edit" ? selectedMenuProductoId : undefined,
         categoriaId,
@@ -4009,7 +4059,11 @@ function bindEvents() {
         activo: dom.menuEditActivo.checked,
         lineasReceta
       });
-      await setProductoGrupoVariante(productoGuardado.id, dom.menuEditVariante.value || null);
+      if (varianteAGuardar) {
+        await saveGrupoVariante({ ...varianteAGuardar, productoIds: [productoGuardado.id] });
+      } else {
+        await setProductoGrupoVariante(productoGuardado.id, dom.menuEditVariante.value || null);
+      }
       await refreshGruposVariantes();
       setFlash(menuProductoMode === "edit" ? "Producto actualizado." : "Producto agregado.", "success");
       closeMenuEdit();

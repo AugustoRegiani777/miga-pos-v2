@@ -857,7 +857,7 @@
               <button type="button" class="ghost-button compact" id="close-menu-edit">Cerrar</button>
             </div>
             <div class="sheet-scroll-body">
-              <p class="form-instruccion">Una unidad de venta tuya: lo que se toca en Caja. Abajo cargás de qué insumos está hecha una unidad.</p>
+              <p class="form-instruccion">Una unidad de venta tuya: lo que se toca en Caja.</p>
               <label class="quantity-field">
                 <span>Nombre</span>
                 <input id="menu-edit-nombre" type="text" required>
@@ -877,6 +877,45 @@
                   <option value="premium">De la casa (premium, +0,30 en combos)</option>
                 </select>
               </label>
+
+              <!-- La receta va ACA, no al final. Crear un producto es sobre
+                   todo decir de que esta hecho: si eso queda abajo de todo, en
+                   letra chica y detras de un boton que lleva a otra pantalla,
+                   lo que se guarda son productos sin receta — que es
+                   exactamente lo que venia pasando. El dueño: "agregar insumos
+                   seria 'principal' si estoy creando un producto nuevo". -->
+              <div class="section-heading" style="margin-top: 1rem;">
+                <div>
+                  <h2 style="font-size: 1rem;">De qué está hecho</h2>
+                  <p class="cal-muted">Lo que consume UNA unidad. Sin esto, venderlo no descuenta nada.</p>
+                </div>
+              </div>
+              <div id="menu-receta-rows"></div>
+              <button type="button" class="ghost-button compact" id="menu-add-receta-row">+ Agregar insumo</button>
+
+              <div class="section-heading" style="margin-top: 1.2rem;">
+                <div>
+                  <h2 style="font-size: 1rem;">Qué se pregunta al venderlo</h2>
+                  <p class="cal-muted">Opcional. Por ejemplo "¿con qué leche?": en caja se elige y se descuenta esa.</p>
+                </div>
+              </div>
+              <label class="quantity-field">
+                <span>Variante</span>
+                <select id="menu-edit-variante">
+                  <option value="">— Ninguna —</option>
+                </select>
+              </label>
+              <!-- Se puede crear la variante ACA. Tenerla que crear antes, en
+                   otra pantalla, para despues volver a empezar el producto, es
+                   un rodeo: "crear la variante antes es un paso previo que
+                   enrosca". -->
+              <div id="menu-variante-nueva" hidden></div>
+
+              <div class="section-heading" style="margin-top: 1.2rem;">
+                <div>
+                  <h2 style="font-size: 1rem;">Cómo se vende</h2>
+                </div>
+              </div>
               <label class="pedido-check-field">
                 <input id="menu-edit-controla-stock" type="checkbox">
                 <span>Controla stock (se descuenta al producirlo y al venderlo)</span>
@@ -889,22 +928,6 @@
                 <input id="menu-edit-activo" type="checkbox" checked>
                 <span>Mostrar en caja</span>
               </label>
-              <label class="quantity-field">
-                <span>Variante <span class="cal-muted">(opcional — pregunta que se hace en caja antes de sumarlo al carrito)</span></span>
-                <select id="menu-edit-variante">
-                  <option value="">— Ninguna —</option>
-                </select>
-              </label>
-
-              <div class="section-heading seccion-con-link" style="margin-top: 1rem;">
-                <div>
-                  <h2 style="font-size: 1rem;">Receta</h2>
-                  <p class="cal-muted">Insumos que consume una unidad de este producto.</p>
-                </div>
-                <button type="button" class="link-cruzado" id="ir-a-recetas" title="Es la misma receta que ves en la sección Recetas">Ver en Recetas →</button>
-              </div>
-              <div id="menu-receta-rows"></div>
-              <button type="button" class="ghost-button compact" id="menu-add-receta-row">+ Agregar insumo</button>
             </div>
             <div class="sheet-footer">
               <button class="primary-button" type="submit">Guardar</button>
