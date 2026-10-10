@@ -29,10 +29,11 @@ DELETE FROM pedidos;
 DELETE FROM detalle_venta;
 DELETE FROM ventas;
 
--- Ledger y produccion.
+-- Ledger. produccion_diaria NO se borra: es una VISTA sobre movimientos_stock
+-- (tipo = 'produccion'), no una tabla. Un DELETE ahi falla con 55000 y tira
+-- abajo la transaccion entera. Se vacia sola al vaciar los movimientos.
 DELETE FROM movimientos_stock;
 DELETE FROM movimientos_insumos;
-DELETE FROM produccion_diaria;
 
 -- Historiales de aprendizaje del modelo.
 DELETE FROM historial_calibraciones;
@@ -45,7 +46,7 @@ SELECT 'ventas'                AS tabla, count(*) AS filas FROM ventas
 UNION ALL SELECT 'detalle_venta',          count(*) FROM detalle_venta
 UNION ALL SELECT 'movimientos_stock',      count(*) FROM movimientos_stock
 UNION ALL SELECT 'movimientos_insumos',    count(*) FROM movimientos_insumos
-UNION ALL SELECT 'produccion_diaria',      count(*) FROM produccion_diaria
+UNION ALL SELECT 'produccion_diaria (vista)', count(*) FROM produccion_diaria
 UNION ALL SELECT 'sesiones_caja',          count(*) FROM sesiones_caja
 UNION ALL SELECT 'pedidos',                count(*) FROM pedidos
 UNION ALL SELECT 'stock_productos != 0',   count(*) FROM stock_productos WHERE stock_actual <> 0
