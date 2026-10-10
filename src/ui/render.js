@@ -359,7 +359,7 @@ export function renderHistory(container, sales, { onUndoSale, onShareSale, onPri
       const badge = el("span", `sale-sync ${pendiente ? "is-pending" : "is-synced"}`, pendiente ? "⏳ sin sincronizar" : "✓");
       row.querySelector("h2").appendChild(badge);
     }
-    row.querySelector("p").textContent = `${sale.fecha} - ${sale.hora} · ${sale.formaPago === "tarjeta" ? "💳 Tarjeta" : "💵 Efectivo"}`;
+    row.querySelector("p").textContent = `${sale.fecha} - ${sale.hora} · ${{ tarjeta: "💳 Tarjeta", glovo: "🛵 Glovo" }[sale.formaPago] || "💵 Efectivo"}`;
     row.querySelector("strong").textContent = centsToMoney(sale.totalCentavos);
     const list = row.querySelector("ul");
     for (const detail of sale.detalles) {

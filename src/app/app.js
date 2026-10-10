@@ -81,7 +81,7 @@ let cartTotalCentavosActual = 0;
 let currentView = "caja";
 let saleInProgress = false;
 let cartMode = "normal";
-let formaPagoActual = "efectivo"; // "efectivo" | "tarjeta" — se pide al cobrar, se resetea a efectivo (la mas comun) despues de cada venta.
+let formaPagoActual = "efectivo"; // "efectivo" | "tarjeta" | "glovo" — se pide al cobrar, se resetea a efectivo (la mas comun) despues de cada venta.
 let productionInProgress = false;
 let productionCommentInProgress = false;
 let stockAdjustInProgress = false;
@@ -376,6 +376,7 @@ const dom = {
   cartModeTogooToggle: document.querySelector("#cart-mode-togoo"),
   pagoFormaEfectivo: document.querySelector("#pago-forma-efectivo"),
   pagoFormaTarjeta: document.querySelector("#pago-forma-tarjeta"),
+  pagoFormaGlovo: document.querySelector("#pago-forma-glovo"),
   cartVuelto: document.querySelector("#cart-vuelto"),
   productionDateText: document.querySelector("#production-date-text"),
   productionCommentText: document.querySelector("#production-comment-text"),
@@ -1305,8 +1306,11 @@ function setFormaPago(forma) {
   dom.pagoFormaEfectivo.setAttribute("aria-pressed", String(forma === "efectivo"));
   dom.pagoFormaTarjeta.classList.toggle("active", forma === "tarjeta");
   dom.pagoFormaTarjeta.setAttribute("aria-pressed", String(forma === "tarjeta"));
-  dom.cartVuelto.hidden = forma === "tarjeta";
-  if (forma === "tarjeta") resetVuelto();
+  dom.pagoFormaGlovo.classList.toggle("active", forma === "glovo");
+  dom.pagoFormaGlovo.setAttribute("aria-pressed", String(forma === "glovo"));
+  // Ni tarjeta ni Glovo tocan el cajon: no hay vuelto que calcular.
+  dom.cartVuelto.hidden = forma !== "efectivo";
+  if (forma !== "efectivo") resetVuelto();
 }
 
 function setCartMode(mode) {
@@ -3395,6 +3399,7 @@ function bindEvents() {
   });
   dom.pagoFormaEfectivo.addEventListener("click", () => setFormaPago("efectivo"));
   dom.pagoFormaTarjeta.addEventListener("click", () => setFormaPago("tarjeta"));
+  dom.pagoFormaGlovo.addEventListener("click", () => setFormaPago("glovo"));
   dom.closeLeche.addEventListener("click", closeLecheSheet);
   dom.lecheBackdrop.addEventListener("click", closeLecheSheet);
   dom.lecheOpciones.addEventListener("click", (event) => {
