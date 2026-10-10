@@ -333,6 +333,10 @@ export function historicoDesdeMovimientosRemotos(catalogo, movimientosDesde, fec
 export function mapVentaRemota(row) {
   return {
     id: row.id,
+    // El uuid es la identidad de una venta entre dispositivos: es lo que permite
+    // saber si la que llega de la nube ya esta en la base local (y no mostrarla
+    // dos veces).
+    uuid: row.uuid,
     fecha: row.fecha,
     hora: row.hora,
     totalCentavos: row.total_centavos,

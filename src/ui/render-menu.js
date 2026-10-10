@@ -1,3 +1,5 @@
+import { minimoSugerido, UNIDADES_ANTES_DE_REPONER } from "../modules/catalogo-armar.js";
+
 function fmtEur(centavos) {
   return (centavos / 100).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 }
@@ -140,26 +142,14 @@ function lineaVarianteCantidades(linea, grupos, insumos, index) {
 
 // Lo que falta cuando se crea un insumo desde aca.
 //
-// El dueño creo "lengua carne" para un sandwich nuevo y el insumo quedo a
-// medias: sin minimo (los campos estaban vacios -> 0) y sin proveedor, porque
-// habia que ir a OTRA pantalla a asignarselo. Sus palabras: "podria haberme
-// ofrecido antes que le asigne proveedor". Tenia razon: el dato se pide donde
-// se crea la cosa, no en otro lado y mas tarde.
+// El dueño creo "lengua carne" para un sandwich nuevo y el insumo quedo a medias:
+// sin minimo (los campos estaban vacios -> 0) y sin proveedor, porque habia que
+// ir a OTRA pantalla a asignarselo. Sus palabras: "podria haberme ofrecido antes
+// que le asigne proveedor". Tenia razon: el dato se pide donde se crea la cosa.
 //
-// El minimo se PROPONE calculado, no se pide en frio: nadie sabe de memoria
-// cuantos gramos de lengua quiere tener siempre, pero todos saben que hacen
-// mas o menos 50 sandwiches de ese tipo antes de reponer. cantidad x 50, y el
-// critico a la mitad. Se muestran en el campo para que se vean y se puedan
-// cambiar — no es un default escondido.
-const SANDWICHES_ANTES_DE_REPONER = 50;
-function minimoSugerido(cantidad) {
-  const n = parseFloat(String(cantidad ?? "").replace(",", "."));
-  if (!Number.isFinite(n) || n <= 0) return null;
-  const crudo = n * SANDWICHES_ANTES_DE_REPONER;
-  // Redondeo a algo que se lea bien: 1500, no 1487,5.
-  const paso = crudo >= 1000 ? 100 : crudo >= 100 ? 10 : 1;
-  return Math.max(paso, Math.round(crudo / paso) * paso);
-}
+// El minimo se PROPONE calculado (minimoSugerido, en catalogo-armar.js) en vez
+// de pedirse en frio. Se muestra en el campo para que se vea y se pueda cambiar:
+// no es un default escondido.
 
 function bloqueProveedorNuevo(linea, index, proveedores) {
   const elegido = linea.nuevoProveedorId || "";
@@ -213,7 +203,7 @@ export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], pr
             <input class="menu-receta-nuevo-critico" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Crítico${sugerido ? `: ${Math.round(sugerido / 2)}` : ""}" value="${linea.nuevoStockCritico ?? (sugerido ? Math.round(sugerido / 2) : "")}">
           </div>
           <p class="menu-receta-nuevo-ayuda cal-muted">${sugerido
-            ? `Calculado para ${SANDWICHES_ANTES_DE_REPONER} unidades antes de reponer. Cambialo si querés.`
+            ? `Calculado para ${UNIDADES_ANTES_DE_REPONER} unidades antes de reponer. Cambialo si querés.`
             : "Poné primero la cantidad y te propongo un mínimo."}</p>
           ${bloqueProveedorNuevo(linea, index, proveedores)}` : ""}
         ${lineaVarianteCantidades(linea, grupos, insumos, index)}

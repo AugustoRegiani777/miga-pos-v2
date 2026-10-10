@@ -5,6 +5,7 @@ import {
   pushInsumosSnapshot,
   pushRecetasSnapshot,
   deleteProductoRemoto,
+  deleteRecetaRemota,
   pushProveedoresSnapshot,
   pushProveedorInsumosSnapshot,
   pushMovimientosInsumos,
@@ -246,6 +247,13 @@ async function executeOp(op) {
     // contiene ese producto y lo volveria a insertar.
     case "producto_eliminado":
       return deleteProductoRemoto(op.payload.id);
+    // Una linea de receta que se saco de un producto. Los snapshots de recetas
+    // son upserts: no borran nada, asi que sin esto el ingrediente sacado
+    // seguia vivo en la nube y volvia con el proximo "Actualizar catalogo".
+    // Como todo lo demas, va por la cola: sin internet se guarda y sale despues,
+    // y si la nube no lo deja borrar queda visible como trabado, no se descarta.
+    case "receta_eliminada":
+      return deleteRecetaRemota(op.payload.id);
     case "movimientos_insumos":
       return pushMovimientosInsumos(op.payload);
     // Nada nuevo encola estos dos tipos (ver migraciones 004 y 010: tanto
@@ -402,6 +410,12 @@ export function trySyncRecetasSnapshot(recetas) {
 // comentario del case en executeOp).
 export function trySyncProductoEliminado(productoId) {
   return tryNow({ type: "producto_eliminado", payload: { id: productoId } });
+}
+
+// Va DESPUES del snapshot de recetas (nivel mas alto en TIER): un snapshot
+// pendiente de antes todavia podria traer la linea y volver a insertarla.
+export function trySyncRecetaEliminada(recetaId) {
+  return tryNow({ type: "receta_eliminada", payload: { id: recetaId } });
 }
 
 export function trySyncProveedoresSnapshot(proveedores) {

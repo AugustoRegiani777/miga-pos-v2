@@ -1,5 +1,5 @@
 import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/idb.js";
-import { todayISO, slugify } from "../utils/format.js";
+import { todayISO } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, getPendingSyncCount } from "./sync.js";
 import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
@@ -7,90 +7,26 @@ import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
 import { getGruposVariantes, saveGrupoVariante } from "./variantes.js";
+import { construirInsumoNuevo } from "./catalogo-armar.js";
+import { guardarCatalogo } from "./catalogo-guardar.js";
 import { sugerirCompra, clasificarUrgencia, variabilidadDiaria, tasaBaseDiaria,
          perfilSemanalDelLocal, perfilSemanalMezclado, alphaDiariaDesde } from "./compras-calculos.js";
 import { serieDeConsumo } from "./estado-stock.js";
 
 
-// Punto unico para "armar un insumo nuevo" — antes esta misma logica estaba
-// copiada en menu.js, proveedores.js y facturas.js, cada una con su propia
-// resolucion de id. idsUsados se pasa por referencia y esta funcion lo va
-// completando: si se crean varios insumos nuevos en el mismo lote (ej. dos
-// lineas de receta nuevas en un mismo producto), el segundo no puede
-// colisionar con el id que acaba de resolver el primero.
-export function construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, factorConversion, stockMinimo, stockCritico } = {}) {
-  const nombreLimpio = String(nombre || "").trim();
-  if (!nombreLimpio) throw new Error("El nombre del insumo nuevo es obligatorio.");
-
-  let id = slugify(nombreLimpio);
-  let sufijo = 2;
-  while (idsUsados.has(id)) {
-    id = `${slugify(nombreLimpio)}-${sufijo}`;
-    sufijo += 1;
-  }
-  idsUsados.add(id);
-
-  const now = new Date().toISOString();
-  const unidadFinal = String(unidad || "").trim() || "unidad";
-
-  // El envase: con que nombre lo contas y cuanto trae cada uno. Sin envase
-  // propio, el insumo se cuenta en su unidad base (factor 1) — es lo que
-  // pasaba siempre antes, y dejaba insumos como "crema: g, de a g", que en la
-  // vista se leian dos veces lo mismo. Un envase que traiga 1 o menos no es un
-  // envase, asi que tampoco cuenta.
-  const envaseNombre = String(unidadCompra || "").trim();
-  const envaseTrae = parseFloat(String(factorConversion ?? "").replace(",", "."));
-  const tieneEnvase = Boolean(envaseNombre) && Number.isFinite(envaseTrae) && envaseTrae > 1;
-
-  // Un minimo en 0 NO es un minimo: es un insumo que nunca va a pedir
-  // reposicion y que ademas se muestra en rojo "critico" para siempre, porque
-  // cualquier stock es <= 0. Le paso al salami, y le volvio a pasar a la
-  // "lengua carne" que el dueño cargo probando: dejo los campos vacios y el
-  // `|| 0` de aca abajo los convirtio en cero sin decir nada.
-  //
-  // Cuando no viene un numero se pone un piso razonable segun la unidad —un
-  // kilo, un litro, una docena— que es un mal dato pero visible y corregible,
-  // a diferencia del cero, que es un mal dato invisible. La pantalla que crea
-  // el insumo ademas lo propone calculado desde la receta (ver render-menu.js),
-  // asi que este piso es la ultima red, no el camino normal.
-  const PISO_MINIMO = { g: 1000, ml: 1000, unidad: 12, rebanada: 24 };
-  const pedido = (v) => { const n = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
-  const minimoFinal = pedido(stockMinimo) ?? PISO_MINIMO[unidadFinal] ?? 1;
-  const criticoFinal = pedido(stockCritico) ?? Math.round((minimoFinal / 2) * 100) / 100;
-
-  return {
-    id,
-    nombre: nombreLimpio,
-    unidad: unidadFinal,
-    unidadCompra: tieneEnvase ? envaseNombre : unidadFinal,
-    factorConversion: tieneEnvase ? envaseTrae : 1,
-    stockActual: 0,
-    stockMinimo: minimoFinal,
-    stockCritico: criticoFinal,
-    activo: true,
-    creadoEn: now,
-    actualizadoEn: now
-  };
-}
+// El constructor de insumos vive en catalogo-armar.js (puro, probado sin
+// navegador). Se re-exporta desde aca para no romper a quien ya lo importaba.
+export { construirInsumoNuevo };
 
 // Crear un insumo suelto, sin producto ni proveedor asociado (boton
-// "+ Crear insumo" en Gestion > Insumos). Los otros tres lugares que crean
-// insumos (Menu, Proveedores, Cargar por factura) usan construirInsumoNuevo
-// directo porque necesitan escribirlo en la MISMA transaccion que su
-// producto/receta/proveedor_insumo — esta funcion es para cuando no hay
-// nada mas que crear junto con el.
+// "+ Crear insumo" en Gestion > Insumos): la puerta oficial. Las otras puertas
+// (Cargar factura, Proveedores, Menu, Variantes) arman y guardan con las mismas
+// piezas — catalogo-armar.js y catalogo-guardar.js.
 export async function createInsumo({ nombre, unidad, unidadCompra, factorConversion, stockMinimo, stockCritico }) {
   const insumosActuales = await getAll("insumos");
   const idsUsados = new Set(insumosActuales.map((i) => i.id));
   const insumo = construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, factorConversion, stockMinimo, stockCritico });
-
-  await withStores(["insumos"], "readwrite", (stores) => {
-    stores.insumos.put(insumo);
-  });
-
-  const insumosFinal = await getAll("insumos");
-  trySyncInsumosSnapshot(insumosFinal).catch(() => {});
-
+  await guardarCatalogo({ insumos: [insumo] });
   return insumo;
 }
 
@@ -1420,6 +1356,27 @@ export async function borrarEspejosSinHistorial() {
   });
   for (const id of aBorrar) await deleteInsumoRemoto(id).catch(() => {});
   return { cambios: aBorrar.length, insumos: aBorrar };
+}
+
+// Nombres de productos de prueba que quedaron en minuscula. En la caja el nombre
+// se lee tal cual, al lado de "Jamon y queso". Solo en la base de prueba: un
+// cambio en la nube no alcanza (cada dispositivo vuelve a subir su catalogo
+// local al arrancar), tiene que correr en el dispositivo.
+const NOMBRES_PRODUCTO_V5 = { "vittel-tone": "Vittel Tone" };
+export async function renombrarProductosDePrueba() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+  const KEY = "nombres_producto_v5";
+  const [productos, config] = await Promise.all([getAll("productos"), getAll("configuracion")]);
+  if (config.find((c) => c.id === KEY)?.valor) return { cambios: 0 };
+  const now = new Date().toISOString();
+  const aCambiar = productos
+    .filter((p) => NOMBRES_PRODUCTO_V5[p.id] && p.nombre !== NOMBRES_PRODUCTO_V5[p.id])
+    .map((p) => ({ ...p, nombre: NOMBRES_PRODUCTO_V5[p.id], actualizadoEn: now }));
+  await guardarCatalogo({ productos: aCambiar });
+  await withStores(["configuracion"], "readwrite", (stores) => {
+    stores.configuracion.put({ id: KEY, valor: true, actualizadoEn: now });
+  });
+  return { cambios: aCambiar.length };
 }
 
 export async function sacarReventaDeProduccion() {

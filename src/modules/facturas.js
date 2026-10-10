@@ -1,7 +1,7 @@
-import { getAll, withStores } from "../db/idb.js";
+import { getAll } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
-import { trySyncInsumosSnapshot, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncProveedoresSnapshot } from "./sync.js";
-import { construirInsumoNuevo } from "./aprovisionamiento.js";
+import { construirInsumoNuevo, construirLineaProveedor } from "./catalogo-armar.js";
+import { guardarCatalogo } from "./catalogo-guardar.js";
 
 // Convierte un archivo (foto o adjunto) a data URL base64, formato que
 // espera la funcion serverless.
@@ -65,80 +65,68 @@ export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = nul
     return { linea, cantidad, insumo: insumosById.get(linea.insumoId) };
   }).filter((op) => op.insumo);
 
-  const movimientosCreados = [];
-  const proveedorInsumosCreados = [];
+  // Una factura puede traer el MISMO insumo en dos lineas. Cada linea suma sobre
+  // el stock que dejo la anterior (y no sobre el que tenia al abrir la factura:
+  // la segunda pisaba a la primera y se perdia una compra).
+  const actuales = new Map();
+  const movimientos = [];
+  const lineasProveedor = [];
 
-  await withStores(["proveedores", "insumos", "movimientos_insumos", "proveedor_insumos"], "readwrite", (stores) => {
-    if (nuevoProveedor) {
-      stores.proveedores.put({
-        id: nuevoProveedor.id,
-        nombre: nuevoProveedor.nombre,
-        tel: nuevoProveedor.tel || "",
-        email: nuevoProveedor.email || "",
-        notas: "",
-        diasCiclo: Number(nuevoProveedor.diasCiclo) || 7,
-        activo: true
-      });
-    }
-    for (const op of operaciones) {
-      // cantidadPorUnidad viene de la IA (o de una factura anterior de este
-      // mismo proveedor, ver procesar-factura.js) y ya representa cuanto
-      // insumo hay, en su unidad base, en UNA de las unidades contadas en
-      // "cantidad" — tiene en cuenta el contenido real del paquete (ej. una
-      // caja de 6 botellas de 1.5L = 9000ml), a diferencia del factorConversion
-      // generico del insumo que asume un tamano de paquete estandar.
-      const cantidadPorUnidadLinea = Number(op.linea.cantidadPorUnidad);
-      const factor = cantidadPorUnidadLinea > 0 ? cantidadPorUnidadLinea : (op.insumo.factorConversion || 1);
-      const delta = op.cantidad * factor;
-      const stockAnterior = Number(op.insumo.stockActual) || 0;
-      const stockNuevo = stockAnterior + delta;
+  for (const op of operaciones) {
+    // cantidadPorUnidad viene de la IA (o de una factura anterior de este mismo
+    // proveedor, ver procesar-factura.js) y ya representa cuanto insumo hay, en
+    // su unidad base, en UNA de las unidades contadas en "cantidad" — tiene en
+    // cuenta el contenido real del paquete (ej. una caja de 6 botellas de 1.5L =
+    // 9000ml), a diferencia del factorConversion generico del insumo.
+    const cantidadPorUnidadLinea = Number(op.linea.cantidadPorUnidad);
+    const factor = cantidadPorUnidadLinea > 0 ? cantidadPorUnidadLinea : (op.insumo.factorConversion || 1);
+    const delta = op.cantidad * factor;
 
-      stores.insumos.put({ ...op.insumo, stockActual: stockNuevo, actualizadoEn: now });
+    const base = actuales.get(op.insumo.id) || op.insumo;
+    const stockAnterior = Number(base.stockActual) || 0;
+    const stockNuevo = stockAnterior + delta;
+    actuales.set(op.insumo.id, { ...base, stockActual: stockNuevo, actualizadoEn: now });
 
-      const movimiento = {
-        uuid: crypto.randomUUID(),
-        insumoId: op.insumo.id,
-        tipo: "compra",
-        cantidad: delta,
-        stockAnterior,
-        stockNuevo,
-        fecha,
-        creadoEn: now
-      };
-      stores.movimientos_insumos.add(movimiento);
-      movimientosCreados.push(movimiento);
+    movimientos.push({
+      uuid: crypto.randomUUID(),
+      insumoId: op.insumo.id,
+      tipo: "compra",
+      cantidad: delta,
+      stockAnterior,
+      stockNuevo,
+      fecha,
+      creadoEn: now
+    });
 
-      const precioUnitarioCentavos = op.cantidad > 0
+    lineasProveedor.push(construirLineaProveedor({
+      proveedorId,
+      insumoId: op.insumo.id,
+      nombreProducto: op.linea.nombreDetectado,
+      unidadCompra: op.linea.unidad || op.insumo.unidadCompra,
+      cantidadPorUnidad: factor,
+      precioUnitarioCentavos: op.cantidad > 0
         ? Math.round(((Number(op.linea.precio) || 0) / op.cantidad) * 100)
-        : 0;
-      const proveedorInsumo = {
-        id: `${proveedorId}:${op.insumo.id}`,
-        proveedorId,
-        insumoId: op.insumo.id,
-        nombreProducto: op.linea.nombreDetectado,
-        unidadCompra: op.linea.unidad || op.insumo.unidadCompra,
-        cantidadPorUnidad: factor,
-        precioUnitarioCentavos,
-        activo: true
-      };
-      stores.proveedor_insumos.put(proveedorInsumo);
-      proveedorInsumosCreados.push(proveedorInsumo);
-    }
-  });
-
-  const [insumosFinal, proveedorInsumosFinal] = await Promise.all([getAll("insumos"), getAll("proveedor_insumos")]);
-  // Primero lo que otros datos REFERENCIAN, y esperando: el proveedor y el
-  // insumo antes que la linea que los une (proveedor_insumos tiene clave foranea
-  // a los dos). La cola ordena por nivel, pero solo entre lo que ya esta en ella
-  // cuando arranca el envio: antes el proveedor nuevo se encolaba ULTIMO, la
-  // linea salia primero y Supabase la rechazaba con un 409 — se auto-corregia al
-  // reintentar, pero dejaba el badge de la topbar en rojo en una factura normal.
-  if (nuevoProveedor) {
-    await trySyncProveedoresSnapshot(await getAll("proveedores")).catch(() => {});
+        : 0
+    }, now));
   }
-  await trySyncInsumosSnapshot(insumosFinal).catch(() => {});
-  trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
-  if (movimientosCreados.length > 0) trySyncMovimientosInsumos(movimientosCreados).catch(() => {});
+
+  // Proveedor nuevo, insumos, lineas y compras: UN paquete. El orden de envio lo
+  // resuelve catalogo-guardar.js (antes, aca, la linea llegaba antes que su
+  // proveedor y Supabase la rechazaba con un 409).
+  await guardarCatalogo({
+    proveedores: nuevoProveedor ? [{
+      id: nuevoProveedor.id,
+      nombre: nuevoProveedor.nombre,
+      tel: nuevoProveedor.tel || "",
+      email: nuevoProveedor.email || "",
+      notas: "",
+      diasCiclo: Number(nuevoProveedor.diasCiclo) || 7,
+      activo: true
+    }] : [],
+    insumos: [...actuales.values()],
+    lineasProveedor,
+    movimientosInsumos: movimientos
+  });
 
   return { insumosActualizados: operaciones.length };
 }

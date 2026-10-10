@@ -7,7 +7,7 @@ import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/re
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -174,6 +174,7 @@ async function pullCatalogoCompleto() {
   await pasarProductosAEnPrueba().catch(() => ({ cambios: 0 }));
   await sacarReventaDeProduccion().catch(() => ({ cambios: 0 }));
   await borrarEspejosSinHistorial().catch(() => ({ cambios: 0 }));
+  await renombrarProductosDePrueba().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };
@@ -1667,39 +1668,34 @@ function nudgeStockAdjust(delta) {
   dom.stockAdjustQuantity.value = String(nextValue);
 }
 
+// "De ayer · Producidos hoy · Ajustes · Vendidos · Quedan": igual para el
+// dispositivo que opera y para el de consulta, asi que se arma en un solo lugar.
+function textoProduccionDelDia(snapshot, historico, sales) {
+  const sandwichIds = new Set(snapshot.sandwiches.map((p) => p.id));
+  const sumar = (lista, f) => lista.reduce((total, x) => total + f(x), 0);
+  const producidos = sumar(snapshot.sandwiches, (p) => Number(p.cantidadProducida) || 0);
+  const vendidos = sumar(sales, (sale) => sumar(sale.detalles, (d) => (sandwichIds.has(d.productoId) ? Number(d.cantidad) || 0 : 0)));
+  const quedan = sumar(snapshot.sandwiches, (p) => historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0));
+  const deAyer = sumar(snapshot.sandwiches, (p) => historico.get(p.id)?.stockAlInicio ?? 0);
+  const ajustes = sumar(snapshot.sandwiches, (p) => historico.get(p.id)?.ajuste ?? 0);
+  return `De ayer: ${deAyer} \u00b7 Producidos hoy: ${producidos} \u00b7 Ajustes: ${formatearAjuste(ajustes)} \u00b7 Vendidos: ${vendidos} \u00b7 Quedan: ${quedan}`;
+}
+
+// Para descartar una respuesta de la nube que llega tarde, cuando ya se cambio de
+// fecha o de pantalla.
+let historialVersion = 0;
+
 async function renderHistoryView() {
   const fecha = dom.historyDate.value || todayISO();
   dom.historyDate.value = fecha;
+  const version = ++historialVersion;
 
   if (isModoConsulta()) {
     showConsultaPlaceholder(dom.historyList, "Cargando...");
     try {
       const { sales, snapshot, historico } = await datosRemotosDelDia(fecha);
-      const totalSandwichesProduced = snapshot.sandwiches.reduce(
-        (total, p) => total + (Number(p.cantidadProducida) || 0), 0
-      );
-      const sandwichIds = new Set(snapshot.sandwiches.map((p) => p.id));
-      const totalSandwichesSold = sales.reduce(
-        (total, sale) => total + sale.detalles.reduce(
-          (saleTotal, detail) => saleTotal + (sandwichIds.has(detail.productoId) ? Number(detail.cantidad) || 0 : 0),
-          0
-        ),
-        0
-      );
-      const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
-        (total, p) => total + (historico.get(p.id)?.stockAlFinal ?? (Number(p.stockActual) || 0)), 0
-      );
-      const totalStockAyer = snapshot.sandwiches.reduce(
-        (total, p) => total + (historico.get(p.id)?.stockAlInicio ?? 0), 0
-      );
-      const totalAjustes = snapshot.sandwiches.reduce(
-        (total, p) => total + (historico.get(p.id)?.ajuste ?? 0), 0
-      );
-      dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
-      renderHistory(dom.historyList, sales, {
-        onShareSale: handleShareSale,
-        onPrintSale: handlePrintSale
-      });
+      dom.historyProductionText.textContent = textoProduccionDelDia(snapshot, historico, sales);
+      renderHistory(dom.historyList, sales, { onShareSale: handleShareSale, onPrintSale: handlePrintSale });
       markConsultaLoaded(dom.historyList);
     } catch (error) {
       dom.historyList.textContent = `No se pudo traer el historial: ${error.message || error}`;
@@ -1707,40 +1703,43 @@ async function renderHistoryView() {
     return;
   }
 
-  const snapshot = await productionSnapshot(fecha);
-  const sales = await salesForDay(fecha);
-  const totalSandwichesProduced = snapshot.sandwiches.reduce(
-    (total, product) => total + (Number(product.cantidadProducida) || 0),
-    0
-  );
-  const sandwichIds = new Set(snapshot.sandwiches.map((product) => product.id));
-  const totalSandwichesSold = sales.reduce(
-    (total, sale) => total + sale.detalles.reduce(
-      (saleTotal, detail) => saleTotal + (sandwichIds.has(detail.productoId) ? Number(detail.cantidad) || 0 : 0),
-      0
-    ),
-    0
-  );
-  const historico = await stockHistoricoPorFecha(fecha);
-  const totalSandwichesDisponibles = snapshot.sandwiches.reduce(
-    (total, product) => total + (historico.get(product.id)?.stockAlFinal ?? (Number(product.stockActual) || 0)),
-    0
-  );
-  const totalStockAyer = snapshot.sandwiches.reduce(
-    (total, product) => total + (historico.get(product.id)?.stockAlInicio ?? 0),
-    0
-  );
-  const totalAjustes = snapshot.sandwiches.reduce(
-    (total, product) => total + (historico.get(product.id)?.ajuste ?? 0),
-    0
-  );
-  dom.historyProductionText.textContent = `De ayer: ${totalStockAyer} · Producidos hoy: ${totalSandwichesProduced} · Ajustes: ${formatearAjuste(totalAjustes)} · Vendidos: ${totalSandwichesSold} · Quedan: ${totalSandwichesDisponibles}`;
-  renderHistory(dom.historyList, sales, {
-    onUndoSale: handleUndoSale,
-    onShareSale: handleShareSale,
-    onPrintSale: handlePrintSale,
-    pendingUuids: getPendingVentaUuids()
-  });
+  // Dispositivo que opera. Dos tiempos, a proposito:
+  //
+  // 1) Lo LOCAL, al instante. Es lo que hace que el Historial ande sin internet
+  //    y que una venta recien cobrada se vea al toque (con su "sin sincronizar").
+  // 2) Lo de la NUBE, cuando llega, completando lo que hicieron los otros
+  //    dispositivos.
+  //
+  // Antes el Historial leia SOLO la base local: un dispositivo nuevo, o uno al que
+  // se le borraron los datos del sitio, mostraba "No hay ventas registradas" con
+  // 431 ventas en la nube. El Cierre y el Panel ya leian de la nube; el Historial
+  // era el unico que no. Y la regla del negocio es que las acciones de cada
+  // dispositivo se vean reflejadas en los demas.
+  const pintar = (sales, snapshot, historico) => {
+    dom.historyProductionText.textContent = textoProduccionDelDia(snapshot, historico, sales);
+    renderHistory(dom.historyList, sales, {
+      onUndoSale: handleUndoSale,
+      onShareSale: handleShareSale,
+      onPrintSale: handlePrintSale,
+      pendingUuids: getPendingVentaUuids()
+    });
+  };
+  const [snapshotLocal, local, historicoLocal] = await Promise.all([
+    productionSnapshot(fecha), salesForDay(fecha), stockHistoricoPorFecha(fecha)
+  ]);
+  pintar(local, snapshotLocal, historicoLocal);
+
+  datosRemotosDelDia(fecha).then((remoto) => {
+    if (version !== historialVersion || currentView !== "historial") return;
+    // Una venta se identifica por su uuid. Si ya esta en la base local se queda la
+    // LOCAL (tiene su id local: es la unica que se puede deshacer); de la nube
+    // entran solo las que no estan aca.
+    const clave = (v) => v.uuid || `${v.hora}|${v.totalCentavos}`;
+    const locales = new Set(local.map(clave));
+    const soloNube = remoto.sales.filter((v) => !locales.has(clave(v))).map((v) => ({ ...v, soloNube: true }));
+    const sales = [...local, ...soloNube].sort((a, b) => String(b.hora).localeCompare(String(a.hora)));
+    pintar(sales, remoto.snapshot, remoto.historico);
+  }).catch(() => { /* sin internet o la nube no responde: queda lo local, que ya esta pintado */ });
 }
 
 async function handleShareSale(sale) {

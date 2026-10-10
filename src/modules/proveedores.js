@@ -2,8 +2,9 @@ import { getAll, getOne, putOne, withStores } from "../db/idb.js";
 import { PROVEEDORES_SEED_VERSION, initialProveedores, initialProveedorInsumos } from "./seed.js";
 import { fetchProveedoresCatalogo, fetchProveedorInsumosCatalogo } from "../db/supabase.js";
 import { slugify } from "../utils/format.js";
-import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot, trySyncInsumosSnapshot, trySyncRecetasSnapshot } from "./sync.js";
-import { construirInsumoNuevo } from "./aprovisionamiento.js";
+import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot } from "./sync.js";
+import { construirInsumoNuevo } from "./catalogo-armar.js";
+import { guardarCatalogo } from "./catalogo-guardar.js";
 
 // `leadTimeDias` y `diasEntrega` son opcionales: hasta que la pantalla de
 // proveedores tenga donde cargarlos, un proveedor nuevo arranca en "lo tengo
@@ -190,31 +191,13 @@ export async function saveProveedorInsumo(data) {
         }))
     : [];
 
-  const storeNames = ["proveedor_insumos"];
-  if (insumoNuevoCreado) storeNames.push("insumos");
-  if (recetasCreadas.length > 0) storeNames.push("recetas");
-
-  await withStores(storeNames, "readwrite", (stores) => {
-    if (insumoNuevoCreado) stores.insumos.put(insumoNuevoCreado);
-    stores.proveedor_insumos.put(proveedorInsumo);
-    for (const receta of recetasCreadas) stores.recetas.put(receta);
+  // Insumo nuevo, linea de proveedor y recetas vinculadas: UN paquete, guardado y
+  // enviado en el orden en que se referencian (ver catalogo-guardar.js).
+  await guardarCatalogo({
+    insumos: insumoNuevoCreado ? [insumoNuevoCreado] : [],
+    lineasProveedor: [proveedorInsumo],
+    recetas: recetasCreadas
   });
-
-  // El ORDEN importa: proveedor_insumos y recetas referencian al insumo por
-  // FK. Encolados al reves, el primer intento del snapshot de proveedor
-  // referencia un insumo que la nube todavia no tiene, Postgres lo rechaza, y
-  // aunque la cola despues lo reordena por tiers y entra bien, el usuario ve
-  // el badge de sync en rojo por un error que no existe.
-  if (insumoNuevoCreado) {
-    const insumosFinal = await getAll("insumos");
-    trySyncInsumosSnapshot(insumosFinal).catch(() => {});
-  }
-  const proveedorInsumosFinal = await getAll("proveedor_insumos");
-  trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
-  if (recetasCreadas.length > 0) {
-    const recetasFinal = await getAll("recetas");
-    trySyncRecetasSnapshot(recetasFinal).catch(() => {});
-  }
 
   return proveedorInsumo;
 }

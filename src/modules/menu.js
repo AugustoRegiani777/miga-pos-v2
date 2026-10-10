@@ -1,8 +1,9 @@
 import { getAll, getOne, putOne, withStores, requestToPromise } from "../db/idb.js";
 import { slugify } from "../utils/format.js";
-import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot, trySyncProveedorInsumosSnapshot, trySyncProductoEliminado, hayPendientesDeTipo } from "./sync.js";
+import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncProductoEliminado, hayPendientesDeTipo } from "./sync.js";
 import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo, contarReferenciasProducto, deleteProductoRemoto } from "../db/supabase.js";
-import { construirInsumoNuevo } from "./aprovisionamiento.js";
+import { construirInsumoNuevo, construirLineaProveedor, lineaProveedorCompleta, construirEspejoReventa } from "./catalogo-armar.js";
+import { guardarCatalogo } from "./catalogo-guardar.js";
 import { getInsumoAGrupoVariante, setProductoGrupoVariante } from "./variantes.js";
 import { clasificarBloqueosEliminacion, mensajeBloqueoEliminacion } from "./menu-calculos.js";
 
@@ -57,50 +58,10 @@ function proximoOrden(productos, categoriaId) {
   return ordenes.length ? Math.max(...ordenes) + 1 : 1;
 }
 
-// Guarda un producto (alta o edicion) junto con su receta completa. Las
-// lineas de receta que apunten a un insumo inexistente lo crean ahi mismo —
-// mismo mecanismo de slugify + resolucion de colision que ya usa
-// confirmarFactura() en facturas.js.
-// Un producto que se compra hecho y se vende tal cual (la Coca-Cola, la
-// medialuna que trae Messialuncitas) es, a la vez, su propio insumo: hay UN
-// insumo con el mismo id que el producto, y una receta de una unidad. No es un
-// camino nuevo — es la misma maquinaria de siempre (receta -> insumo ->
-// proveedor), y es lo que lo hace entrar en la lista de compras con su
-// proveedor y su precio.
-//
-// El insumo se cuenta en unidades sueltas; cuantas trae una caja lo dice la
-// linea de proveedor, no el insumo (CLAUDE.md 7: el envase del insumo y como lo
-// vende el proveedor son dos cosas distintas y no se mezclan).
-//
-// Si el insumo ya existe (un producto que se dejo "en prueba" despues de haber
-// sido de reventa, o viceversa) se REACTIVA en vez de crear otro: su historial
-// de stock vive en el ledger y tiene que seguir siendo el mismo.
-export function construirEspejoReventa({ producto, datos, insumoExistente, now }) {
-  const insumo = insumoExistente
-    ? { ...insumoExistente, activo: true, actualizadoEn: now }
-    : { ...construirInsumoNuevo(producto.nombre, new Set(), { unidad: "unidad" }), id: producto.id };
-  const receta = {
-    id: `${producto.id}:${producto.id}`,
-    productoId: producto.id,
-    insumoId: insumo.id,
-    cantidadPorUnidad: 1,
-    esEstimado: false,
-    creadoEn: now,
-    actualizadoEn: now
-  };
-  const lineaProveedor = construirLineaProveedor({
-    nuevoProveedorId: datos?.proveedorId,
-    nuevoProveedorProducto: datos?.nombreProducto,
-    nuevoProveedorUnidad: datos?.unidadCompra,
-    nuevoProveedorTrae: datos?.cantidadPorUnidad,
-    nuevoProveedorPrecio: datos?.precio
-  }, insumo, now);
-  return { insumo, receta, lineaProveedor };
-}
-
 // Define como "se compra hecho" un producto que todavia no tenia receta. Se usa
 // desde el aviso "En prueba" de Insumos; el alta de producto hace lo mismo
-// dentro de saveProducto.
+// dentro de saveProducto. Las piezas (insumo espejo, receta, linea de proveedor)
+// se arman en catalogo-armar.js y se guardan con el motor de catalogo-guardar.js.
 export async function definirProductoComoReventa({ productoId, datos }) {
   const [producto, insumos, recetas] = await Promise.all([
     getOne("productos", productoId), getAll("insumos"), getAll("recetas")
@@ -113,52 +74,19 @@ export async function definirProductoComoReventa({ productoId, datos }) {
   const { insumo, receta, lineaProveedor } = construirEspejoReventa({
     producto, datos, insumoExistente: insumos.find((i) => i.id === productoId), now
   });
-
-  await withStores(["productos", "insumos", "recetas", "proveedor_insumos"], "readwrite", (stores) => {
+  await guardarCatalogo({
     // Lo que se compra hecho deja de aparecer en Produccion.
-    stores.productos.put({ ...producto, controlaStock: false, actualizadoEn: now });
-    stores.insumos.put(insumo);
-    stores.recetas.put(receta);
-    if (lineaProveedor) stores.proveedor_insumos.put(lineaProveedor);
+    productos: [{ ...producto, controlaStock: false, actualizadoEn: now }],
+    insumos: [insumo],
+    recetas: [receta],
+    lineasProveedor: lineaProveedor ? [lineaProveedor] : []
   });
-
-  // En este orden y esperando: la receta y la linea de proveedor referencian al
-  // insumo por clave foranea, y Supabase rechaza el lote entero con un 409 si
-  // el insumo todavia no llego.
-  trySyncCatalogoSnapshot(await getAll("categorias"), await getAll("productos")).catch(() => {});
-  await trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
-  await trySyncRecetasSnapshot(await getAll("recetas")).catch(() => {});
-  if (lineaProveedor) trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
   return { insumo, lineaProveedor: Boolean(lineaProveedor) };
 }
 
-// La linea de proveedor que sale del alta de un insumo nuevo en Menu. Solo se
-// crea si estan los cuatro datos que la hacen util: sin precio o sin cuanto
-// trae, la lista de compras no puede ni comparar ni calcular, y seria una
-// linea que ensucia sin servir. Si falta algo se ignora en silencio y el
-// insumo queda "sin proveedor", que es lo que el aviso de Insumos ya marca.
-function construirLineaProveedor(linea, insumo, now) {
-  const proveedorId = String(linea.nuevoProveedorId || "").trim();
-  if (!proveedorId) return null;
-  const num = (v) => { const n = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
-  const trae = num(linea.nuevoProveedorTrae);
-  const precio = num(linea.nuevoProveedorPrecio);
-  const unidadCompra = String(linea.nuevoProveedorUnidad || "").trim();
-  if (!trae || !precio || !unidadCompra) return null;
-  return {
-    id: `${proveedorId}:${insumo.id}`,
-    proveedorId,
-    insumoId: insumo.id,
-    nombreProducto: String(linea.nuevoProveedorProducto || "").trim() || insumo.nombre,
-    unidadCompra,
-    cantidadPorUnidad: trae,
-    precioUnitarioCentavos: Math.round(precio * 100),
-    activo: true,
-    creadoEn: now,
-    actualizadoEn: now
-  };
-}
-
+// Guarda un producto (alta o edicion) junto con su receta completa. Las lineas
+// de receta que apunten a un insumo inexistente lo crean ahi mismo, con las
+// mismas piezas que cualquier otra puerta (catalogo-armar.js).
 // `modo` dice como se consigue el producto:
 //   "receta"    (o sin modo) -> lo que venga en lineasReceta, como siempre
 //   "reventa"   -> se compra hecho: crea su insumo espejo con su proveedor
@@ -243,10 +171,18 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
         insumosNuevos.push(insumoNuevo);
         // Si en el mismo formulario se eligio a quien comprarselo, la linea de
         // proveedor se crea aca y no en otra pantalla. Un insumo sin proveedor
-        // no entra nunca en la lista de compras, y hasta ahora habia que
-        // acordarse de ir a cargarlo aparte.
-        const lineaProv = construirLineaProveedor(l, insumoNuevo, now);
-        if (lineaProv) provInsumosNuevos.push(lineaProv);
+        // no entra nunca en la lista de compras. Si el formulario la deja
+        // incompleta se ignora, y el insumo queda "sin proveedor" en Completar.
+        const datosProveedor = {
+          proveedorId: l.nuevoProveedorId,
+          nombreProducto: l.nuevoProveedorProducto || insumoNuevo.nombre,
+          unidadCompra: l.nuevoProveedorUnidad,
+          cantidadPorUnidad: l.nuevoProveedorTrae,
+          precio: l.nuevoProveedorPrecio
+        };
+        if (lineaProveedorCompleta(datosProveedor)) {
+          provInsumosNuevos.push(construirLineaProveedor({ ...datosProveedor, insumoId: insumoNuevo.id }, now));
+        }
         return { insumoId: insumoNuevo.id, cantidadPorUnidad: cantidadDecimal(l), variantesCantidad };
       }
       return { insumoId: l.insumoId, cantidadPorUnidad: cantidadDecimal(l), variantesCantidad };
@@ -256,67 +192,62 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
   const recetaPorId = new Map(recetasDelProducto.map(r => [r.id, r]));
   const idsFinales = new Set(lineasFinales.map(l => `${productoId}:${l.insumoId}`));
 
-  await withStores(["productos", "insumos", "recetas", "proveedor_insumos"], "readwrite", (stores) => {
-    stores.productos.put(producto);
-    for (const insumo of insumosNuevos) stores.insumos.put(insumo);
-    for (const linea of provInsumosNuevos) stores.proveedor_insumos.put(linea);
-    // Solo se borran las lineas que el usuario saco del formulario. Antes se
-    // borraban TODAS y se recreaban de cero, y eso se llevaba puesto los
-    // campos que esta pantalla no maneja — sobre todo recetaFija, la marca
-    // que dice "esta receta es exacta, no la aprendas" (la miga: siempre 0,5
-    // rebanadas, ver CLAUDE.md 9). Resultado: tocar el precio de un sandwich
-    // aca desactivaba en silencio la receta fija de su miga y la metia en el
-    // modelo de calibracion. Ahora cada linea se FUSIONA con la que ya
-    // existia y solo se pisa lo que este formulario realmente edita.
-    for (const receta of recetasDelProducto) {
-      if (!idsFinales.has(receta.id)) stores.recetas.delete(receta.id);
-    }
-    for (const linea of lineasFinales) {
-      const id = `${productoId}:${linea.insumoId}`;
-      const existente = recetaPorId.get(id);
-      const cantidadCambio = !existente || existente.cantidadPorUnidad !== linea.cantidadPorUnidad;
-      stores.recetas.put({
-        ...(existente || {}),
-        id,
-        productoId,
-        insumoId: linea.insumoId,
-        cantidadPorUnidad: linea.cantidadPorUnidad,
-        ...(Object.keys(linea.variantesCantidad || {}).length
-          ? { variantesCantidad: linea.variantesCantidad }
-          : existente ? { variantesCantidad: undefined } : {}),
-        // Una cantidad escrita a mano deja de ser estimacion (mismo criterio
-        // que actualizarReceta en aprovisionamiento.js). Si no se toco, se
-        // respeta lo que ya decia.
-        esEstimado: cantidadCambio ? !existente : existente.esEstimado === true,
-        creadoEn: existente?.creadoEn || now,
-        actualizadoEn: now
-      });
-    }
+  // Solo se borran las lineas que el usuario saco del formulario. Antes se
+  // borraban TODAS y se recreaban de cero, y eso se llevaba puesto los campos que
+  // esta pantalla no maneja — sobre todo recetaFija, la marca que dice "esta
+  // receta es exacta, no la aprendas" (la miga: siempre 0,5 rebanadas, ver
+  // CLAUDE.md 9). Resultado: tocar el precio de un sandwich aca desactivaba en
+  // silencio la receta fija de su miga y la metia en el modelo de calibracion.
+  // Ahora cada linea se FUSIONA con la que ya existia y solo se pisa lo que este
+  // formulario realmente edita.
+  const recetasAEscribir = lineasFinales.map((linea) => {
+    const id = `${productoId}:${linea.insumoId}`;
+    const existente = recetaPorId.get(id);
+    const cantidadCambio = !existente || existente.cantidadPorUnidad !== linea.cantidadPorUnidad;
+    return {
+      ...(existente || {}),
+      id,
+      productoId,
+      insumoId: linea.insumoId,
+      cantidadPorUnidad: linea.cantidadPorUnidad,
+      ...(Object.keys(linea.variantesCantidad || {}).length
+        ? { variantesCantidad: linea.variantesCantidad }
+        : existente ? { variantesCantidad: undefined } : {}),
+      // Una cantidad escrita a mano deja de ser estimacion (mismo criterio que
+      // actualizarReceta en aprovisionamiento.js). Si no se toco, se respeta lo
+      // que ya decia.
+      esEstimado: cantidadCambio ? !existente : existente.esEstimado === true,
+      creadoEn: existente?.creadoEn || now,
+      actualizadoEn: now
+    };
   });
+  // Las que se sacaron se borran tambien de la NUBE (por la cola, asi funciona
+  // sin internet). Antes solo se borraban del dispositivo y los snapshots de
+  // recetas son upserts: el ingrediente sacado seguia vivo en Supabase y volvia
+  // con el proximo "Actualizar catalogo".
+  const recetasABorrar = recetasDelProducto.filter((r) => !idsFinales.has(r.id)).map((r) => r.id);
 
-  const [categorias, productosFinal, recetasFinal, insumosFinal] = await Promise.all([
-    getAll("categorias"),
-    getAll("productos"),
-    getAll("recetas"),
-    getAll("insumos")
-  ]);
-  trySyncCatalogoSnapshot(categorias, productosFinal).catch(() => {});
-  trySyncRecetasSnapshot(recetasFinal).catch(() => {});
-  if (insumosNuevos.length > 0) await trySyncInsumosSnapshot(insumosFinal).catch(() => {});
-  // DESPUES de los insumos, nunca antes: proveedor_insumos los referencia por
-  // clave foranea y Supabase rechaza el lote entero con un 409 si el insumo
-  // todavia no llego (paso con el modulo de proveedores, y el badge de la cola
-  // quedaba en rojo sin que nada en pantalla explicara por que).
-  if (provInsumosNuevos.length > 0) {
-    trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
-  }
-
-  // Se compra hecho: ahora que el producto existe, se arma su insumo espejo.
-  // Va despues y por separado porque la receta referencia al producto por
-  // clave foranea, y el snapshot del catalogo ya quedo en la cola de arriba.
+  const insumosAGuardar = [...insumosNuevos];
+  const lineasProveedor = [...provInsumosNuevos];
+  // Se compra hecho: la receta es la de su insumo espejo.
   if (modoEfectivo === "reventa") {
-    await definirProductoComoReventa({ productoId, datos: reventa || {} });
+    const espejo = construirEspejoReventa({
+      producto, datos: reventa || {}, insumoExistente: insumosActuales.find((i) => i.id === productoId), now
+    });
+    insumosAGuardar.push(espejo.insumo);
+    recetasAEscribir.push(espejo.receta);
+    if (espejo.lineaProveedor) lineasProveedor.push(espejo.lineaProveedor);
   }
+
+  // Producto, insumos nuevos, recetas y lineas de proveedor: UN paquete, en una
+  // sola transaccion, y enviado en el orden en que se referencian.
+  await guardarCatalogo({
+    productos: [producto],
+    insumos: insumosAGuardar,
+    recetas: recetasAEscribir,
+    lineasProveedor,
+    recetasABorrar
+  });
 
   return producto;
 }

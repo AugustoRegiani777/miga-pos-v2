@@ -4041,19 +4041,29 @@ body.arrastrando-fila {
 /* ---- Insumos: boton naranja "Calibrar" en cada fila, y buscador de calibracion ---- */
 .stock-row-actions { display: flex; align-items: center; gap: 10px; }
 .btn-calibrar-insumo {
-  min-height: 44px;
-  min-width: 44px;
+  min-height: 40px;
+  min-width: 40px;
   padding: 0 14px;
-  border: 0;
+  /* Contorno y fondo apenas teñido, no un boton solido: calibrar es una
+     funcion de la fila, no la accion principal de la pantalla. */
+  border: 1px solid rgba(214, 75, 42, 0.55);
   border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
+  background: rgba(214, 75, 42, 0.12);
+  color: #e8836a;
   font: inherit;
-  font-weight: 700;
-  font-size: 0.88rem;
+  font-weight: 600;
+  font-size: 0.86rem;
   cursor: pointer;
 }
-.btn-calibrar-insumo:active { filter: brightness(0.9); }
+.btn-calibrar-insumo:hover { background: rgba(214, 75, 42, 0.2); }
+.btn-calibrar-insumo:active { background: rgba(214, 75, 42, 0.28); }
+/* En la lista de Insumos el boton va AL LADO del estado, no arriba: el grupo de
+   acciones es una columna en el resto de la app (Produccion apila sus botones). */
+#insumos-list .stock-row-actions {
+  flex-direction: row;
+  align-items: center;
+  gap: 22px;
+}
 .calibrar-buscar { display: block; margin: 0.4rem 0 0.8rem; }
 .calibrar-buscar input {
   width: 100%;

@@ -369,7 +369,10 @@ export function renderHistory(container, sales, { onUndoSale, onShareSale, onPri
     }
     row.querySelector(".sale-share").addEventListener("click", () => onShareSale?.(sale));
     row.querySelector(".sale-print").addEventListener("click", () => onPrintSale?.(sale));
-    if (onUndoSale) {
+    // Deshacer una venta repone el stock en la base LOCAL de quien la hizo. Una
+    // venta que solo esta en la nube (la hizo otro dispositivo) no se puede
+    // deshacer desde aca: no hay nada local que revertir.
+    if (onUndoSale && !sale.soloNube) {
       row.querySelector(".sale-undo").addEventListener("click", () => onUndoSale(sale));
     } else {
       row.querySelector(".sale-undo").remove();

@@ -4,9 +4,10 @@
 // aprovisionamiento.js) — ahora es una LISTA de grupos, editable desde
 // Gestion > Variantes, guardada en el store generico "configuracion" bajo
 // una sola fila (no hizo falta agregar un store nuevo ni tocar DB_VERSION).
-import { getOne, putOne, getAll, withStores } from "../db/idb.js";
-import { construirInsumoNuevo } from "./aprovisionamiento.js";
-import { trySyncInsumosSnapshot, trySyncVariantesGrupos } from "./sync.js";
+import { getOne, putOne, getAll } from "../db/idb.js";
+import { construirInsumoNuevo } from "./catalogo-armar.js";
+import { guardarCatalogo } from "./catalogo-guardar.js";
+import { trySyncVariantesGrupos } from "./sync.js";
 import { fetchVariantesGrupos } from "../db/supabase.js";
 import { slugify } from "../utils/format.js";
 
@@ -73,13 +74,10 @@ export async function saveGrupoVariante({ id, nombre, titulo, opciones, producto
       return { nombre: o.nombre.trim(), insumoId: o.insumoId };
     });
 
-  if (insumosNuevos.length > 0) {
-    await withStores(["insumos"], "readwrite", (stores) => {
-      for (const insumo of insumosNuevos) stores.insumos.put(insumo);
-    });
-    const insumosFinal = await getAll("insumos");
-    trySyncInsumosSnapshot(insumosFinal).catch(() => {});
-  }
+  // Las respuestas que traen un insumo nuevo lo crean con el mismo motor que
+  // cualquier otra puerta: nace con minimo, y si le falta el proveedor queda
+  // anotado en Insumos > Completar.
+  await guardarCatalogo({ insumos: insumosNuevos });
 
   let grupoId = id;
   if (!grupoId) {
