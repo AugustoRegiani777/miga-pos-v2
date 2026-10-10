@@ -2971,6 +2971,13 @@ async function renderCierreView() {
   cierreCargando = true;
   try {
     cierreDatos = await cargarCierre(cierreFecha);
+    // La apertura y los pagos/retiros del dia son de ESTE dispositivo (la plata
+    // del cajon no se replica entre dispositivos a proposito): con eso el cierre
+    // se arma solo — ver armarCierreAutomatico.
+    cierreDatos.caja = {
+      apertura: await aperturaDelDia(cierreFecha).catch(() => null),
+      movimientos: await movimientosDelDia(cierreFecha).catch(() => [])
+    };
     await refrescarPasosCaja().catch(() => {});
     if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos);
   } catch (error) {

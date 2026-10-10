@@ -103,5 +103,63 @@ export function desgloseFormaPago(ventas) {
   const suma = (forma) => ventas
     .filter((v) => (v.formaPago || "efectivo") === forma)
     .reduce((total, v) => total + (v.totalCentavos || 0), 0);
-  return { efectivoCentavos: suma("efectivo"), tarjetaCentavos: suma("tarjeta") };
+  return { efectivoCentavos: suma("efectivo"), tarjetaCentavos: suma("tarjeta"), glovoCentavos: suma("glovo") };
+}
+
+// Lo que el sistema YA SABE del dia y puede poner solo en el cierre. La persona
+// que cierra no tendria que tipear nada de esto: solo chequearlo.
+//
+//   fondo      -> con lo que se abrio la caja (paso 1). Si la caja nunca se abrio
+//                 "de verdad" (la sesion implicita que crea el primer pago),
+//                 se usa lo que se dejo el ultimo dia.
+//   tarjeta    -> lo que la Caja registro como cobrado con tarjeta
+//   plataforma -> lo que la Caja registro como cobrado por Glovo
+//   salidas    -> cada pago y retiro EN EFECTIVO del dia (pasos 2 y 3), con su
+//                 concepto: es lo que el cajon perdio y hay que poder explicar
+//   retiros    -> salidas menos lo que entro que no es venta (cambio, aportes)
+//
+// Lo que NUNCA completa: el efectivo contado. Contar lo que hay en el cajon es
+// el control humano del cierre — si el sistema lo llenara con lo esperado, un
+// cierre "cuadraria" por construccion, sin que nadie mire el cajon.
+export function armarCierreAutomatico({ ventas = [], apertura = null, movimientos = [], fondoSugeridoCentavos = null } = {}) {
+  const sistema = desgloseFormaPago(ventas);
+  const fondoCentavos = apertura && !apertura.implicita
+    ? apertura.fondoInicialCentavos
+    : (fondoSugeridoCentavos ?? apertura?.fondoInicialCentavos ?? 0);
+
+  // Solo lo que mueve el cajon y no esta anulado. Un gasto pagado con tarjeta es
+  // un gasto, pero no sale plata del cajon.
+  const delCajon = movimientos.filter((m) => !m.anulado && !m.corrigeUuid && m.afectaCajon !== false);
+  const salidas = delCajon
+    .filter((m) => m.tipo === "gasto" || m.tipo === "retiro")
+    .map((m) => ({
+      tipo: m.tipo === "retiro" ? "retiro" : "pago",
+      concepto: String(m.motivo || (m.tipo === "retiro" ? "Retiro" : "Pago")).trim(),
+      centavos: Math.abs(Number(m.importeCentavos) || 0)
+    }))
+    .filter((x) => x.centavos > 0);
+  const salidasTotalCentavos = salidas.reduce((total, x) => total + x.centavos, 0);
+  const ingresosCentavos = delCajon
+    .filter((m) => m.tipo === "ingreso")
+    .reduce((total, m) => total + Math.abs(Number(m.importeCentavos) || 0), 0);
+  const retirosCentavos = Math.max(0, salidasTotalCentavos - ingresosCentavos);
+
+  const eur = (c) => centavosAInput(c) + " " + String.fromCharCode(8364);
+  const retirosNota = salidas
+    .map((x) => `${x.tipo === "retiro" ? "Retiro: " : ""}${x.concepto} ${eur(x.centavos)}`)
+    .join(" " + String.fromCharCode(183) + " ");
+
+  return {
+    fondoCentavos,
+    tarjetaCentavos: sistema.tarjetaCentavos,
+    plataformasCentavos: sistema.glovoCentavos,
+    efectivoSistemaCentavos: sistema.efectivoCentavos,
+    salidas,
+    salidasTotalCentavos,
+    ingresosCentavos,
+    retirosCentavos,
+    retirosNota,
+    // Mañana se arranca con lo mismo que hoy, salvo que quien cierra decida otra cosa.
+    fondoMananaCentavos: fondoCentavos
+  };
 }

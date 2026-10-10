@@ -42,7 +42,7 @@ CREATE TABLE ventas (
   -- 'baja' ya NO es un sale_mode — una baja no es una venta, no genera fila
   -- aca (ver movimientos_stock.tipo = 'baja' mas abajo).
   sale_mode      TEXT NOT NULL DEFAULT 'normal' CHECK (sale_mode IN ('normal', 'togoo')),
-  forma_pago     TEXT NOT NULL DEFAULT 'efectivo' CHECK (forma_pago IN ('efectivo', 'tarjeta')), -- mig. 016
+  forma_pago     TEXT NOT NULL DEFAULT 'efectivo' CHECK (forma_pago IN ('efectivo', 'tarjeta', 'glovo')), -- mig. 016 + 023
   anulada        BOOLEAN NOT NULL DEFAULT false,
   anulada_en     TIMESTAMPTZ,
   origen         TEXT,

@@ -4078,3 +4078,49 @@ body.arrastrando-fila {
   border-left: 3px solid var(--primary-2);
 }
 .menu-variante-opcion-nuevo input { flex: 1; min-width: 0; }
+
+/* ---- Cierre que se arma solo ---- */
+.cierre-auto {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0.2rem 0 0.8rem;
+}
+.cierre-auto small { color: var(--muted); flex: 1 1 220px; }
+.cierre-auto-estado {
+  margin: 0 0 0.8rem;
+  padding: 0.55rem 0.8rem;
+  border-left: 3px solid var(--ok);
+  border-radius: 0 8px 8px 0;
+  background: var(--page);
+  font-size: 0.9rem;
+}
+.cierre-coincide {
+  margin-top: 6px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--primary-2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--primary-2);
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.cierre-salidas {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed var(--line);
+}
+.cierre-salidas h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.cierre-salidas ul { list-style: none; margin: 0 0 0.4rem; padding: 0; }
+.cierre-salidas li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0.3rem 0;
+  font-size: 0.92rem;
+}
+.cierre-salidas small { display: block; margin-top: 0.4rem; color: var(--muted); }

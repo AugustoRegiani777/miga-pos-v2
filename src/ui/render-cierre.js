@@ -1,5 +1,5 @@
 import { centsToMoney } from "../utils/format.js";
-import { calcularCierre, parseEuros, centavosAInput, desgloseFormaPago } from "../modules/cierre-calculos.js";
+import { calcularCierre, parseEuros, centavosAInput, desgloseFormaPago, armarCierreAutomatico } from "../modules/cierre-calculos.js";
 
 function esc(texto) {
   return String(texto ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -81,7 +81,16 @@ export function renderResultadoCierre(el, { calculo: c, error, form }) {
 
 export function renderCierre(container, datos) {
   const v = datos.vigente;
-  const fondo = v ? v.fondoInicialCentavos : datos.fondoSugeridoCentavos;
+  // Lo que el sistema ya sabe del dia (apertura, tarjeta, Glovo, pagos y
+  // retiros). Si ya hay un cierre guardado se muestra ESE: nunca se pisa con
+  // lo calculado.
+  const auto = armarCierreAutomatico({
+    ventas: datos.ventas,
+    apertura: datos.caja?.apertura || null,
+    movimientos: datos.caja?.movimientos || [],
+    fondoSugeridoCentavos: datos.fondoSugeridoCentavos
+  });
+  const fondo = v ? v.fondoInicialCentavos : auto.fondoCentavos;
   const ventasTotal = datos.ventas.reduce((s, x) => s + (x.totalCentavos || 0), 0);
   const tgtg = datos.ventas.filter((x) => x.saleMode === "togoo");
   const tgtgTotal = tgtg.reduce((s, x) => s + (x.totalCentavos || 0), 0);
@@ -105,16 +114,32 @@ export function renderCierre(container, datos) {
     ${aviso}
     <section class="panel-card">
       <h2><span class="caja-paso-num">4</span> Cerrar el día</h2>
+      <!-- El cierre se arma solo con lo que ya se anoto durante el dia. Quien
+           cierra no tipea: chequea, corrige lo que no coincida, y cuenta el
+           efectivo — lo unico que el sistema NO puede (ni debe) saber. -->
+      <div class="cierre-auto">
+        <button type="button" class="primary-button secondary" id="cierre-autocompletar">Completar con lo que anotó el sistema</button>
+        <small>Trae la apertura, la tarjeta, Glovo, los pagos y los retiros del día. <strong>El efectivo lo contás vos.</strong></small>
+      </div>
+      <p class="cierre-auto-estado" id="cierre-auto-estado" role="status" hidden></p>
       <div class="cierre-form">
-        ${campoDinero("cierre-fondo", "Fondo con el que abriste (€)", centavosAInput(fondo ?? 0), datos.fondoSugeridoCentavos !== null && !v ? "Propuesto: lo que dejaste en el último cierre." : "")}
-        ${campoDinero("cierre-tarjeta", "Tarjeta: total del cierre de Postnet (€)", centavosAInput(v?.tarjetaCentavos ?? null), "Si no hubo ventas con tarjeta, poné 0.")}
-        ${campoDinero("cierre-plataformas", "Plataformas (Glovo…) que cobra la plataforma (€)", centavosAInput(v?.plataformasCentavos ?? null), "Opcional. No cuenta como efectivo.")}
-        ${campoDinero("cierre-retiros", "Retiros del cajón (€)", centavosAInput(v?.retirosCentavos ?? null), "Opcional. Plata que sacaste durante el día.")}
-        <label class="cierre-field" for="cierre-retiros-nota"><span>Para qué fueron los retiros</span><input type="text" id="cierre-retiros-nota" maxlength="120" value="${esc(v?.retirosNota || "")}" placeholder="proveedor, compra…"></label>
-        ${campoDinero("cierre-contado", "Efectivo contado ahora (€)", centavosAInput(v?.contadoCentavos ?? null))}
+        ${campoDinero("cierre-fondo", "Fondo con el que abriste (€)", centavosAInput(fondo ?? 0), v ? "" : (datos.caja?.apertura && !datos.caja.apertura.implicita ? "Es el que anotaste al abrir la caja." : "Propuesto: lo que dejaste en el último cierre."))}
+        ${campoDinero("cierre-tarjeta", "Tarjeta (€)", centavosAInput(v ? v.tarjetaCentavos : auto.tarjetaCentavos), "Lo que cobró la Caja con tarjeta. Si el cierre de Postnet dice otra cosa, corregilo: manda el Postnet.")}
+        ${campoDinero("cierre-plataformas", "Glovo y otras plataformas (€)", centavosAInput(v ? (v.plataformasCentavos ?? null) : (auto.plataformasCentavos || null)), "Lo que cobra la plataforma. No cuenta como efectivo.")}
+        ${campoDinero("cierre-retiros", "Salidas de efectivo (€)", centavosAInput(v?.retirosCentavos ?? null), "Pagos y retiros que hiciste durante el día.")}
+        <label class="cierre-field" for="cierre-retiros-nota"><span>Detalle de las salidas</span><input type="text" id="cierre-retiros-nota" maxlength="400" value="${esc(v?.retirosNota || "")}" placeholder="proveedor, compra…"></label>
+        ${campoDinero("cierre-contado", "Efectivo contado ahora (€)", centavosAInput(v?.contadoCentavos ?? null), `<button type="button" class="cierre-coincide" id="cierre-contado-coincide" hidden></button>`)}
         ${campoDinero("cierre-fondo-manana", "Dejás en el cajón para mañana (€)", centavosAInput(v?.fondoMananaCentavos ?? null), "Opcional. Mañana se propone como fondo.")}
         <label class="cierre-field" for="cierre-nota"><span>Nota del cierre</span><input type="text" id="cierre-nota" maxlength="200" value="${esc(v?.nota || "")}" placeholder="opcional"></label>
       </div>
+      ${auto.salidas.length ? `
+      <div class="cierre-salidas">
+        <h3>Salidas de efectivo de hoy</h3>
+        <ul>${auto.salidas.map((x) => `<li><span>${x.tipo === "retiro" ? "Retiro" : "Pago"}: ${esc(x.concepto)}</span><strong>− ${centsToMoney(x.centavos)}</strong></li>`).join("")}</ul>
+        <div class="cierre-row is-sub"><span>Total de salidas</span><strong>− ${centsToMoney(auto.salidasTotalCentavos)}</strong></div>
+        ${auto.ingresosCentavos > 0 ? `<div class="cierre-row"><span>Entró que no es venta (cambio, aportes)</span><strong>+ ${centsToMoney(auto.ingresosCentavos)}</strong></div>` : ""}
+        <small>Se restan del efectivo: fondo + ventas en efectivo − salidas = lo que tendría que haber en el cajón.</small>
+      </div>` : ""}
     </section>
 
     <section class="panel-card">
@@ -144,6 +169,7 @@ export function renderCierre(container, datos) {
     </section>`;
 
   const resultado = container.querySelector("#cierre-resultado");
+  let esperadoActual = null;
   const recalcular = () => {
     const r = calcularDesdeFormulario(container, datos.ventas);
     // Cruce contra lo que se tapeo en la Caja (ver nota "Segun como se cobro"
@@ -155,7 +181,42 @@ export function renderCierre(container, datos) {
     renderResultadoCierre(resultado, r);
     container.querySelectorAll("input[data-money]").forEach((i) => i.setAttribute("aria-invalid", Number.isNaN(parseEuros(i.value)) ? "true" : "false"));
     container.querySelector("#cierre-guardar").disabled = Boolean(r.error);
+    // "Coincide": un toque cuando lo contado es justo lo esperado. Muestra el
+    // importe, porque es lo que hay que comparar con el cajon que se tiene
+    // delante. Es un atajo para escribirlo, no un autocompletado: la persona
+    // sigue contando.
+    const btn = container.querySelector("#cierre-contado-coincide");
+    esperadoActual = r.calculo.esperadoEfectivoCentavos;
+    if (btn) {
+      btn.hidden = !(esperadoActual >= 0);
+      btn.textContent = `Hay ${centsToMoney(esperadoActual)}: coincide`;
+    }
     return r;
+  };
+  // Todo lo que el sistema sabe, en los campos. NUNCA el efectivo contado.
+  const poner = (id, texto) => { const el = container.querySelector(`#${id}`); if (el) el.value = texto; };
+  const autocompletar = () => {
+    poner("cierre-fondo", centavosAInput(auto.fondoCentavos));
+    poner("cierre-tarjeta", centavosAInput(auto.tarjetaCentavos));
+    poner("cierre-plataformas", auto.plataformasCentavos > 0 ? centavosAInput(auto.plataformasCentavos) : "");
+    poner("cierre-retiros", auto.retirosCentavos > 0 ? centavosAInput(auto.retirosCentavos) : "");
+    poner("cierre-retiros-nota", auto.retirosNota);
+    poner("cierre-fondo-manana", centavosAInput(auto.fondoMananaCentavos));
+    const estado = container.querySelector("#cierre-auto-estado");
+    if (estado) {
+      const n = auto.salidas.length;
+      estado.textContent = `Listo: ${n === 0 ? "sin pagos ni retiros anotados" : `${n} salida${n === 1 ? "" : "s"} de efectivo anotada${n === 1 ? "" : "s"}`}. Revisá los importes y contá el efectivo del cajón.`;
+      estado.hidden = false;
+    }
+    recalcular();
+    container.querySelector("#cierre-contado")?.focus();
+  };
+  container.onclick = (e) => {
+    if (e.target.closest("#cierre-autocompletar")) { autocompletar(); return; }
+    if (e.target.closest("#cierre-contado-coincide") && esperadoActual !== null) {
+      poner("cierre-contado", centavosAInput(esperadoActual));
+      recalcular();
+    }
   };
   container.oninput = recalcular;
   container.onchange = recalcular;
