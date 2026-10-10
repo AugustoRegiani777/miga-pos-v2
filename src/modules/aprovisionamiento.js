@@ -1392,6 +1392,36 @@ export async function pasarProductosAEnPrueba() {
 //
 // Solo en la base de prueba: en produccion no se toca el menu del dueño sin que
 // lo pida.
+// Los insumos "espejo" de los seis productos en prueba quedaron DESACTIVADOS
+// (no borrados) porque en ese momento tenian movimientos en el ledger. Con el
+// set de prueba regenerado ya no los tiene nadie, asi que dejarlos solo suma
+// ruido en la base. Se borran de verdad — pero SOLO si no tienen movimientos ni
+// recetas en este dispositivo, y si la nube se niega (hay ledger colgando) no se
+// fuerza nada: la clave foranea es la que manda.
+//
+// Solo en la base de prueba.
+export async function borrarEspejosSinHistorial() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+  const KEY = "espejos_borrados_v1";
+  const [insumos, recetas, movimientos, config] = await Promise.all([
+    getAll("insumos"), getAll("recetas"), getAll("movimientos_insumos"), getAll("configuracion")
+  ]);
+  if (config.find((c) => c.id === KEY)?.valor) return { cambios: 0 };
+  const conMovimiento = new Set(movimientos.map((m) => m.insumoId));
+  const usados = new Set(recetas.map((r) => r.insumoId));
+  const aBorrar = PRODUCTOS_EN_PRUEBA_V4.filter((id) => {
+    const i = insumos.find((x) => x.id === id);
+    return i && i.activo === false && !conMovimiento.has(id) && !usados.has(id);
+  });
+  const now = new Date().toISOString();
+  await withStores(["insumos", "configuracion"], "readwrite", (stores) => {
+    for (const id of aBorrar) stores.insumos.delete(id);
+    stores.configuracion.put({ id: KEY, valor: true, actualizadoEn: now });
+  });
+  for (const id of aBorrar) await deleteInsumoRemoto(id).catch(() => {});
+  return { cambios: aBorrar.length, insumos: aBorrar };
+}
+
 export async function sacarReventaDeProduccion() {
   if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
   const [productos, recetas, config] = await Promise.all([getAll("productos"), getAll("recetas"), getAll("configuracion")]);
