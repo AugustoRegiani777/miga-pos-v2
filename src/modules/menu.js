@@ -1,4 +1,5 @@
 import { getAll, getOne, putOne, withStores, requestToPromise } from "../db/idb.js";
+import { marcarCatalogoPendiente, limpiarCatalogoPendiente, hayCatalogoPendiente } from "./catalogo-pendiente.js";
 import { slugify } from "../utils/format.js";
 import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncInsumosSnapshot } from "./sync.js";
 import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo } from "../db/supabase.js";
@@ -41,6 +42,14 @@ export async function getMenuDashboardData() {
         });
       return { ...categoria, productos: productosCategoria };
     });
+}
+
+// Sube el catalogo local y, SOLO si llego a la nube, baja la marca de "cambios
+// sin subir". Fire-and-forget: la UI nunca espera a Supabase.
+function subirCatalogo(categorias, productos) {
+  return trySyncCatalogoSnapshot(categorias, productos)
+    .then((subio) => { if (subio) limpiarCatalogoPendiente(); return subio; })
+    .catch(() => false);
 }
 
 function proximoOrden(productos, categoriaId) {
@@ -141,13 +150,14 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
     }
   });
 
+  marcarCatalogoPendiente();
   const [categorias, productosFinal, recetasFinal, insumosFinal] = await Promise.all([
     getAll("categorias"),
     getAll("productos"),
     getAll("recetas"),
     getAll("insumos")
   ]);
-  trySyncCatalogoSnapshot(categorias, productosFinal).catch(() => {});
+  subirCatalogo(categorias, productosFinal);
   trySyncRecetasSnapshot(recetasFinal).catch(() => {});
   if (insumosNuevos.length > 0) trySyncInsumosSnapshot(insumosFinal).catch(() => {});
 
@@ -170,6 +180,15 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
 // tiene que pasar DENTRO de la misma transaccion en la que se escribe, nunca
 // minutos (ni milisegundos) antes.
 export async function pullCatalogoDesdeNube() {
+  // Si hay cambios locales que todavia no llegaron a la nube (un precio, un
+  // producto oculto), bajar el catalogo los pisaria con la copia vieja y el
+  // cambio "se borraria" al refrescar. Primero se suben; si no se puede (sin
+  // internet), no se baja nada y lo local queda como esta.
+  if (hayCatalogoPendiente()) {
+    const [categoriasLocales, productosLocales] = await Promise.all([getAll("categorias"), getAll("productos")]);
+    const subio = await subirCatalogo(categoriasLocales, productosLocales);
+    if (!subio) return { categorias: 0, productos: 0, recetas: 0, omitido: true };
+  }
   const [categoriasRemotas, productosRemotos, recetasRemotas] = await Promise.all([
     fetchCategoriasCatalogo(),
     fetchProductosCatalogo(),
@@ -216,6 +235,12 @@ export async function pullCatalogoDesdeNube() {
     }
   });
 
+  // Nube sin catalogo (primera vez): se siembra con el local.
+  if (productosRemotos.length === 0) {
+    const [categoriasLocales, productosLocales] = await Promise.all([getAll("categorias"), getAll("productos")]);
+    subirCatalogo(categoriasLocales, productosLocales);
+  }
+
   return { categorias: categoriasRemotas.length, productos: productosRemotos.length, recetas: recetasRemotas.length };
 }
 
@@ -223,8 +248,9 @@ export async function setProductoActivo(id, activo) {
   const producto = await getOne("productos", id);
   if (!producto) throw new Error("Producto no encontrado.");
   await putOne("productos", { ...producto, activo, actualizadoEn: new Date().toISOString() });
+  marcarCatalogoPendiente();
   const [categorias, productos] = await Promise.all([getAll("categorias"), getAll("productos")]);
-  trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
+  subirCatalogo(categorias, productos);
 }
 
 export async function moverProductoOrden(id, direccion) {
@@ -244,6 +270,7 @@ export async function moverProductoOrden(id, direccion) {
     stores.productos.put({ ...vecino, orden: ordenProducto });
   });
 
+  marcarCatalogoPendiente();
   const [categorias, productos] = await Promise.all([getAll("categorias"), getAll("productos")]);
-  trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
+  subirCatalogo(categorias, productos);
 }

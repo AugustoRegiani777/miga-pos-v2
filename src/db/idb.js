@@ -1,4 +1,5 @@
 import { DB_NAME, DB_VERSION, STORE_NAMES, initialCategories, initialProducts } from "../modules/seed.js";
+import { marcarCatalogoPendiente } from "../modules/catalogo-pendiente.js";
 
 let dbPromise;
 let dbInstance;
@@ -128,6 +129,9 @@ export async function seedDatabase() {
   const currentProducts = await requestToPromise(
     db.transaction("productos", "readonly").objectStore("productos").getAll()
   );
+  const migracionIceLatte = await requestToPromise(
+    db.transaction("configuracion", "readonly").objectStore("configuracion").get("migracion_precio_ice_latte_350")
+  );
   const tx = db.transaction(["categorias", "productos", "configuracion"], "readwrite");
   const now = new Date().toISOString();
   const categoryStore = tx.objectStore("categorias");
@@ -139,28 +143,29 @@ export async function seedDatabase() {
     categoryStore.put({ ...category, creadoEn: now });
   }
 
+  // NO destructivo: un producto que ya existe se queda como esta. Antes esto
+  // reescribia precio, nombre, orden y "activo" con los valores del codigo en
+  // CADA arranque, asi que un precio cambiado o un producto oculto desde
+  // Gestion > Menu volvia solo al refrescar (y encima el arranque subia a la
+  // nube esa copia "reseteada"). Del seed solo se completan campos que al
+  // producto le falten. Un cambio de precio que SI se quiera aplicar a todos
+  // va como migracion de una sola vez (ver abajo), no editando el seed.
   for (const product of initialProducts) {
     const current = currentById.get(product.id);
-    productStore.put({
-      ...product,
-      ...current,
-      categoriaId: product.categoriaId,
-      nombre: product.nombre,
-      precioCentavos: product.precioCentavos,
-      umbralBajo: product.umbralBajo,
-      controlaStock: product.controlaStock,
-      orden: product.orden,
-      activo: product.activo,
-      sandwichTipo: product.sandwichTipo,
-      stockActual: current?.stockActual ?? product.stockActual,
-      creadoEn: current?.creadoEn ?? now,
-      actualizadoEn: now,
-      // Marca que este producto lo administra el seed — asi la limpieza de
-      // abajo (sacar de circulacion lo que se borro de initialProducts) NUNCA
-      // toca un producto creado a mano desde Gestion > Menu, que no tiene
-      // esta marca.
-      origenSeed: true
-    });
+    if (current) {
+      const mergeado = { ...product, ...current, origenSeed: true };
+      // Octubre 2026: el Ice Latte pasa a 3,50 EUR. Una sola vez por dispositivo
+      // (la marca queda en configuracion); despues la persona lo cambia como quiera.
+      if (product.id === "ice-latte" && !migracionIceLatte) {
+        mergeado.precioCentavos = 350;
+        mergeado.actualizadoEn = now;
+        marcarCatalogoPendiente();
+      }
+      productStore.put(mergeado);
+    } else {
+      productStore.put({ ...product, creadoEn: now, actualizadoEn: now, origenSeed: true });
+      marcarCatalogoPendiente(); // producto nuevo del seed: hay que subirlo a la nube
+    }
   }
 
   for (const current of currentProducts) {
@@ -170,6 +175,7 @@ export async function seedDatabase() {
   }
 
   tx.objectStore("configuracion").put({ id: "seeded_v2", valor: true, actualizadoEn: now });
+  tx.objectStore("configuracion").put({ id: "migracion_precio_ice_latte_350", valor: true, actualizadoEn: now });
   await transactionDone(tx);
 }
 

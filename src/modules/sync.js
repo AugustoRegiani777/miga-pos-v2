@@ -33,7 +33,10 @@ export function getPendingSyncCount() {
 }
 
 function enqueue(op) {
-  const q = loadQueue();
+  // El catalogo viaja como foto completa: si ya hay una esperando, la nueva la
+  // reemplaza. Si no, al volver la conexion se subiria PRIMERO la vieja (con el
+  // precio de antes) y recien despues la nueva, o peor, al reves.
+  const q = op.type === "catalogo_snapshot" ? loadQueue().filter((x) => x.type !== op.type) : loadQueue();
   q.push({ ...op, enqueuedAt: new Date().toISOString() });
   saveQueue(q);
 }

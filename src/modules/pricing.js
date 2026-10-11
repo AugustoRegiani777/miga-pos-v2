@@ -1,6 +1,6 @@
 export const SANDWICH_COMBOS = [
-  { cantidad: 12, precioCentavos: 3400, nombre: "Combo 12 sandwiches", premiumExtraCentavos: 30 },
-  { cantidad: 6, precioCentavos: 1900, nombre: "Combo 6 sandwiches", premiumExtraCentavos: 30 }
+  { cantidad: 12, precioCentavos: 3800, nombre: "Combo 12 sandwiches", premiumExtraCentavos: 30 },
+  { cantidad: 6, precioCentavos: 2100, nombre: "Combo 6 sandwiches", premiumExtraCentavos: 30 }
 ];
 
 const PREMIUM_SANDWICH_IDS = new Set(["atun-palta-queso", "huevo-jamon", "especial-semanal"]);

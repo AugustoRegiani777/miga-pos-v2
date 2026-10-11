@@ -2998,13 +2998,11 @@ async function bootApp() {
       trySyncProveedoresSnapshot(proveedores).catch(() => {});
       trySyncProveedorInsumosSnapshot(proveedorInsumos).catch(() => {});
     }).catch(() => {});
-  // Catalogo (categorias/productos): ademas de lo que trae el seed, se edita
-  // desde Gestion > Menu (ver menu.js) y se espeja a Supabase al arrancar
-  // para que el dashboard lea el real en vez de mantener su propia copia.
-  Promise.all([getAll("categorias"), getAll("productos")])
-    .then(([categorias, productos]) => {
-      trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
-    }).catch(() => {});
+  // Catalogo (categorias/productos): ya NO se sube a ciegas al arrancar. Antes se
+  // mandaba la copia local completa en cada apertura, y un dispositivo con datos
+  // viejos (o con el seed recien cargado) pisaba en la nube los precios y los
+  // productos ocultos que se habian cambiado desde otro. Ahora solo sube lo que
+  // cambio de verdad (ver catalogo-pendiente.js y pullCatalogoDesdeNube).
   // Auto-sync silencioso al abrir la app (ver sincronizarCatalogoSilencioso).
   // Sin await a proposito: no puede demorar el primer render (offline-first).
   // El carrito de Caja siempre arranca vacio en este momento, asi que no

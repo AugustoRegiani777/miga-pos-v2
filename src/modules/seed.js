@@ -478,7 +478,7 @@ export const initialProducts = [
     id: "ice-latte",
     categoriaId: "cafe",
     nombre: "Ice Latte",
-    precioCentavos: 300,
+    precioCentavos: 350,
     stockActual: 0,
     umbralBajo: 0,
     controlaStock: false,
