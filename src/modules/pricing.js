@@ -5,7 +5,7 @@
 // lo actualiza al arrancar la app y cada vez que se guarda un cambio — asi
 // calculateCartPricing/aplicarCombosEnCascada, mas abajo, nunca tienen que
 // saber de donde salio el numero.
-export const DEFAULT_COMBOS_CONFIG = { docePrecioCentavos: 3400, seisPrecioCentavos: 1900, premiumExtraCentavos: 30 };
+export const DEFAULT_COMBOS_CONFIG = { docePrecioCentavos: 3800, seisPrecioCentavos: 2100, premiumExtraCentavos: 30 };
 let combosConfigActual = DEFAULT_COMBOS_CONFIG;
 
 export function setCombosConfig(valor) {

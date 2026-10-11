@@ -1379,6 +1379,26 @@ export async function renombrarProductosDePrueba() {
   return { cambios: aCambiar.length };
 }
 
+// Octubre 2026: el Ice Latte pasa a 3,50 EUR (igual que en la tablet real). El
+// seed ya no pisa precios de productos existentes, asi que el cambio va como
+// migracion de una sola vez, en el dispositivo (un cambio solo en la nube lo
+// revertiria el proximo arranque).
+export async function actualizarPreciosOctubre() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+  const KEY = "precio_ice_latte_350";
+  const [productos, config] = await Promise.all([getAll("productos"), getAll("configuracion")]);
+  if (config.find((c) => c.id === KEY)?.valor) return { cambios: 0 };
+  const now = new Date().toISOString();
+  const aCambiar = productos
+    .filter((p) => p.id === "ice-latte" && p.precioCentavos !== 350)
+    .map((p) => ({ ...p, precioCentavos: 350, actualizadoEn: now }));
+  await guardarCatalogo({ productos: aCambiar });
+  await withStores(["configuracion"], "readwrite", (stores) => {
+    stores.configuracion.put({ id: KEY, valor: true, actualizadoEn: now });
+  });
+  return { cambios: aCambiar.length };
+}
+
 export async function sacarReventaDeProduccion() {
   if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
   const [productos, recetas, config] = await Promise.all([getAll("productos"), getAll("recetas"), getAll("configuracion")]);
