@@ -21,7 +21,7 @@ import { unidadesDisponibles, tieneConversion, aBase, desdeBase, mejorUnidad, fo
 import { getGruposVariantes, saveGrupoVariante, deleteGrupoVariante, getGrupoDeProducto, setProductoGrupoVariante, pullVariantesGruposDesdeNube } from "../modules/variantes.js";
 import { renderVariantesOpcionesRows, renderVariantesProductosChecklist, renderVariantesGruposList } from "../ui/render-variantes.js";
 import { mensajeConfirmacionEliminacion } from "../modules/menu-calculos.js";
-import { renderMenuList, renderMenuRecetaRows, renderMenuVarianteNueva } from "../ui/render-menu.js";
+import { renderMenuList, renderMenuRecetaRows, renderMenuVarianteNueva, actualizarSugeridoEnSitio } from "../ui/render-menu.js";
 import {
   trySyncVenta,
   trySyncMovimientosInsumos,
@@ -622,6 +622,9 @@ const dom = {
   menuSinRecetaAviso: document.querySelector("#menu-sin-receta-aviso"),
   menuReventaProveedor: document.querySelector("#menu-reventa-proveedor"),
   menuReventaDetalle: document.querySelector("#menu-reventa-detalle"),
+  menuReventaProveedorNuevo: document.querySelector("#menu-reventa-proveedor-nuevo"),
+  menuReventaProveedorNombre: document.querySelector("#menu-reventa-proveedor-nombre"),
+  menuReventaProveedorDias: document.querySelector("#menu-reventa-proveedor-dias"),
   menuReventaNombre: document.querySelector("#menu-reventa-nombre"),
   menuReventaUnidad: document.querySelector("#menu-reventa-unidad"),
   menuReventaTrae: document.querySelector("#menu-reventa-trae"),
@@ -1236,6 +1239,20 @@ function showGestionSubView(subViewName) {
   document.querySelectorAll(".subview").forEach((section) => section.classList.toggle("active", section.id === `subview-${subViewName}`));
   document.querySelectorAll(".sub-nav-link").forEach((link) => link.classList.toggle("active", link.dataset.subview === subViewName));
   refreshGestionSubView(subViewName);
+}
+
+// "¿Por dónde empiezo?": cada puerta lleva directo a la hoja donde se hace lo que
+// la persona quiere, sin pasos intermedios.
+async function abrirPuertaDeInicio(puerta) {
+  if (puerta === "producto") {
+    showGestionSubView("menu");
+    await refreshGestionSubView("menu");
+    await openMenuProductoAdd("sandwiches");
+  } else if (puerta === "factura") {
+    showGestionSubView("insumos");
+    await refreshGestionSubView("insumos");
+    await openFacturaSheet();
+  }
 }
 
 function showView(viewName) {
@@ -2532,9 +2549,11 @@ function actualizarAvisoSinReceta() {
 function llenarProveedoresReventa() {
   dom.menuReventaProveedor.innerHTML =
     `<option value="">— Lo cargo después —</option>` +
-    menuProveedoresDisponibles.map((v) => `<option value="${v.id}">${v.nombre}</option>`).join("");
+    menuProveedoresDisponibles.map((v) => `<option value="${v.id}">${v.nombre}</option>`).join("") +
+    `<option value="__nuevo__">+ Proveedor nuevo…</option>`;
   dom.menuReventaDetalle.hidden = true;
-  for (const campo of [dom.menuReventaNombre, dom.menuReventaUnidad, dom.menuReventaTrae, dom.menuReventaPrecio]) campo.value = "";
+  dom.menuReventaProveedorNuevo.hidden = true;
+  for (const campo of [dom.menuReventaNombre, dom.menuReventaUnidad, dom.menuReventaTrae, dom.menuReventaPrecio, dom.menuReventaProveedorNombre, dom.menuReventaProveedorDias]) campo.value = "";
 }
 
 async function openMenuProductoAdd(categoriaId) {
@@ -3807,6 +3826,12 @@ function bindEvents() {
   });
 
   dom.abrirFactura.addEventListener("click", () => { openFacturaSheet().catch(() => {}); });
+  document.querySelector("#guia-puertas").addEventListener("click", (e) => {
+    const puerta = e.target.closest("[data-puerta]")?.dataset.puerta;
+    if (!puerta) return;
+    document.querySelector("#guia-puertas").open = false;
+    abrirPuertaDeInicio(puerta).catch(() => {});
+  });
   dom.closeFactura.addEventListener("click", closeFacturaSheet);
   dom.facturaBackdrop.addEventListener("click", closeFacturaSheet);
 
@@ -4043,6 +4068,8 @@ function bindEvents() {
     if (e.target.classList.contains("menu-receta-nuevo-unidad")) menuRecetaLineas[idx].nuevaUnidad = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-min")) menuRecetaLineas[idx].nuevoStockMinimo = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-critico")) menuRecetaLineas[idx].nuevoStockCritico = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-prov-quien-nombre")) menuRecetaLineas[idx].nuevoProveedorNombre = e.target.value;
+    if (e.target.classList.contains("menu-receta-nuevo-prov-dias")) menuRecetaLineas[idx].nuevoProveedorDias = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-prov-nombre")) menuRecetaLineas[idx].nuevoProveedorProducto = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-prov-unidad")) menuRecetaLineas[idx].nuevoProveedorUnidad = e.target.value;
     if (e.target.classList.contains("menu-receta-nuevo-prov-trae")) menuRecetaLineas[idx].nuevoProveedorTrae = e.target.value;
@@ -4069,6 +4096,7 @@ function bindEvents() {
   dom.menuReventaProveedor.addEventListener("change", () => {
     const conProveedor = Boolean(dom.menuReventaProveedor.value);
     dom.menuReventaDetalle.hidden = !conProveedor;
+    dom.menuReventaProveedorNuevo.hidden = dom.menuReventaProveedor.value !== "__nuevo__";
     if (conProveedor && !dom.menuReventaNombre.value) dom.menuReventaNombre.value = dom.menuEditNombre.value.trim();
   });
   dom.menuEditVariante.addEventListener("change", () => {
@@ -4132,8 +4160,12 @@ function bindEvents() {
       }
       renderMenuRecetaEditorView();
     }
-    // Al salir del campo de cantidad se recalcula el minimo sugerido.
-    if (e.target.classList.contains("menu-receta-cantidad")) renderMenuRecetaEditorView();
+    // Al salir del campo de cantidad se recalcula el minimo sugerido, en su lugar
+    // (volver a dibujar la lista pisaba el campo que se estaba por tocar).
+    if (e.target.classList.contains("menu-receta-cantidad")) {
+      if (menuRecetaLineas[idx].insumoId === "__nuevo__") actualizarSugeridoEnSitio(dom.menuRecetaRows, menuRecetaLineas[idx], idx);
+      else if (e.target.closest(".menu-receta-row")?.querySelector(".menu-receta-variante-cantidades")) renderMenuRecetaEditorView();
+    }
   });
 
   dom.menuRecetaRows.addEventListener("click", (e) => {
@@ -4254,12 +4286,15 @@ function bindEvents() {
       if (menuModo === "reventa") {
         reventa = {
           proveedorId: dom.menuReventaProveedor.value,
+          proveedorNombre: dom.menuReventaProveedorNombre.value.trim(),
+          proveedorDias: dom.menuReventaProveedorDias.value,
           nombreProducto: dom.menuReventaNombre.value.trim() || nombre,
           unidadCompra: dom.menuReventaUnidad.value.trim(),
           cantidadPorUnidad: parseDecimal(dom.menuReventaTrae.value),
           precio: parseDecimal(dom.menuReventaPrecio.value)
         };
         if (reventa.proveedorId) {
+          if (reventa.proveedorId === "__nuevo__" && !reventa.proveedorNombre) throw new Error("Poné el nombre del proveedor nuevo.");
           if (!reventa.unidadCompra) throw new Error("Poné cómo te lo factura (caja, bolsa, unidad...).");
           if (!(reventa.cantidadPorUnidad > 0)) throw new Error("Falta cuántas unidades trae.");
           if (!(reventa.precio > 0)) throw new Error("Falta el precio.");

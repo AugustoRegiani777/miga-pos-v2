@@ -163,8 +163,14 @@ function bloqueProveedorNuevo(linea, index, proveedores) {
         <select class="menu-receta-nuevo-proveedor" data-idx="${index}">
           <option value="" ${elegido ? "" : "selected"}>— Lo cargo después —</option>
           ${opciones}
+          <option value="__nuevo__" ${elegido === "__nuevo__" ? "selected" : ""}>+ Proveedor nuevo…</option>
         </select>
       </label>
+      ${elegido === "__nuevo__" ? `
+        <div class="menu-receta-nuevo-fields">
+          <input class="menu-receta-nuevo-prov-quien-nombre" data-idx="${index}" type="text" placeholder="Nombre del proveedor" value="${linea.nuevoProveedorNombre ?? ""}">
+          <input class="menu-receta-nuevo-prov-dias" data-idx="${index}" type="number" min="1" step="1" inputmode="numeric" placeholder="Cada cuántos días le pedís (7)" value="${linea.nuevoProveedorDias ?? ""}">
+        </div>` : ""}
       ${elegido ? `
         <div class="menu-receta-nuevo-fields">
           <input class="menu-receta-nuevo-prov-nombre" data-idx="${index}" type="text" placeholder="Cómo figura en su factura" value="${linea.nuevoProveedorProducto ?? ""}">
@@ -175,6 +181,29 @@ function bloqueProveedorNuevo(linea, index, proveedores) {
           <input class="menu-receta-nuevo-prov-precio" data-idx="${index}" type="text" inputmode="decimal" placeholder="Precio de esa unidad (€)" value="${linea.nuevoProveedorPrecio ?? ""}">
         </div>` : ""}
     </div>`;
+}
+
+// Al salir del campo "cantidad" de un insumo nuevo cambia el minimo que se
+// propone. Eso se actualiza EN SU LUGAR: volver a dibujar toda la lista (lo que
+// se hacia) reemplazaba los campos justo cuando la persona tocaba el siguiente,
+// y lo que estaba escribiendo se perdia.
+export function actualizarSugeridoEnSitio(container, linea, index) {
+  const fila = container.querySelector(`.menu-receta-row[data-idx="${index}"]`);
+  const min = fila?.querySelector(".menu-receta-nuevo-min");
+  if (!min) return;
+  const critico = fila.querySelector(".menu-receta-nuevo-critico");
+  const ayuda = fila.querySelector(".menu-receta-nuevo-ayuda");
+  const sugerido = minimoSugerido(linea.cantidad);
+  min.placeholder = `Mínimo${sugerido ? `: ${sugerido}` : ""}`;
+  critico.placeholder = `Crítico${sugerido ? `: ${Math.round(sugerido / 2)}` : ""}`;
+  // Solo se mueve el valor si la persona no lo escribio ella.
+  if (linea.nuevoStockMinimo === undefined) min.value = sugerido ?? "";
+  if (linea.nuevoStockCritico === undefined) critico.value = sugerido ? Math.round(sugerido / 2) : "";
+  if (ayuda) {
+    ayuda.textContent = sugerido
+      ? `Calculado para ${UNIDADES_ANTES_DE_REPONER} unidades antes de reponer. Cambialo si querés.`
+      : "Poné primero la cantidad y te propongo un mínimo.";
+  }
 }
 
 export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], proveedores = []) {

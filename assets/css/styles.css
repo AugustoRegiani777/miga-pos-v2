@@ -3184,6 +3184,18 @@ details[open] > .prov-summary::before {
 /* Gestion: las 6 subpestañas son en realidad DOS ciclos distintos —
    la despensa (Insumos, Calibración, Proveedores) y el producto
    (Menú, Recetas, Variantes). Esta linea marca donde empieza el segundo. */
+/* "¿Por dónde empiezo?": discreta, plegada, con dos botones grandes al abrirla. */
+.guia-puertas { margin: 0 0 12px; padding: 0 2px; }
+.guia-puertas > summary { cursor: pointer; list-style: none; color: var(--muted); font-size: 0.9rem; min-height: 44px; display: flex; align-items: center; }
+.guia-puertas > summary::-webkit-details-marker { display: none; }
+.guia-puertas > summary::after { content: " ▾"; margin-left: 4px; }
+.guia-puertas[open] > summary::after { content: " ▴"; }
+.guia-puertas-texto { margin: 0 0 8px; font-size: 0.9rem; }
+.guia-puertas-botones { display: flex; gap: 10px; flex-wrap: wrap; }
+.guia-puerta { flex: 1 1 240px; min-height: 64px; padding: 10px 14px; text-align: left; border: 2px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.guia-puerta strong { font-size: 1rem; }
+.guia-puerta small { color: var(--muted); font-size: 0.85rem; }
+
 .sub-nav-sep {
   border-left: 2px solid var(--line);
   margin-left: 10px;

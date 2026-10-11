@@ -2,7 +2,7 @@ import { getAll, getOne, putOne, withStores, requestToPromise } from "../db/idb.
 import { slugify } from "../utils/format.js";
 import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncProductoEliminado, hayPendientesDeTipo } from "./sync.js";
 import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo, contarReferenciasProducto, deleteProductoRemoto } from "../db/supabase.js";
-import { construirInsumoNuevo, construirLineaProveedor, lineaProveedorCompleta, construirEspejoReventa } from "./catalogo-armar.js";
+import { construirInsumoNuevo, construirLineaProveedor, lineaProveedorCompleta, construirEspejoReventa, construirProveedorNuevo } from "./catalogo-armar.js";
 import { guardarCatalogo } from "./catalogo-guardar.js";
 import { getInsumoAGrupoVariante, setProductoGrupoVariante } from "./variantes.js";
 import { clasificarBloqueosEliminacion, mensajeBloqueoEliminacion } from "./menu-calculos.js";
@@ -53,6 +53,22 @@ export async function getMenuDashboardData() {
     });
 }
 
+// "+ Proveedor nuevo...": se crea en el mismo guardado que el producto. Si ya hay
+// un proveedor con ese nombre se usa ese (no se duplica), y dos lineas que piden
+// el mismo proveedor nuevo comparten el que se crea. Devuelve el id a usar, o ""
+// si no se escribio nombre (queda como "lo cargo despues").
+export const PROVEEDOR_NUEVO = "__nuevo__";
+function resolverProveedor({ proveedorId, nombre, diasCiclo }, existentes, nuevos, now) {
+  if (proveedorId !== PROVEEDOR_NUEVO) return proveedorId || "";
+  const limpio = String(nombre || "").trim();
+  if (!limpio) return "";
+  const ya = [...existentes, ...nuevos].find((p) => slugify(p.nombre) === slugify(limpio));
+  if (ya) return ya.id;
+  const creado = construirProveedorNuevo(limpio, new Set([...existentes, ...nuevos].map((p) => p.id)), { diasCiclo }, now);
+  nuevos.push(creado);
+  return creado.id;
+}
+
 function proximoOrden(productos, categoriaId) {
   const ordenes = productos.filter(p => p.categoriaId === categoriaId).map(p => p.orden || 0);
   return ordenes.length ? Math.max(...ordenes) + 1 : 1;
@@ -95,11 +111,13 @@ export async function definirProductoComoReventa({ productoId, datos }) {
 //                  se lo defina. No es un error, y no rompe nada.
 export async function saveProducto({ id, categoriaId, nombre, precioCentavos, controlaStock, umbralBajo, sandwichTipo, activo, lineasReceta, modo, reventa }) {
   const now = new Date().toISOString();
-  const [productosActuales, insumosActuales, recetasActuales] = await Promise.all([
+  const [productosActuales, insumosActuales, recetasActuales, proveedoresActuales] = await Promise.all([
     getAll("productos"),
     getAll("insumos"),
-    getAll("recetas")
+    getAll("recetas"),
+    getAll("proveedores")
   ]);
+  const proveedoresNuevos = [];
 
   const existente = id ? productosActuales.find(p => p.id === id) : null;
   let productoId = id;
@@ -181,7 +199,11 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
           precio: l.nuevoProveedorPrecio
         };
         if (lineaProveedorCompleta(datosProveedor)) {
-          provInsumosNuevos.push(construirLineaProveedor({ ...datosProveedor, insumoId: insumoNuevo.id }, now));
+          datosProveedor.proveedorId = resolverProveedor(
+            { proveedorId: l.nuevoProveedorId, nombre: l.nuevoProveedorNombre, diasCiclo: l.nuevoProveedorDias },
+            proveedoresActuales, proveedoresNuevos, now
+          );
+          if (datosProveedor.proveedorId) provInsumosNuevos.push(construirLineaProveedor({ ...datosProveedor, insumoId: insumoNuevo.id }, now));
         }
         return { insumoId: insumoNuevo.id, cantidadPorUnidad: cantidadDecimal(l), variantesCantidad };
       }
@@ -231,8 +253,13 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
   const lineasProveedor = [...provInsumosNuevos];
   // Se compra hecho: la receta es la de su insumo espejo.
   if (modoEfectivo === "reventa") {
+    const datosReventa = { ...(reventa || {}) };
+    datosReventa.proveedorId = resolverProveedor(
+      { proveedorId: datosReventa.proveedorId, nombre: datosReventa.proveedorNombre, diasCiclo: datosReventa.proveedorDias },
+      proveedoresActuales, proveedoresNuevos, now
+    );
     const espejo = construirEspejoReventa({
-      producto, datos: reventa || {}, insumoExistente: insumosActuales.find((i) => i.id === productoId), now
+      producto, datos: datosReventa, insumoExistente: insumosActuales.find((i) => i.id === productoId), now
     });
     insumosAGuardar.push(espejo.insumo);
     recetasAEscribir.push(espejo.receta);
@@ -243,6 +270,7 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
   // sola transaccion, y enviado en el orden en que se referencian.
   await guardarCatalogo({
     productos: [producto],
+    proveedores: proveedoresNuevos,
     insumos: insumosAGuardar,
     recetas: recetasAEscribir,
     lineasProveedor,

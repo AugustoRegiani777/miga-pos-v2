@@ -28,6 +28,21 @@ const positivo = (v) => {
 // esta funcion lo va completando: si se crean varios insumos nuevos en el mismo
 // lote (ej. dos lineas de receta nuevas en un mismo producto), el segundo no
 // puede colisionar con el id que acaba de resolver el primero.
+// Un proveedor creado al paso, desde el formulario de un producto. Solo pide lo
+// que hace falta para empezar (nombre y cada cuanto se le pide); el contacto, los
+// dias de entrega y lo demas se completan despues en Proveedores.
+export function construirProveedorNuevo(nombre, idsUsados, { diasCiclo } = {}, now = new Date().toISOString()) {
+  const nombreLimpio = String(nombre || "").trim();
+  if (!nombreLimpio) throw new Error("El nombre del proveedor nuevo es obligatorio.");
+  let id = slugify(nombreLimpio);
+  let sufijo = 2;
+  while (idsUsados.has(id)) {
+    id = `${slugify(nombreLimpio)}-${sufijo}`;
+    sufijo += 1;
+  }
+  return { id, nombre: nombreLimpio, tel: "", email: "", notas: "", diasCiclo: Number(diasCiclo) > 0 ? Math.round(Number(diasCiclo)) : 7, activo: true, creadoEn: now, actualizadoEn: now };
+}
+
 export function construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, factorConversion, stockMinimo, stockCritico } = {}) {
   const nombreLimpio = String(nombre || "").trim();
   if (!nombreLimpio) throw new Error("El nombre del insumo nuevo es obligatorio.");

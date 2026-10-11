@@ -55,7 +55,7 @@ export function renderProveedoresList(el, data, callbacks = {}) {
       : "<p class='cal-muted' style='padding:0.5rem 0'>Sin insumos registrados.</p>";
 
     return `
-      <details class="prov-card" data-prov-id="${proveedor.id}">
+      <details class="prov-card" data-prov-id="${proveedor.id}"${proveedor.productos.length === 0 ? " open" : ""}>
         <summary class="prov-summary">
           <div class="prov-summary-main">
             <strong>${proveedor.nombre}</strong>

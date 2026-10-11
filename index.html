@@ -533,6 +533,24 @@
         <button class="nav-link sub-nav-link" type="button" data-subview="variantes">Variantes</button>
       </nav>
 
+      <!-- No es una lista de pasos en orden: se empieza por lo que se tiene en la
+           mano, y lo que falta se crea sobre la marcha. Plegada por defecto para no
+           estorbar a quien ya conoce el sistema. -->
+      <details class="guia-puertas" id="guia-puertas">
+        <summary>¿Por dónde empiezo?</summary>
+        <p class="cal-muted guia-puertas-texto">Según lo que tengas en la mano. Lo que falte (un insumo, un proveedor) lo creás ahí mismo.</p>
+        <div class="guia-puertas-botones">
+          <button type="button" class="guia-puerta" data-puerta="producto">
+            <strong>Quiero vender algo nuevo</strong>
+            <small>Creás el producto con su receta y, sobre la marcha, sus insumos y proveedores.</small>
+          </button>
+          <button type="button" class="guia-puerta" data-puerta="factura">
+            <strong>Me llegó mercadería</strong>
+            <small>Foto de la factura: se cargan insumos, precios y stock de una vez.</small>
+          </button>
+        </div>
+      </details>
+
       <section class="subview active" id="subview-insumos" aria-labelledby="insumos-title">
       <section class="section-heading">
         <h1 id="insumos-title">Insumos</h1>
@@ -804,11 +822,11 @@
               </label>
               <label class="quantity-field">
                 <span>Stock minimo</span>
-                <input id="prov-prod-nuevo-min" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+                <input id="prov-prod-nuevo-min" type="number" min="0" step="any" inputmode="decimal" placeholder="Vacío: lo calcula el sistema">
               </label>
               <label class="quantity-field">
                 <span>Stock critico</span>
-                <input id="prov-prod-nuevo-crit" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+                <input id="prov-prod-nuevo-crit" type="number" min="0" step="any" inputmode="decimal" placeholder="Vacío: la mitad del mínimo">
               </label>
             </div>
             <label class="quantity-field">
@@ -924,6 +942,16 @@
                   <span>¿A quién se lo comprás?</span>
                   <select id="menu-reventa-proveedor"></select>
                 </label>
+                <div id="menu-reventa-proveedor-nuevo" hidden>
+                  <label class="quantity-field">
+                    <span>Nombre del proveedor</span>
+                    <input id="menu-reventa-proveedor-nombre" type="text">
+                  </label>
+                  <label class="quantity-field">
+                    <span>¿Cada cuántos días le pedís?</span>
+                    <input id="menu-reventa-proveedor-dias" type="number" min="1" step="1" inputmode="numeric" placeholder="7">
+                  </label>
+                </div>
                 <div id="menu-reventa-detalle" hidden>
                   <label class="quantity-field">
                     <span>Cómo figura en su factura</span>
