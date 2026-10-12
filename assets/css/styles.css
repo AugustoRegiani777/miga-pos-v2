@@ -2454,7 +2454,9 @@ details[open] > .prov-summary::before {
   margin-top: 0.5rem;
 }
 
-.menu-receta-nuevo-fields input {
+.menu-receta-nuevo-fields input,
+.menu-receta-nuevo-fields select,
+.menu-variante-opcion-nuevo select {
   flex: 1;
   min-width: 0;
   min-height: 48px;
@@ -4050,32 +4052,28 @@ body.arrastrando-fila {
 .menu-opcional > summary::before { content: "▸"; color: var(--muted); }
 .menu-opcional[open] > summary::before { content: "▾"; }
 
-/* ---- Insumos: boton naranja "Calibrar" en cada fila, y buscador de calibracion ---- */
+/* ---- Insumos: "Calibrar" junto al nombre, y buscador de calibracion ---- */
 .stock-row-actions { display: flex; align-items: center; gap: 10px; }
+.stock-row-titulo { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 12px; }
+/* Texto discreto, sin color de alerta ni fondo: calibrar es una herramienta,
+   no algo que haya que hacer. El area tactil es grande (padding) aunque se vea
+   chico, para no fallar con el dedo. */
 .btn-calibrar-insumo {
-  min-height: 40px;
-  min-width: 40px;
-  padding: 0 14px;
-  /* Contorno y fondo apenas teñido, no un boton solido: calibrar es una
-     funcion de la fila, no la accion principal de la pantalla. */
-  border: 1px solid rgba(214, 75, 42, 0.55);
-  border-radius: 8px;
-  background: rgba(214, 75, 42, 0.12);
-  color: #e8836a;
+  min-height: 48px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
   font: inherit;
-  font-weight: 600;
-  font-size: 0.86rem;
+  font-weight: 500;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
-.btn-calibrar-insumo:hover { background: rgba(214, 75, 42, 0.2); }
-.btn-calibrar-insumo:active { background: rgba(214, 75, 42, 0.28); }
-/* En la lista de Insumos el boton va AL LADO del estado, no arriba: el grupo de
-   acciones es una columna en el resto de la app (Produccion apila sus botones). */
-#insumos-list .stock-row-actions {
-  flex-direction: row;
-  align-items: center;
-  gap: 22px;
-}
+.btn-calibrar-insumo:hover, .btn-calibrar-insumo:focus-visible { color: var(--ink); text-decoration-style: solid; }
+#insumos-list .stock-row-actions { flex-direction: row; align-items: center; gap: 22px; }
 .calibrar-buscar { display: block; margin: 0.4rem 0 0.8rem; }
 .calibrar-buscar input {
   width: 100%;
@@ -4099,7 +4097,7 @@ body.arrastrando-fila {
   padding-left: 0.6rem;
   border-left: 3px solid var(--primary-2);
 }
-.menu-variante-opcion-nuevo input { flex: 1; min-width: 0; }
+.menu-variante-opcion-nuevo input, .menu-variante-opcion-nuevo select { flex: 1; min-width: 0; }
 
 /* ---- Cierre que se arma solo ---- */
 .cierre-auto {
@@ -4146,3 +4144,19 @@ body.arrastrando-fila {
   font-size: 0.92rem;
 }
 .cierre-salidas small { display: block; margin-top: 0.4rem; color: var(--muted); }
+
+/* "Qué pedir" abre un panel debajo: el boton lo dice con su flecha y queda marcado
+   mientras esta abierto, y el panel tiene borde propio y su "Cerrar". */
+.boton-despliega::after { content: " ▾"; color: var(--muted); }
+.boton-despliega.activo::after { content: " ▴"; }
+.boton-despliega.activo { border-color: var(--primary-2); color: var(--ink); }
+.panel-lista-compras {
+  margin: 12px 0 16px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--primary-2);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.panel-lista-compras-encabezado { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.panel-lista-compras-encabezado h2 { margin: 0; }

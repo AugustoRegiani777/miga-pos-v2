@@ -7,7 +7,7 @@ import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/re
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -177,6 +177,7 @@ async function pullCatalogoCompleto() {
   await borrarEspejosSinHistorial().catch(() => ({ cambios: 0 }));
   await renombrarProductosDePrueba().catch(() => ({ cambios: 0 }));
   await actualizarPreciosOctubre().catch(() => ({ cambios: 0 }));
+  await borrarInsumosConUnidadRara().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };
@@ -495,6 +496,7 @@ const dom = {
   recetaEditEquivale: document.querySelector("#receta-edit-equivale"),
   recetaEditMotivo: document.querySelector("#receta-edit-motivo"),
   verListaCompras: document.querySelector("#ver-lista-compras"),
+  cerrarListaCompras: document.querySelector("#cerrar-lista-compras"),
   listaComprasSection: document.querySelector("#lista-compras-section"),
   listaComprasList: document.querySelector("#lista-compras-list"),
   exportListaCompras: document.querySelector("#export-lista-compras"),
@@ -2486,7 +2488,7 @@ function setMenuEditSheetOpen(isOpen) {
 
 function renderMenuRecetaEditorView() {
   actualizarAvisoSinReceta();
-  renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles, menuGruposVarianteDisponibles, menuProveedoresDisponibles);
+  renderMenuRecetaRows(dom.menuRecetaRows, menuRecetaLineas, menuInsumosDisponibles, menuGruposVarianteDisponibles, menuProveedoresDisponibles, dom.menuEditVariante.value);
 }
 
 // Los inputs numericos son type="number", pero en la tablet a veces dejan
@@ -2512,6 +2514,8 @@ function populateMenuVarianteSelect(selectedGrupoId) {
     menuGruposVarianteDisponibles.map((g) => `<option value="${g.id}" ${g.id === selectedGrupoId ? "selected" : ""}>${g.nombre}</option>`).join("") +
     `<option value="__nuevo__" ${selectedGrupoId === "__nuevo__" ? "selected" : ""}>+ Crear variante nueva…</option>`;
   renderMenuVarianteNueva(dom.menuVarianteNueva, menuVarianteNueva, menuInsumosDisponibles);
+  // La receta se pinta segun la variante elegida (ver lineaVarianteCantidades).
+  renderMenuRecetaEditorView();
 }
 
 // Muestra el bloque que corresponde al modo elegido y esconde los otros.
@@ -3809,15 +3813,23 @@ function bindEvents() {
     }
   });
 
-  dom.verListaCompras.addEventListener("click", async () => {
-    insumosListaComprasVisible = !insumosListaComprasVisible;
-    dom.listaComprasSection.hidden = !insumosListaComprasVisible;
-    dom.verListaCompras.textContent = insumosListaComprasVisible ? "Cerrar lista" : "Lista de compras";
-    if (insumosListaComprasVisible) {
+  // "Qué pedir" abre y cierra el panel de abajo y conserva SIEMPRE su nombre (antes
+  // cambiaba a "Cerrar lista" y despues a "Lista de compras", y no se entendia que
+  // era lo mismo). Que esta abierto se ve en el boton (marcado) y en el panel, que
+  // tiene borde y su propio "Cerrar".
+  async function setListaComprasVisible(visible) {
+    insumosListaComprasVisible = visible;
+    dom.listaComprasSection.hidden = !visible;
+    dom.verListaCompras.classList.toggle("activo", visible);
+    dom.verListaCompras.setAttribute("aria-expanded", String(visible));
+    if (visible) {
       const smartData = await listaDeComprasSmart();
       renderListaComprasSmart(dom.listaComprasList, smartData);
+      dom.listaComprasSection.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-  });
+  }
+  dom.verListaCompras.addEventListener("click", () => { setListaComprasVisible(!insumosListaComprasVisible).catch(() => {}); });
+  dom.cerrarListaCompras.addEventListener("click", () => { setListaComprasVisible(false).catch(() => {}); });
 
   dom.exportListaCompras.addEventListener("click", async () => {
     const txt = await exportarListaCompras();
@@ -4104,6 +4116,8 @@ function bindEvents() {
       ? (menuVarianteNueva || { nombre: "", opciones: [{ nombre: "", insumoId: "" }, { nombre: "", insumoId: "" }] })
       : null;
     renderMenuVarianteNueva(dom.menuVarianteNueva, menuVarianteNueva, menuInsumosDisponibles);
+    // Las cantidades por opcion de la receta dependen de si el producto usa la variante.
+    renderMenuRecetaEditorView();
   });
   dom.menuVarianteNueva.addEventListener("input", (e) => {
     if (!menuVarianteNueva) return;

@@ -1358,6 +1358,42 @@ export async function borrarEspejosSinHistorial() {
   return { cambios: aBorrar.length, insumos: aBorrar };
 }
 
+// Insumos que una factura de prueba creo con la unidad del proveedor como unidad
+// base ("BL", "BQ", "PQ"): inactivos, de prueba, y justo el caso que la lista fija
+// de unidades evita. Se borran en cada dispositivo (en la nube sola volverian con
+// el proximo arranque) y solo si no tienen historial ni receta.
+const INSUMOS_UNIDAD_RARA_V1 = [
+  "grillix-ensaladera-plastico-1000cc-50-unidades",
+  "metro-chef-harina-de-trigo-de-uso-comun-5-kg",
+  "metro-chef-mantequilla-pura-1-kg",
+  "metro-professional-cuchara-de-madera-bio-16-5cm-100-unidades",
+  "metro-professional-papel-higienico-de-2-capas-48-metros-contiene-12-rollos"
+];
+export async function borrarInsumosConUnidadRara() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+  const KEY = "insumos_unidad_rara_v1";
+  const [insumos, recetas, movimientos, lineas, config] = await Promise.all([
+    getAll("insumos"), getAll("recetas"), getAll("movimientos_insumos"), getAll("proveedor_insumos"), getAll("configuracion")
+  ]);
+  if (config.find((c) => c.id === KEY)?.valor) return { cambios: 0 };
+  const conMovimiento = new Set(movimientos.map((m) => m.insumoId));
+  const usados = new Set(recetas.map((r) => r.insumoId));
+  const aBorrar = INSUMOS_UNIDAD_RARA_V1.filter((id) => {
+    const i = insumos.find((x) => x.id === id);
+    return i && i.activo === false && !conMovimiento.has(id) && !usados.has(id);
+  });
+  const lineasABorrar = lineas.filter((l) => aBorrar.includes(l.insumoId)).map((l) => l.id);
+  const now = new Date().toISOString();
+  await withStores(["insumos", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
+    for (const id of lineasABorrar) stores.proveedor_insumos.delete(id);
+    for (const id of aBorrar) stores.insumos.delete(id);
+    stores.configuracion.put({ id: KEY, valor: true, actualizadoEn: now });
+  });
+  for (const id of lineasABorrar) await deleteProveedorInsumoRemoto(id).catch(() => {});
+  for (const id of aBorrar) await deleteInsumoRemoto(id).catch(() => {});
+  return { cambios: aBorrar.length, insumos: aBorrar };
+}
+
 // Nombres de productos de prueba que quedaron en minuscula. En la caja el nombre
 // se lee tal cual, al lado de "Jamon y queso". Solo en la base de prueba: un
 // cambio en la nube no alcanza (cada dispositivo vuelve a subir su catalogo

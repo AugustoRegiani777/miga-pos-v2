@@ -31,6 +31,40 @@ const ETIQUETAS = { g: "g", kg: "kg", ml: "ml", l: "L" };
 
 const normalizar = (u) => String(u || "").trim().toLowerCase();
 
+// La unidad BASE de un insumo (en la que se guarda el stock y se escribe la
+// receta) se ELIGE de esta lista, no se escribe: si cada persona la escribe a su
+// manera ("g", "gr", "Gramos") el sistema no sabe que son lo mismo y se pierden
+// las conversiones (kg, L), el minimo sugerido y la lectura de facturas. kg y L
+// no estan aca porque son la misma medida mas grande (el sistema ya los ofrece
+// solos); botella, caja o paquete son ENVASES y se cargan aparte.
+export const UNIDADES_BASE = [
+  { valor: "g", etiqueta: "g · gramos" },
+  { valor: "ml", etiqueta: "ml · mililitros" },
+  { valor: "unidad", etiqueta: "unidad" },
+  { valor: "rebanada", etiqueta: "rebanada" }
+];
+
+const ALIAS_UNIDAD_BASE = {
+  g: "g", gr: "g", grs: "g", gramo: "g", gramos: "g",
+  ml: "ml", cc: "ml", mililitro: "ml", mililitros: "ml",
+  unidad: "unidad", unidades: "unidad", u: "unidad", un: "unidad", ud: "unidad", uds: "unidad", unid: "unidad",
+  rebanada: "rebanada", rebanadas: "rebanada"
+};
+
+// Devuelve la unidad base estandar, o null si no es ninguna conocida. Red de
+// seguridad para lo que llega por otra via (una factura, un dato viejo).
+export function normalizarUnidadBase(texto) {
+  return ALIAS_UNIDAD_BASE[normalizar(texto)] || null;
+}
+
+// <option>s para un <select> de unidad base. Sin valor elegido queda "— Unidad —":
+// hay que elegir, para que nadie guarde "unidad" por olvido cuando era gramos.
+export function opcionesUnidadBase(valor = "") {
+  const actual = normalizarUnidadBase(valor) || "";
+  return `<option value="" ${actual ? "" : "selected"}>— Unidad —</option>` +
+    UNIDADES_BASE.map((u) => `<option value="${u.valor}" ${u.valor === actual ? "selected" : ""}>${u.etiqueta}</option>`).join("");
+}
+
 function familiaDe(unidadBase) {
   const u = normalizar(unidadBase);
   return FAMILIAS.find((f) => Object.keys(f.equivalencias).includes(u)) || null;

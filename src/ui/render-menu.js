@@ -1,4 +1,5 @@
 import { minimoSugerido, UNIDADES_ANTES_DE_REPONER } from "../modules/catalogo-armar.js";
+import { opcionesUnidadBase } from "../utils/unidades.js";
 
 function fmtEur(centavos) {
   return (centavos / 100).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -117,9 +118,19 @@ export function renderMenuInsumoSelect(selectEl, insumos, selectedId) {
 // opcion, salvo la que ya tiene su propio campo "Cantidad" arriba, puede
 // pisar ese valor con uno propio (ej: la avena rinde distinto que la
 // entera). Vacio = usa la cantidad base de arriba, sin excepcion.
-function lineaVarianteCantidades(linea, grupos, insumos, index) {
+//
+// Eso SOLO aplica si ESTE producto usa ese grupo (el selector "Que se pregunta al
+// venderlo"). Si no lo usa, la receta descuenta el insumo elegido tal cual y las
+// otras opciones no intervienen para nada; mostrar sus cantidades igual hacia
+// pensar que se descontaban todas ("me preocupa que descuente de las tres").
+// En ese caso se dice claramente que no.
+function lineaVarianteCantidades(linea, grupos, insumos, index, grupoElegidoId = "") {
   const grupo = grupos.find((g) => (g.opciones || []).some((o) => o.insumoId === linea.insumoId));
   if (!grupo) return "";
+  if (grupo.id !== grupoElegidoId) {
+    const nombre = insumos.find((i) => i.id === linea.insumoId)?.nombre || "este insumo";
+    return `<p class="cal-muted menu-receta-sin-variante">Se descuenta solo ${nombre}. Este producto no pregunta "${grupo.nombre}" al venderlo.</p>`;
+  }
   const unidad = insumos.find((i) => i.id === linea.insumoId)?.unidad || "";
   const cantidadBase = linea.cantidad || 0;
   const overrides = linea.variantesCantidad || {};
@@ -206,7 +217,7 @@ export function actualizarSugeridoEnSitio(container, linea, index) {
   }
 }
 
-export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], proveedores = []) {
+export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], proveedores = [], grupoElegidoId = "") {
   if (!lineas.length) {
     container.innerHTML = "<p class='cal-muted' style='padding:0.25rem 0'>Sin insumos agregados todavia.</p>";
     return;
@@ -225,7 +236,7 @@ export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], pr
         ${esNuevo ? `
           <div class="menu-receta-nuevo-fields">
             <input class="menu-receta-nuevo-nombre" data-idx="${index}" type="text" placeholder="Nombre del insumo nuevo" value="${linea.nuevoNombre ?? ""}">
-            <input class="menu-receta-nuevo-unidad" data-idx="${index}" type="text" placeholder="Unidad (g, ml, unidad...)" value="${linea.nuevaUnidad ?? ""}">
+            <select class="menu-receta-nuevo-unidad" data-idx="${index}" aria-label="Unidad en la que lo gastás">${opcionesUnidadBase(linea.nuevaUnidad)}</select>
           </div>
           <div class="menu-receta-nuevo-fields">
             <input class="menu-receta-nuevo-min" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Mínimo${sugerido ? `: ${sugerido}` : ""}" value="${linea.nuevoStockMinimo ?? (sugerido ?? "")}">
@@ -235,7 +246,7 @@ export function renderMenuRecetaRows(container, lineas, insumos, grupos = [], pr
             ? `Calculado para ${UNIDADES_ANTES_DE_REPONER} unidades antes de reponer. Cambialo si querés.`
             : "Poné primero la cantidad y te propongo un mínimo."}</p>
           ${bloqueProveedorNuevo(linea, index, proveedores)}` : ""}
-        ${lineaVarianteCantidades(linea, grupos, insumos, index)}
+        ${lineaVarianteCantidades(linea, grupos, insumos, index, grupoElegidoId)}
       </div>`;
   }).join("");
 
@@ -292,7 +303,7 @@ export function renderMenuVarianteNueva(container, estado, insumos) {
         ${o.insumoId === "__nuevo__" ? `
         <div class="menu-variante-opcion-nuevo" data-idx="${i}">
           <input class="menu-variante-nuevo-nombre" data-idx="${i}" type="text" placeholder="Nombre del insumo nuevo" value="${o.nuevoInsumo?.nombre ?? ""}">
-          <input class="menu-variante-nuevo-unidad" data-idx="${i}" type="text" placeholder="Unidad (ml, g...)" value="${o.nuevoInsumo?.unidad ?? ""}">
+          <select class="menu-variante-nuevo-unidad" data-idx="${i}" aria-label="Unidad en la que lo gastás">${opcionesUnidadBase(o.nuevoInsumo?.unidad)}</select>
         </div>` : ""}`).join("")}
       <button class="ghost-button compact" type="button" data-action="agregar-opcion">+ Agregar respuesta</button>
     </div>`;

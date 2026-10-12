@@ -1,3 +1,6 @@
 node_modules/
 .netlify/
 .env
+
+# Notas privadas con claves (el repositorio es publico)
+COMANDOS.local.md

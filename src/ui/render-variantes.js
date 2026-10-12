@@ -1,4 +1,5 @@
 import { renderMenuInsumoSelect } from "./render-menu.js";
+import { opcionesUnidadBase } from "../utils/unidades.js";
 
 export function renderVariantesGruposList(el, grupos, callbacks = {}) {
   if (!grupos.length) {
@@ -66,7 +67,7 @@ export function renderVariantesOpcionesRows(container, opciones, insumos) {
         ${esNuevo ? `
           <div class="menu-receta-nuevo-fields">
             <input class="variante-nuevo-nombre" data-idx="${index}" type="text" placeholder="Nombre del insumo nuevo" value="${opcion.nuevoInsumo?.nombre ?? ""}">
-            <input class="variante-nuevo-unidad" data-idx="${index}" type="text" placeholder="Unidad (g, ml...)" value="${opcion.nuevoInsumo?.unidad ?? ""}">
+            <select class="variante-nuevo-unidad" data-idx="${index}" aria-label="Unidad en la que lo gastás">${opcionesUnidadBase(opcion.nuevoInsumo?.unidad)}</select>
           </div>
           <div class="menu-receta-nuevo-fields">
             <input class="variante-nuevo-min" data-idx="${index}" type="number" min="0" step="any" inputmode="decimal" placeholder="Stock minimo" value="${opcion.nuevoInsumo?.stockMinimo ?? ""}">

@@ -626,7 +626,7 @@
       <section class="stock-toolbar stock-toolbar-ciclo">
         <div class="toolbar-paso">
           <span class="toolbar-paso-titulo">Antes de comprar</span>
-          <button class="ghost-button compact" type="button" id="ver-lista-compras">Qué pedir</button>
+          <button class="ghost-button compact boton-despliega" type="button" id="ver-lista-compras" aria-expanded="false" aria-controls="lista-compras-section">Qué pedir</button>
         </div>
         <div class="toolbar-paso">
           <span class="toolbar-paso-titulo">Cuando llega</span>
@@ -650,8 +650,14 @@
               <input id="crear-insumo-nombre" type="text" required>
             </label>
             <label class="quantity-field">
-              <span>Unidad base (g, ml, unidad...)</span>
-              <input id="crear-insumo-unidad" type="text">
+              <span>Unidad en la que lo gastás</span>
+              <select id="crear-insumo-unidad">
+                <option value="">— Unidad —</option>
+                <option value="g">g · gramos</option>
+                <option value="ml">ml · mililitros</option>
+                <option value="unidad">unidad</option>
+                <option value="rebanada">rebanada</option>
+              </select>
             </label>
             <p class="form-instruccion">Y ahora, c&oacute;mo lo cont&aacute;s vos cuando lo mir&aacute;s en la estanter&iacute;a. No c&oacute;mo te lo factura el proveedor: eso se carga aparte, en Proveedores.</p>
             <label class="quantity-field">
@@ -677,9 +683,12 @@
         </form>
       </section>
 
-      <section id="lista-compras-section" hidden>
-        <div class="section-heading" style="padding-top: 0.5rem">
+      <!-- Panel con borde, para que se vea que es una lista que se despliega de
+           "Qué pedir" y no una pantalla nueva. Se cierra desde su propio encabezado. -->
+      <section id="lista-compras-section" class="panel-lista-compras" hidden>
+        <div class="panel-lista-compras-encabezado">
           <h2>Lo que falta comprar</h2>
+          <button class="ghost-button compact" type="button" id="cerrar-lista-compras" aria-label="Cerrar la lista">✕ Cerrar</button>
         </div>
         <div class="stock-list" id="lista-compras-list"></div>
         <div class="backup-actions">
@@ -817,8 +826,14 @@
                 <input id="prov-prod-nuevo-nombre" type="text">
               </label>
               <label class="quantity-field">
-                <span>Unidad base (g, ml, unidad...)</span>
-                <input id="prov-prod-nuevo-unidad" type="text">
+                <span>Unidad en la que lo gastás</span>
+                <select id="prov-prod-nuevo-unidad">
+                  <option value="">— Unidad —</option>
+                <option value="g">g · gramos</option>
+                <option value="ml">ml · mililitros</option>
+                <option value="unidad">unidad</option>
+                <option value="rebanada">rebanada</option>
+                </select>
               </label>
               <label class="quantity-field">
                 <span>Stock minimo</span>

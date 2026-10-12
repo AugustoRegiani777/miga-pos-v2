@@ -1,4 +1,4 @@
-import { formatearCantidad, formatearConEnvase, desdeBase, tieneConversion, etiquetaUnidadPlural, formatearNumero } from "../utils/unidades.js";
+import { formatearCantidad, formatearConEnvase, desdeBase, tieneConversion, etiquetaUnidadPlural, formatearNumero, opcionesUnidadBase } from "../utils/unidades.js";
 
 function timeAgo(isoString) {
   if (!isoString) return "Nunca calibrado";
@@ -81,10 +81,12 @@ function stockBaseText(insumo) {
   return formatearConEnvase(insumo.stockActual, insumo.unidad, envaseDe(insumo));
 }
 
-// onCalibrar (opcional): cada fila trae su propio boton naranja "Calibrar", al
-// lado del estado del stock. Calibrar es contar lo que hay y decirselo al
-// sistema, asi que el boton tiene que estar en la fila del insumo que se tiene
-// delante, no al final de una lista aparte donde hay que ir a buscarlo.
+// onCalibrar (opcional): cada fila trae su propio "Calibrar", junto al NOMBRE del
+// insumo (no junto al estado). Calibrar es contar lo que hay y decirselo al
+// sistema: una herramienta de la fila, no una tarea pendiente. Por eso es texto
+// discreto y no un boton de color, y por eso no comparte lugar con la cantidad y
+// el estado, que es lo que la persona lee. Va en la fila del insumo que se tiene
+// delante, no en una lista aparte donde hay que ir a buscarlo.
 export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
   if (insumos.length === 0) {
     container.innerHTML = '<p class="empty-state">No hay insumos cargados.</p>';
@@ -93,11 +95,13 @@ export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
   container.innerHTML = insumos.map(insumo => `
     <div class="stock-row" data-id="${insumo.id}" role="button" tabindex="0">
       <div>
-        <h2>${insumo.nombre}${insumo.esEstimado ? " ~" : ""}</h2>
+        <div class="stock-row-titulo">
+          <h2>${insumo.nombre}${insumo.esEstimado ? " ~" : ""}</h2>
+          ${onCalibrar ? `<button type="button" class="btn-calibrar-insumo" data-calibrar-fila="${insumo.id}" aria-label="Calibrar ${insumo.nombre}">Calibrar</button>` : ""}
+        </div>
         <p>${stockBaseText(insumo)}</p>
       </div>
       <div class="stock-row-actions">
-        ${onCalibrar ? `<button type="button" class="btn-calibrar-insumo" data-calibrar-fila="${insumo.id}" aria-label="Calibrar ${insumo.nombre}">Calibrar</button>` : ""}
         ${statusPill(insumo.estadoStock)}
       </div>
     </div>
@@ -485,8 +489,8 @@ export function renderFacturaLineas(container, lineas, insumos) {
           <label class="quantity-field">Nombre del insumo nuevo
             <input type="text" class="factura-nuevo-nombre" value="${linea.nombreDetectado || ""}">
           </label>
-          <label class="quantity-field">Unidad base
-            <input type="text" class="factura-nueva-unidad" value="${linea.unidad || ""}">
+          <label class="quantity-field">Unidad en la que lo gastás
+            <select class="factura-nueva-unidad">${opcionesUnidadBase(linea.unidad)}</select>
           </label>
           <label class="quantity-field">Stock mínimo
             <input type="number" step="any" class="factura-nuevo-min" value="0">

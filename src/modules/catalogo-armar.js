@@ -10,6 +10,7 @@
 // reposicion, y una linea de proveedor armada distinto segun la puerta.
 
 import { slugify } from "../utils/format.js";
+import { normalizarUnidadBase } from "../utils/unidades.js";
 
 const numero = (v) => {
   const n = parseFloat(String(v ?? "").replace(",", "."));
@@ -56,7 +57,12 @@ export function construirInsumoNuevo(nombre, idsUsados, { unidad, unidadCompra, 
   idsUsados.add(id);
 
   const now = new Date().toISOString();
-  const unidadFinal = String(unidad || "").trim() || "unidad";
+  // La unidad base es una de g, ml, unidad o rebanada (ver unidades.js). Escribir
+  // "gr" o "Gramos" se reconoce y se guarda como "g"; cualquier otra cosa se
+  // rechaza con un mensaje claro en vez de guardar una unidad que el sistema no
+  // sabe convertir.
+  const unidadFinal = normalizarUnidadBase(unidad);
+  if (!unidadFinal) throw new Error(`Elegí la unidad de "${nombreLimpio}": g, ml, unidad o rebanada.`);
 
   // El envase: con que nombre lo contas y cuanto trae cada uno. Sin envase
   // propio, el insumo se cuenta en su unidad base (factor 1). Un envase que
