@@ -366,22 +366,32 @@ export function renderListaComprasSmart(container, { items, byProveedor }) {
     return `<span class="ldc-dias">${texto}</span>`;
   }
 
+  // Lo que se muestra del pedido. Un insumo que esta OK no hay que pedirlo YA:
+  // la cantidad es para su proximo pedido normal al proveedor, y decir "Pedir"
+  // lo hacia parecer una urgencia (miga con 16 dias de stock y "Pedir 11
+  // paquetes"). Se agrega cuantos dias cubre ese pedido, que es lo que permite
+  // juzgar si la cantidad tiene sentido.
+  function pedidoTexto(item, s) {
+    const costoStr = s.costoTotalCentavos > 0 ? ` · ~€${(s.costoTotalCentavos/100).toFixed(2)}` : "";
+    const cubreStr = s.coberturaFinalDias != null && s.coberturaFinalDias > 0 ? ` · cubre ~${Math.round(s.coberturaFinalDias)} días` : "";
+    const prefijo = item.urgencia === "ok" ? "Para el próximo pedido:" : "Pedir";
+    return `${prefijo} <strong>${s.cantidadEnCompra} ${s.unidadCompra}</strong>${costoStr}${cubreStr}`;
+  }
+
   function rowHtml(item, showSupplier = true) {
     let supplierHtml = "";
     if (showSupplier) {
       if (item.mejorSupplier) {
         const s = item.mejorSupplier;
-        const costoStr = s.costoTotalCentavos > 0 ? ` · ~€${(s.costoTotalCentavos/100).toFixed(2)}` : "";
-        const cantStr = s.cantidadEnCompra > 0 ? `Pedir <strong>${s.cantidadEnCompra} ${s.unidadCompra}</strong>${costoStr}` : `Sin pedido necesario`;
+        const cantStr = s.cantidadEnCompra > 0 ? pedidoTexto(item, s) : `Sin pedido necesario`;
         supplierHtml = `<span class="ldc-supplier">${s.proveedorNombre} — ${cantStr}</span>`;
       } else {
         supplierHtml = `<span class="ldc-supplier ldc-sin-prov">Sin proveedor asignado</span>`;
       }
     } else if (item.mejorSupplier) {
       const s = item.mejorSupplier;
-      const costoStr = s.costoTotalCentavos > 0 ? ` · ~€${(s.costoTotalCentavos/100).toFixed(2)}` : "";
       supplierHtml = s.cantidadEnCompra > 0
-        ? `<span class="ldc-supplier">Pedir <strong>${s.cantidadEnCompra} ${s.unidadCompra}</strong>${costoStr}</span>`
+        ? `<span class="ldc-supplier">${pedidoTexto(item, s)}</span>`
         : `<span class="ldc-supplier ldc-sin-prov">Sin pedido necesario</span>`;
     }
     return `<div class="ldc-row ldc-row--${item.urgencia}">
