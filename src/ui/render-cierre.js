@@ -205,36 +205,18 @@ export function renderCierre(container, datos, opciones = {}) {
     renderResultadoCierre(resultado, r, { tickets: datos.ventas.length });
     container.querySelectorAll("input[data-money]").forEach((i) => i.setAttribute("aria-invalid", Number.isNaN(parseEuros(i.value)) ? "true" : "false"));
     container.querySelector("#cierre-guardar").disabled = Boolean(r.error);
-    // Dato al lado del campo (no un boton): lo que el sistema dice que deberia haber, y si lo
-    // contado coincide o cuanto se aleja. La persona sigue contando y escribiendo.
-    const info = container.querySelector("#cierre-contado-coincide");
+    // Dato al lado de cada campo: solo lo que dice el sistema. No se juzga si "esta bien": lo
+    // que se escribe es lo que se cuenta, y decir "coincide" daba por bueno algo sin confirmar.
     esperadoActual = r.calculo.esperadoEfectivoCentavos;
+    const info = container.querySelector("#cierre-contado-coincide");
     if (info) {
       info.hidden = !(esperadoActual >= 0);
-      const contado = r.form.contadoCentavos;
-      const dif = Number.isFinite(contado) ? contado - esperadoActual : null;
-      info.classList.toggle("es-ok", dif !== null && Math.abs(dif) <= 1);
-      info.classList.toggle("es-dif", dif !== null && Math.abs(dif) > 1);
-      info.textContent = dif === null
-        ? `Según el sistema debería haber ${centsToMoney(esperadoActual)}`
-        : Math.abs(dif) <= 1
-          ? `✓ Coincide con el sistema (${centsToMoney(esperadoActual)})`
-          : `Sistema: ${centsToMoney(esperadoActual)} · ${dif > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(dif))}`;
+      info.textContent = `Según el sistema debería haber ${centsToMoney(esperadoActual)}`;
     }
-    // Lo mismo para la tarjeta: lo que anoto la Caja contra el total de Postnet que se escribe.
     const infoT = container.querySelector("#cierre-tarjeta-coincide");
     if (infoT) {
-      const sist = sistema.tarjetaCentavos;
-      const tarj = r.form.tarjetaCentavos;
-      const difT = Number.isFinite(tarj) ? tarj - sist : null;
       infoT.hidden = false;
-      infoT.classList.toggle("es-ok", difT !== null && Math.abs(difT) <= 1);
-      infoT.classList.toggle("es-dif", difT !== null && Math.abs(difT) > 1);
-      infoT.textContent = difT === null
-        ? `Según el sistema entró ${centsToMoney(sist)}`
-        : Math.abs(difT) <= 1
-          ? `✓ Coincide con el sistema (${centsToMoney(sist)})`
-          : `Sistema: ${centsToMoney(sist)} · ${difT > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(difT))}`;
+      infoT.textContent = `Según el sistema entró ${centsToMoney(sistema.tarjetaCentavos)}`;
     }
     return r;
   };
