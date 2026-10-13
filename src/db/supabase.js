@@ -1,4 +1,5 @@
 import { esEntornoDePrueba } from "../utils/entorno.js";
+import { refDeBase } from "../utils/base-de-datos.js";
 
 const PROD_URL = "https://iknytfgqkdddtqpykgab.supabase.co";
 const PROD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlrbnl0Zmdxa2RkZHRxcHlrZ2FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NjY1OTQsImV4cCI6MjA5ODI0MjU5NH0.1qAJ71w1DaZu1i0G5an6AOuLwyu4_OU-uMvms4AjM0w";
@@ -22,6 +23,9 @@ const usarStaging = typeof location !== "undefined" && esEntornoDePrueba(locatio
 export const ENTORNO_DE_PRUEBA = Boolean(usarStaging);
 
 const SUPABASE_URL = usarStaging ? STAGING_URL : PROD_URL;
+// Con que base habla este dispositivo. Cada dispositivo anota la suya (ver
+// utils/base-de-datos.js) para no mezclar lo guardado de una base con otra.
+export const BASE_REF = refDeBase(SUPABASE_URL);
 const SUPABASE_ANON_KEY = usarStaging ? STAGING_ANON_KEY : PROD_ANON_KEY;
 
 if (usarStaging) {

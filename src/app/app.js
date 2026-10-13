@@ -6,7 +6,8 @@ import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, 
 import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/render-caja-pasos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
-import { signIn, signOut, restoreSession, fetchStockProductos } from "../db/supabase.js";
+import { signIn, signOut, restoreSession, fetchStockProductos, BASE_REF } from "../db/supabase.js";
+import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
@@ -4677,6 +4678,14 @@ async function bootApp() {
 }
 
 export async function startApp() {
+  // PRIMERO, antes de cualquier lectura o envio: si lo guardado en este
+  // dispositivo es de otra base de datos, se borra (ver utils/base-de-datos.js).
+  try {
+    await asegurarMismaBase(BASE_REF);
+  } catch (error) {
+    window.alert(error.message || "No se pudo reiniciar este dispositivo.");
+    return;
+  }
   setupRelojSimulado();
   bindAuthEvents();
   const session = await restoreSession();
