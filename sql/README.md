@@ -5,6 +5,3 @@
 
 Flujo: una migracion nueva nace en `staging/`, se prueba, y recien cuando esta validada se copia a `produccion/` y se corre en la base real.
 Pendiente de promover a produccion: `staging/supabase-migration-014-venta-uuid-en-movimientos.sql`.
-
-Usuario: qa-demo
-Contraseña: QaDemo-2026-staging

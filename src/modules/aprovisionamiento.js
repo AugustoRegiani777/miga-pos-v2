@@ -1,7 +1,7 @@
 import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, getPendingSyncCount } from "./sync.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount } from "./sync.js";
 import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
@@ -1392,6 +1392,48 @@ export async function borrarInsumosConUnidadRara() {
   for (const id of lineasABorrar) await deleteProveedorInsumoRemoto(id).catch(() => {});
   for (const id of aBorrar) await deleteInsumoRemoto(id).catch(() => {});
   return { cambios: aBorrar.length, insumos: aBorrar };
+}
+
+// Octubre 2026, antes de empezar de cero: tres productos y tres insumos de prueba
+// (Vittel Tone, "prooducto prueba", Pesto aguacate y salmon / INSUMO NUEVO,
+// lengua carne, salmon) se sacaron de la base. Un dispositivo que todavia los
+// tenga guardados los volveria a subir en su proximo arranque (cada uno sube su
+// catalogo local), asi que cada uno los saca tambien de lo suyo. Una sola vez.
+const PRODUCTOS_FUERA_V1 = ["vittel-tone", "prooducto-prueba", "pesto-aguacate-y-salmon"];
+const INSUMOS_FUERA_V1 = ["insumo-nuevo", "lengua-carne", "salmon"];
+export async function quitarDelCatalogoDePruebaV1() {
+  if (!ENTORNO_DE_PRUEBA) return { cambios: 0, motivo: "no es la base de prueba" };
+  const KEY = "catalogo_prueba_quitado_v1";
+  const [productos, insumos, recetas, lineas, movStock, movInsumos, historial, config] = await Promise.all([
+    getAll("productos"), getAll("insumos"), getAll("recetas"), getAll("proveedor_insumos"),
+    getAll("movimientos_stock"), getAll("movimientos_insumos"), getAll("historial_recetas"), getAll("configuracion")
+  ]);
+  if (config.find((c) => c.id === KEY)?.valor) return { cambios: 0 };
+
+  const P = new Set(PRODUCTOS_FUERA_V1), I = new Set(INSUMOS_FUERA_V1);
+  const recetasFuera = recetas.filter((r) => P.has(r.productoId) || I.has(r.insumoId));
+  const idsReceta = new Set(recetasFuera.map((r) => r.id));
+  const lineasFuera = lineas.filter((l) => I.has(l.insumoId));
+  const now = new Date().toISOString();
+
+  await withStores(["productos", "insumos", "recetas", "proveedor_insumos", "movimientos_stock", "movimientos_insumos", "historial_recetas", "configuracion"], "readwrite", (stores) => {
+    for (const r of recetasFuera) stores.recetas.delete(r.id);
+    for (const l of lineasFuera) stores.proveedor_insumos.delete(l.id);
+    for (const m of movStock) if (P.has(m.productoId)) stores.movimientos_stock.delete(m.id);
+    for (const m of movInsumos) if (I.has(m.insumoId) || P.has(m.productoId)) stores.movimientos_insumos.delete(m.id);
+    for (const h of historial) if (P.has(h.productoId) || idsReceta.has(h.recetaId)) stores.historial_recetas.delete(h.id);
+    for (const id of PRODUCTOS_FUERA_V1) stores.productos.delete(id);
+    for (const id of INSUMOS_FUERA_V1) stores.insumos.delete(id);
+    stores.configuracion.put({ id: KEY, valor: true, actualizadoEn: now });
+  });
+
+  // De la nube, de lo que cuelga hacia arriba (recetas y lineas antes que sus padres).
+  // Todo es idempotente: si ya no estan, no pasa nada.
+  for (const r of recetasFuera) await deleteRecetaRemota(r.id).catch(() => {});
+  for (const l of lineasFuera) await deleteProveedorInsumoRemoto(l.id).catch(() => {});
+  for (const id of PRODUCTOS_FUERA_V1) trySyncProductoEliminado(id).catch(() => {});
+  for (const id of INSUMOS_FUERA_V1) await deleteInsumoRemoto(id).catch(() => {});
+  return { cambios: PRODUCTOS_FUERA_V1.length + INSUMOS_FUERA_V1.length };
 }
 
 // Nombres de productos de prueba que quedaron en minuscula. En la caja el nombre
