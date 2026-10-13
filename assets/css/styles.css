@@ -4176,3 +4176,97 @@ body.arrastrando-fila {
 }
 .version-badge:active { opacity: 0.85; }
 .version-badge:disabled { opacity: 0.6; }
+
+/* =====================================================================
+   CELULAR (iPhone y similares, hasta 600 px de ancho). La tablet NO se toca.
+   Principio: en un celular la pantalla es chica, asi que lo que no se usa a
+   cada rato no puede ocupar sitio. Antes, la barra de arriba, el titulo, los
+   botones de la seccion y el menu secundario se llevaban tres cuartos de la
+   primera pantalla antes de ver una sola fila de datos.
+   ===================================================================== */
+@media (max-width: 600px) {
+  /* Zonas seguras del iPhone (muesca arriba, barra de inicio abajo). */
+  body { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .reloj-simulado { padding-top: calc(0.4rem + env(safe-area-inset-top, 0px)); }
+
+  /* Barra superior: una fila fina (marca + avisos + salir) y debajo el menu, que se
+     desliza con un degradado a la derecha que avisa que hay mas. */
+  .topbar {
+    flex-direction: row;       /* por debajo de 940 px otra regla lo apilaba en columna */
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 6px 0 0;
+  }
+  .brand { order: 1; padding-left: 12px; font-size: 1.05rem; }
+  .topbar-actions { order: 2; margin-left: auto; padding-right: 12px; gap: 6px; }
+  .topbar-actions .ghost-button,
+  .topbar-actions .sync-status-badge,
+  .topbar-actions .novedades-badge,
+  .topbar-actions .version-badge {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 0.8rem;
+  }
+  .nav {
+    order: 3;
+    flex: 1 1 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0 12px 6px;
+    gap: 2px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(to right, #000 90%, transparent);
+    mask-image: linear-gradient(to right, #000 90%, transparent);
+  }
+  .nav-link { flex-shrink: 0; min-height: 44px; padding: 0 12px; font-size: 0.95rem; scroll-snap-align: start; }
+
+  /* Titulo de la seccion en una linea con su boton, y sin el parrafo explicativo. */
+  .section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 10px;
+    margin-bottom: 10px;
+  }
+  .section-heading h1 { margin: 0; font-size: 1.5rem; }
+  .section-heading > p { display: none; }
+  .section-heading .ghost-button { min-height: 40px; }
+
+  /* Menu secundario de Gestion: una fila que se desliza, no dos filas cortadas. */
+  .nav.sub-nav {
+    flex-wrap: nowrap;
+    margin: 0 -12px 8px;
+    padding: 0 12px;
+  }
+  .nav.sub-nav .nav-link { padding: 0 12px; }
+
+  /* Hojas (formularios): el "Cerrar" va arriba a la derecha, no en una fila propia. */
+  .production-sheet-header {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .production-sheet-header > .ghost-button { flex-shrink: 0; width: auto; min-height: 40px; }
+  .stock-adjust-sheet .sheet-footer,
+  .production-sheet .sheet-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  /* Gestion: lo primero que se ve tiene que ser el trabajo, no el marco. */
+  /* El titulo de cada subpantalla repite lo que ya dice la pestana de arriba. */
+  .subview > .section-heading h1 { display: none; }
+  .subview > .section-heading:not(:has(button)) { display: none; }
+  /* Los botones de accion, en una fila y sin las etiquetas de grupo. */
+  .stock-toolbar-ciclo { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+  .stock-toolbar-ciclo .toolbar-paso { display: contents; }
+  .stock-toolbar-ciclo .toolbar-paso-titulo { display: none; }
+  .stock-toolbar-ciclo .ghost-button { flex: 1 1 auto; min-height: 44px; margin: 0; }
+  /* "Ordenar por" al lado del selector, no encima. */
+  #insumos-orden-field { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+  #insumos-orden-field > span { white-space: nowrap; font-size: 0.9rem; }
+  #insumos-orden-field select { flex: 1; min-width: 0; min-height: 44px; }
+  /* Cada insumo en dos lineas (nombre + cantidad a la izquierda, estado a la derecha),
+     no en tres con el estado debajo. */
+  #insumos-list .stock-row { grid-template-columns: 1fr auto; align-items: center; padding: 10px 14px; }
+  #insumos-list .stock-row-actions { grid-column: auto; justify-content: flex-end; }
+  #insumos-list .stock-row h2 { font-size: 1.1rem; }
+}
