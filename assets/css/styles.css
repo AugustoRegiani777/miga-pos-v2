@@ -4484,3 +4484,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .toolbar-buscar input::placeholder { color: var(--muted); }
 .toolbar-orden select { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; font: inherit; }
 @media (max-width: 700px) { .toolbar-buscar { flex: 1 1 100%; max-width: none; margin: 0; } }
+
+.toolbar-orden-fila { display: flex; gap: 8px; align-items: center; }
+#insumos-orden-sentido { min-height: 44px; white-space: nowrap; }
+@media (max-width: 700px) { .toolbar-orden-fila { flex: 1; min-width: 0; } .toolbar-orden-fila select { flex: 1; } }

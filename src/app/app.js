@@ -408,6 +408,7 @@ const dom = {
   closePeriodButton: document.querySelector("#close-period-button"),
   insumosOrden: document.querySelector("#insumos-orden"),
   insumosBuscar: document.querySelector("#insumos-buscar"),
+  insumosOrdenSentido: document.querySelector("#insumos-orden-sentido"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
   relojSimulado: document.querySelector("#reloj-simulado"),
@@ -2082,11 +2083,34 @@ function closeCalibracionSheet() {
 // sirviendo tal cual para todo lo demas que la usa, ej. la cola de
 // faltantes de produccion).
 // Categoria y proveedor agrupan con un encabezado; un insumo sin ese dato va al final, en "Sin asignar".
+// Sentido del orden: "normal" es el que se ve al entrar (lo mas flojo / urgente / reciente primero);
+// "invertido" lo da vuelta. Dentro de cada grupo (categoria, proveedor) se ordena por nivel de stock.
+let insumosOrdenInvertido = false;
+const TEXTO_SENTIDO = {
+  estado: ["Menor stock primero", "Mayor stock primero"],
+  categoria: ["Menor stock primero", "Mayor stock primero"],
+  proveedor: ["Menor stock primero", "Mayor stock primero"],
+  fecha: ["Más reciente primero", "Más antigua primero"],
+  sugerencia: ["Más urgente primero", "Menos urgente primero"]
+};
+function actualizarBotonSentido() {
+  const modo = dom.insumosOrden?.value || "estado";
+  const [normal, invertido] = TEXTO_SENTIDO[modo] || TEXTO_SENTIDO.estado;
+  if (!dom.insumosOrdenSentido) return;
+  dom.insumosOrdenSentido.textContent = `${insumosOrdenInvertido ? "↓" : "↑"} ${insumosOrdenInvertido ? invertido : normal}`;
+  dom.insumosOrdenSentido.setAttribute("aria-pressed", String(insumosOrdenInvertido));
+}
+// Nivel de stock: cuanto tiene respecto a su minimo (los insumos usan unidades distintas, asi que
+// la cantidad suelta no se puede comparar entre ellos).
+const nivelDeStock = (i) => (Number(i.stockMinimo) > 0 ? (Number(i.stockActual) || 0) / Number(i.stockMinimo) : Infinity);
+
 async function ordenarInsumosParaVista(insumos, modo) {
+  const sentido = insumosOrdenInvertido ? -1 : 1;
   const porNombre = (a, b) => a.nombre.localeCompare(b.nombre);
+  const porNivel = (a, b) => (sentido * (nivelDeStock(a) - nivelDeStock(b))) || porNombre(a, b);
   const agrupar = (clave) => insumos
     .map((i) => ({ ...i, grupo: clave(i) || { nombre: "Sin asignar", orden: 1e9 } }))
-    .sort((a, b) => (a.grupo.orden - b.grupo.orden) || a.grupo.nombre.localeCompare(b.grupo.nombre) || porNombre(a, b))
+    .sort((a, b) => (a.grupo.orden - b.grupo.orden) || a.grupo.nombre.localeCompare(b.grupo.nombre) || porNivel(a, b))
     .map((i) => ({ ...i, grupo: i.grupo.nombre }));
 
   if (modo === "categoria") {
@@ -2109,11 +2133,12 @@ async function ordenarInsumosParaVista(insumos, modo) {
     const provDe = new Map(items.map((x) => [x.id, x.mejorSupplier ? { nombre: x.mejorSupplier.proveedorNombre, orden: 0 } : null]));
     return agrupar((i) => provDe.get(i.id));
   }
+  if (modo === "estado" && insumosOrdenInvertido) return insumos.slice().sort(porNivel);
   if (modo === "sugerencia") {
     // El mismo orden que "Que pedir": lo mas urgente de pedir primero.
     const { items } = await listaDeComprasSmart();
     const rango = new Map(items.map((x, n) => [x.id, n]));
-    return insumos.slice().sort((a, b) => ((rango.get(a.id) ?? 1e9) - (rango.get(b.id) ?? 1e9)) || porNombre(a, b));
+    return insumos.slice().sort((a, b) => (sentido * ((rango.get(a.id) ?? 1e9) - (rango.get(b.id) ?? 1e9))) || porNombre(a, b));
   }
   if (modo === "fecha") {
     // La ultima vez que entro mercaderia (compra); los que nunca tuvieron una, al final.
@@ -2125,7 +2150,7 @@ async function ordenarInsumosParaVista(insumos, modo) {
       if (f > (ultima.get(m.insumoId) || "")) ultima.set(m.insumoId, f);
     }
     return insumos.slice()
-      .sort((a, b) => (ultima.get(b.id) || "").localeCompare(ultima.get(a.id) || "") || porNombre(a, b))
+      .sort((a, b) => (sentido * (ultima.get(b.id) || "").localeCompare(ultima.get(a.id) || "")) || porNombre(a, b))
       .map((i) => ({ ...i, ultimaCompra: ultima.get(i.id) || null }));
   }
   return insumos;
@@ -2259,6 +2284,7 @@ async function guardarPendienteCiclo(article) {
 
 async function renderInsumosView() {
   const insumos = await listInsumos();
+  actualizarBotonSentido();
   let ordenados = await ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
   // Buscador: sin tildes ni mayusculas ("jamon" encuentra "Jamon york" y "Jamón serrano").
   const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -3842,7 +3868,8 @@ function bindEvents() {
     }
   });
 
-  dom.insumosOrden?.addEventListener("change", () => { renderInsumosView(); });
+  dom.insumosOrden?.addEventListener("change", () => { insumosOrdenInvertido = false; renderInsumosView(); });
+  dom.insumosOrdenSentido?.addEventListener("click", () => { insumosOrdenInvertido = !insumosOrdenInvertido; renderInsumosView(); });
   dom.insumosBuscar?.addEventListener("input", () => { renderInsumosView(); });
   dom.closeInsumosAjuste.addEventListener("click", closeInsumoAjusteSheet);
   dom.insumosAjusteBackdrop.addEventListener("click", closeInsumoAjusteSheet);
