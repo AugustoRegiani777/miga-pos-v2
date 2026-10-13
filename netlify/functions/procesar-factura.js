@@ -24,6 +24,8 @@
 // variables): ANTHROPIC_API_KEY y SUPABASE_SERVICE_ROLE_KEY. Opcional: SUPABASE_URL
 // (solo en un sitio de pruebas, para apuntar a staging; sin ella usa la real).
 
+const { guiaDe } = require("./guias-proveedores");
+const { conVerificacion } = require("./factura-calculos");
 const AnthropicModule = require("@anthropic-ai/sdk");
 const Anthropic = AnthropicModule.default || AnthropicModule;
 
@@ -117,6 +119,14 @@ const FACTURA_TOOL = {
               type: "number",
               description: "precio TOTAL de esa linea, en euros. Omitir si no se distingue con claridad — no inventar."
             },
+            precioUnitarioFactura: {
+              type: "number",
+              description: "precio por unidad de medida tal como lo imprime la factura en su columna de precio (P.V.P, precio, etc.), por ejemplo el precio por kilo. Omitir si la factura no lo trae. Sirve para comprobar la cuenta."
+            },
+            factorPorUnidadFactura: {
+              type: "number",
+              description: "SOLO si la factura lo imprime en una columna: cuanto pesa o mide cada unidad de la linea (por ejemplo 3,15 kg por unidad). Omitir si no hay esa columna. Sirve para comprobar la cuenta."
+            },
             insumoId: {
               type: ["string", "null"],
               description: "id del catalogo maestro si ES SEMANTICAMENTE el mismo insumo (aunque el nombre sea distinto). null si no hay ninguno claro."
@@ -189,7 +199,7 @@ exports.handler = async (event) => {
       supabaseQuery(
         `/proveedor_insumos?proveedor_id=eq.${encodeURIComponent(proveedorId)}&activo=eq.true&select=insumo_id,nombre_producto,cantidad_por_unidad`
       ),
-      leerConClaude(mediaType, base64Data, buildCatalogoMaestroTexto(catalogoMaestro))
+      leerConClaude(mediaType, base64Data, buildCatalogoMaestroTexto(catalogoMaestro), proveedorId)
     ]);
   } catch (error) {
     return { statusCode: 502, body: `No se pudo procesar la factura: ${error.message}` };
@@ -226,7 +236,7 @@ exports.handler = async (event) => {
       return base;
     }
     return item;
-  });
+  }).map(conVerificacion);
 
   return {
     statusCode: 200,
@@ -243,7 +253,7 @@ function unidadBaseDe(insumoId, catalogoMaestro) {
   return catalogoMaestro.find((i) => i.id === insumoId)?.unidad || "unidad";
 }
 
-async function leerConClaude(mediaType, base64Data, lineasMaestro) {
+async function leerConClaude(mediaType, base64Data, lineasMaestro, proveedorId) {
   const systemPrompt = `Sos un asistente que lee facturas y albaranes de proveedores para una sandwicheria y extrae cada linea de producto en formato estructurado.
 
 Catalogo maestro de insumos (ingredientes) del negocio:
@@ -254,7 +264,12 @@ Para cada linea de producto real que encuentres en la factura (ignora envases, p
 - "cantidad" es el numero de unidades de compra tal como figura en la factura (ej. la columna "Unidades": 1, 6, 3). "unidad" es el formato/envase tal como aparece (ej. "6 CAJA", "1 BRIK", "1 BOLSA"). No los combines ni los conviertas entre si.
 - Si un campo (precio, unidad) no es legible con claridad, omitilo en la respuesta en vez de inventar un valor.
 - Si el producto ES semanticamente el mismo insumo que algo del catalogo maestro de arriba (aunque el nombre este escrito distinto), asigna ese insumoId con confianza "media". Si no reconoces ningun insumo equivalente, deja insumoId en null y confianza "sin_match". No asumas una equivalencia si no estas razonablemente seguro — es preferible "sin_match" a un match forzado.
-- Cuando asignes insumoId, ademas RAZONA cuanto rinde UNA unidad de compra de esa linea, en la unidad base del insumo (campo cantidadPorUnidad) — las facturas de proveedores mayoristas suelen empaquetar varias piezas juntas (ej. una "caja" que en realidad son 6 botellas de 1.5L cada una = 9L por caja) y ese multiplicador casi nunca es 1. Fijate en el nombre del producto y en "Formato"/"unidad" para el tamano de cada pieza y el multiplicador del paquete, y mostra la cuenta en calculoExplicado para que un humano la pueda revisar de un vistazo. Si el envase ya es una sola pieza suelta (ej. "1 BRIK" de 1L), cantidadPorUnidad es simplemente el tamano de esa pieza convertido a unidad base.`;
+- Cuando asignes insumoId, ademas RAZONA cuanto rinde UNA unidad de compra de esa linea, en la unidad base del insumo (campo cantidadPorUnidad) — las facturas de proveedores mayoristas suelen empaquetar varias piezas juntas (ej. una "caja" que en realidad son 6 botellas de 1.5L cada una = 9L por caja) y ese multiplicador casi nunca es 1. Fijate en el nombre del producto y en "Formato"/"unidad" para el tamano de cada pieza y el multiplicador del paquete, y mostra la cuenta en calculoExplicado para que un humano la pueda revisar de un vistazo. Si el envase ya es una sola pieza suelta (ej. "1 BRIK" de 1L), cantidadPorUnidad es simplemente el tamano de esa pieza convertido a unidad base.
+
+Reglas para no confundir datos (valen para cualquier proveedor):
+- La cantidad es la de la columna de CANTIDAD de la fila principal del producto. Los numeros de otras filas o renglones de descripcion (fecha de caducidad "F.C.", lote, "Can:", pesos totales, "Total:") son datos de control: NO son la cantidad comprada.
+- Si la factura trae, por linea, un precio por unidad de medida (precioUnitarioFactura), cuanto pesa o mide cada unidad (factorPorUnidadFactura) y un importe (precio), extraelos tal cual: despues se comprueba que cantidad x peso por unidad x precio de el importe. Si no los trae, omitilos.
+- Si dos lecturas posibles de una cantidad compiten, elegi la que haga cuadrar el importe de la linea.${guiaDe(proveedorId)}`;
 
   // Los PDF se mandan como bloque "document" (Claude los lee pagina por
   // pagina); las fotos como bloque "image". Mismo formato de "source" en

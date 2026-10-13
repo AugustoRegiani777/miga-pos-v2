@@ -475,6 +475,7 @@ export function renderFacturaLineas(container, lineas, insumos) {
           <strong>${linea.nombreDetectado || "Producto sin nombre"}</strong>
           <span class="factura-badge ${confianza}">${CONFIANZA_LABEL[confianza]}</span>
         </div>
+        ${linea.aviso ? `<p class="factura-aviso">⚠ ${linea.aviso}</p>` : ""}
         <div class="factura-linea-acciones">
           <button type="button" class="ghost-button compact factura-omitir">No cargar esta línea</button>
         </div>

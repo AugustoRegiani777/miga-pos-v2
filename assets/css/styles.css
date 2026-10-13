@@ -4321,3 +4321,15 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .ldc-badge.ldc-urgente { color: var(--txt-out); }
 .ldc-badge.ldc-ok { color: var(--txt-ok); }
 .cart-vuelto input { background: var(--surface); color: var(--ink); }
+
+/* Aviso de que la cuenta de la linea no cuadra (cantidad x peso x precio != importe). */
+.factura-aviso {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--low);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--low) 16%, var(--surface));
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
