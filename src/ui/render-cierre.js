@@ -172,8 +172,8 @@ export function renderCierre(container, datos, opciones = {}) {
           <h3>Detalle de las salidas</h3>
           ${detalleDeSalidas(auto.salidas, notaSalidas)}
         </div>
-        ${campoDinero("cierre-contado", "Efectivo real en caja (€)", centavosAInput(v?.contadoCentavos ?? null), `<button type="button" class="cierre-coincide" id="cierre-contado-coincide" hidden></button>`)}
-        ${campoDinero("cierre-tarjeta", "Cierre de Postnet · tarjeta (€)", centavosAInput(v ? v.tarjetaCentavos : auto.tarjetaCentavos), "El total del cierre de Postnet. Si dice otra cosa que lo que anotó la Caja, corregilo: manda el Postnet.")}
+        ${campoDinero("cierre-contado", "Efectivo real en caja (€)", centavosAInput(v?.contadoCentavos ?? null), `<small class="cierre-coincide" id="cierre-contado-coincide" aria-live="polite" hidden></small>`)}
+        ${campoDinero("cierre-tarjeta", "Cierre de Postnet · tarjeta (€)", centavosAInput(v ? v.tarjetaCentavos : auto.tarjetaCentavos), `El total del cierre de Postnet: es el que manda. <small class="cierre-coincide" id="cierre-tarjeta-coincide" aria-live="polite" hidden></small>`)}
         ${campoDinero("cierre-fondo-manana", "Dejás en el cajón para mañana (€)", centavosAInput(v ? (v.fondoMananaCentavos ?? null) : auto.fondoMananaCentavos), "Opcional. Mañana se propone como fondo.")}
       </div>
       <!-- Lo que se calcula solo y se guarda con el cierre: no se ve como campo. -->
@@ -208,23 +208,40 @@ export function renderCierre(container, datos, opciones = {}) {
     renderResultadoCierre(resultado, r, { tickets: datos.ventas.length });
     container.querySelectorAll("input[data-money]").forEach((i) => i.setAttribute("aria-invalid", Number.isNaN(parseEuros(i.value)) ? "true" : "false"));
     container.querySelector("#cierre-guardar").disabled = Boolean(r.error);
-    // "Coincide": un toque cuando lo contado es justo lo esperado. Es un atajo para escribirlo,
-    // no un autocompletado: la persona sigue contando.
-    const btn = container.querySelector("#cierre-contado-coincide");
+    // Dato al lado del campo (no un boton): lo que el sistema dice que deberia haber, y si lo
+    // contado coincide o cuanto se aleja. La persona sigue contando y escribiendo.
+    const info = container.querySelector("#cierre-contado-coincide");
     esperadoActual = r.calculo.esperadoEfectivoCentavos;
-    if (btn) {
-      btn.hidden = !(esperadoActual >= 0);
-      btn.textContent = `Hay ${centsToMoney(esperadoActual)}: coincide`;
+    if (info) {
+      info.hidden = !(esperadoActual >= 0);
+      const contado = r.form.contadoCentavos;
+      const dif = Number.isFinite(contado) ? contado - esperadoActual : null;
+      info.classList.toggle("es-ok", dif !== null && Math.abs(dif) <= 1);
+      info.classList.toggle("es-dif", dif !== null && Math.abs(dif) > 1);
+      info.textContent = dif === null
+        ? `Según el sistema debería haber ${centsToMoney(esperadoActual)}`
+        : Math.abs(dif) <= 1
+          ? `✓ Coincide con el sistema (${centsToMoney(esperadoActual)})`
+          : `Sistema: ${centsToMoney(esperadoActual)} · ${dif > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(dif))}`;
+    }
+    // Lo mismo para la tarjeta: lo que anoto la Caja contra el total de Postnet que se escribe.
+    const infoT = container.querySelector("#cierre-tarjeta-coincide");
+    if (infoT) {
+      const sist = sistema.tarjetaCentavos;
+      const tarj = r.form.tarjetaCentavos;
+      const difT = Number.isFinite(tarj) ? tarj - sist : null;
+      infoT.hidden = false;
+      infoT.classList.toggle("es-ok", difT !== null && Math.abs(difT) <= 1);
+      infoT.classList.toggle("es-dif", difT !== null && Math.abs(difT) > 1);
+      infoT.textContent = difT === null
+        ? `Según el sistema entró ${centsToMoney(sist)}`
+        : Math.abs(difT) <= 1
+          ? `✓ Coincide con el sistema (${centsToMoney(sist)})`
+          : `Sistema: ${centsToMoney(sist)} · ${difT > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(difT))}`;
     }
     return r;
   };
   const poner = (id, texto) => { const el = container.querySelector(`#${id}`); if (el) el.value = texto; };
-  container.onclick = (e) => {
-    if (e.target.closest("#cierre-contado-coincide") && esperadoActual !== null) {
-      poner("cierre-contado", centavosAInput(esperadoActual));
-      recalcular();
-    }
-  };
   container.oninput = recalcular;
   container.onchange = recalcular;
   return recalcular();

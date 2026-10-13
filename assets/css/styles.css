@@ -4446,3 +4446,14 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .cierre-detalle-lista li span { color: color-mix(in srgb, var(--ink) 80%, var(--surface)); font-weight: 400; }
 .cierre-detalle-lista li strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cierre-sin-salidas { font-size: 0.9rem; font-style: italic; }
+
+/* "Debería haber X": dato junto al campo, no un boton */
+.cierre-coincide { display: block; margin-top: 6px; min-height: 0; padding: 0; border: 0; background: none; font-size: 0.85rem; font-weight: 500; color: var(--muted); cursor: default; }
+.cierre-coincide.es-ok { color: var(--txt-ok); font-weight: 700; }
+.cierre-coincide.es-dif { color: var(--txt-low); font-weight: 700; }
+#cierre-contado-coincide { color: var(--muted); }
+#cierre-contado-coincide.es-ok { color: var(--txt-ok); }
+#cierre-contado-coincide.es-dif { color: var(--txt-low); }
+#cierre-tarjeta-coincide { color: var(--muted); }
+#cierre-tarjeta-coincide.es-ok { color: var(--txt-ok); }
+#cierre-tarjeta-coincide.es-dif { color: var(--txt-low); }
