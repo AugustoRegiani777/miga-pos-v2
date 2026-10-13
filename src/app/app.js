@@ -6,7 +6,7 @@ import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, 
 import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/render-caja-pasos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
-import { signIn, signOut, restoreSession, fetchStockProductos, BASE_REF } from "../db/supabase.js";
+import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
@@ -330,11 +330,17 @@ async function initModoConsultaDefault() {
   let yaConfigurado = false;
   try { yaConfigurado = localStorage.getItem(MODO_CONSULTA_KEY) !== null; } catch { /* ignorar */ }
   if (yaConfigurado) return;
-  let defaultConsulta = true;
+  // Un dispositivo nuevo decide por el TAMAÑO de su pantalla: el lado menor de una
+  // tablet o una PC pasa de 600 px, el de un celular no. La tablet de la caja opera;
+  // el celular arranca en consulta (ve Caja, Produccion e Historial en vivo y gestiona
+  // desde Gestion, pero no cobra por error). Antes se decidia por "no tiene ventas
+  // todavia", y una tablet recien reiniciada, sin ventas, arrancaba en consulta y no
+  // podia cobrar. Se puede cambiar a mano en cualquier momento.
+  let defaultConsulta = true; // si no se puede medir, lo mas seguro: consulta
   try {
-    const ventas = await getAll("ventas");
-    defaultConsulta = ventas.length === 0;
-  } catch { /* si falla, default mas seguro: consulta prendida */ }
+    const ladoMenor = Math.min(window.screen.width, window.screen.height);
+    if (Number.isFinite(ladoMenor) && ladoMenor > 0) defaultConsulta = ladoMenor < 600;
+  } catch { /* se queda en consulta */ }
   setModoConsulta(defaultConsulta);
 }
 
@@ -4627,9 +4633,20 @@ async function bootApp() {
   // Un dispositivo en modo consulta NO sube nada al arrancar: solo mira. Si
   // subiera su copia local (vieja, o vacia si es nuevo) pisaria definiciones
   // de insumos/recetas editadas desde otro lado.
+  //
+  // LA NUBE ES LA FUENTE DE VERDAD. Antes, cada arranque de un dispositivo que opera
+  // (la tablet) subia su copia COMPLETA del catalogo a la nube y recien despues
+  // bajaba lo nuevo. Si desde otro dispositivo (el celular) se habia cambiado un
+  // precio, una receta o un proveedor, la tablet lo pisaba con el valor viejo al
+  // encenderse, sin avisar (probado: el cambio del celu se perdia). Los cambios ya
+  // se suben solos en el momento de hacerlos (y quedan en la cola si no hay
+  // internet), asi que esa subida a ciegas no hace falta. Solo se sube todo cuando
+  // la nube NO tiene catalogo todavia: una base nueva y vacia que hay que sembrar.
   const subidaDeArranque = (async () => {
     if (isModoConsulta()) return;
     try {
+      const remotos = await fetchProductosCatalogo().catch(() => null);
+      if (!remotos || remotos.length > 0) return; // sin conexion, o la nube ya tiene su catalogo
       const [categorias, productos] = await Promise.all([getAll("categorias"), getAll("productos")]);
       await trySyncCatalogoSnapshot(categorias, productos).catch(() => {});
 
