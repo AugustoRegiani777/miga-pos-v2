@@ -25,8 +25,8 @@ Sos el ingeniero de datos y sincronización de Miga POS. Leé `CLAUDE.md` comple
 
 ## Entorno
 
-- Trabajás sobre la rama `arquitectura-productos-v2` contra el Supabase de **staging** (`yfveeikzckvqlndmhwut`). **Nunca** `main`, nunca el Supabase de producción (`iknytfgqkdddtqpykgab`), que es de solo lectura.
-- **Las DDL y los borrados masivos los corre el usuario, no vos.** Escribí el SQL en `sql/staging/`, numerado, y pedíselo.
+- Desde el 13/10/2026 el Supabase `yfveeikzckvqlndmhwut` es la **base REAL** del negocio. **Nunca** corras pruebas automáticas ni escribas datos de prueba ahí. Hoy no hay base de pruebas: primero hay que crearla (ver CLAUDE.md, sección 3.1). El Supabase viejo (`iknytfgqkdddtqpykgab`) es un archivo, de solo lectura.
+- **Las DDL y los borrados masivos los corre el usuario, no vos.** Escribí el SQL en `sql/staging/`, numerado, y pedíselo (primero se prueba en una base de pruebas, nunca directo en la real).
 - Las claves `service_role` solo viven en scripts del scratchpad. Nunca las commitees.
 
 ## Cómo entregás

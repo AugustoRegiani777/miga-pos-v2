@@ -1,7 +1,6 @@
 # SQL de Supabase
 
-- `produccion/` — schema y migraciones ya aplicadas (o listas para aplicar) en la base REAL (`iknytfgqkdddtqpykgab`). Numeradas en orden; una vez corrida en produccion, no se edita.
-- `staging/` — todo lo de la base de PRUEBA (`yfveeikzckvqlndmhwut`): su schema completo y las migraciones que se prueban ahi primero.
+- `produccion/` — schema y migraciones de la base VIEJA (`iknytfgqkdddtqpykgab`), que dejo de usarse el 13/10/2026. Se conserva como archivo; no se corre mas.
+- `staging/` — el esquema y las migraciones de la base NUEVA (`yfveeikzckvqlndmhwut`), que desde el 13/10/2026 es la base REAL. Una base de pruebas nueva se arma con estos mismos archivos.
 
-Flujo: una migracion nueva nace en `staging/`, se prueba, y recien cuando esta validada se copia a `produccion/` y se corre en la base real.
-Pendiente de promover a produccion: `staging/supabase-migration-014-venta-uuid-en-movimientos.sql`.
+Flujo desde ahora: una migracion nueva se escribe aca, se prueba en una base de pruebas (hay que crearla), y recien despues se corre en la real.
