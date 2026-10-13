@@ -4878,7 +4878,13 @@ async function bootApp() {
   // subir, la alineacion del stock con la nube se salta a proposito (nunca
   // pisar algo que la nube todavia no vio) y el dispositivo quedaria con el
   // stock viejo hasta la proxima vez que se abra Gestion.
-  subidaDeArranque.then(() => sincronizarCatalogoSilencioso());
+  // Al terminar de bajar el catalogo se vuelve a dibujar la pantalla: en un dispositivo recien
+  // reiniciado (primer inicio de sesion) la Caja ya se habia dibujado con el catalogo de
+  // arranque y quedaba mostrando solo 7 productos hasta recargar la pagina.
+  subidaDeArranque
+    .then(() => sincronizarCatalogoSilencioso())
+    .then(() => refreshView(currentView))
+    .catch(() => {});
   dom.historyDate.value = todayISO();
   bindEvents();
   const initialView = window.location.hash.replace("#", "") || "caja";
