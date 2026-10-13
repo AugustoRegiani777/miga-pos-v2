@@ -25,6 +25,13 @@
 // pero tenerlo escrito evita que una regla nueva lo toque por accidente.
 export const HOSTS_DE_PRODUCCION = ["unodemigapos.netlify.app"];
 
+// Sitios de pruebas con nombre que la regla de palabras no reconoce (esa regla
+// necesita palabras separadas por guion, como "miga-pos-staging"). Un sitio de
+// pruebas que no este reconocido se toma por la tablet real y se conecta a la base
+// real: pasó con "pruebaposmiga" (palabra pegada). Todo sitio de pruebas nuevo se
+// anota aca, o se le pone un nombre con guiones.
+export const HOSTS_DE_PRUEBA = ["pruebaposmiga.netlify.app"];
+
 const MARCAS_DE_PRUEBA = ["staging", "prueba", "pruebas", "test", "testing", "dev", "demo", "qa", "beta", "preview"];
 
 const esIpDeRedLocal = (host) => {
@@ -38,6 +45,7 @@ export function esEntornoDePrueba(hostname) {
   const host = String(hostname ?? "").trim().toLowerCase();
   if (!host) return false;
   if (HOSTS_DE_PRODUCCION.includes(host)) return false;
+  if (HOSTS_DE_PRUEBA.includes(host)) return true;
   if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") return true;
   if (esIpDeRedLocal(host)) return true;
 
