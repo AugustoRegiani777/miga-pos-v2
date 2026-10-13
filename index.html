@@ -1201,7 +1201,10 @@
         <p class="form-instruccion" id="insumos-ajuste-instruccion">Llegó mercadería: anotá cuánto entró y se suma al stock.</p>
         <label class="quantity-field" id="insumos-compra-field">
           <span id="insumos-compra-label">Cantidad recibida</span>
-          <input id="insumos-compra-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+          <div class="campo-con-unidad">
+            <input id="insumos-compra-cantidad" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
+            <select class="selector-unidad" id="insumos-compra-unidad" aria-label="Unidad"></select>
+          </div>
           <small id="insumos-compra-equivale" class="campo-equivale"></small>
         </label>
         <div id="insumos-ajuste-field" hidden>

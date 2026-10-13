@@ -460,6 +460,7 @@ const dom = {
   insumosAjusteForm: document.querySelector("#insumos-ajuste-form"),
   insumosAjusteSelected: document.querySelector("#insumos-ajuste-selected"),
   insumosCompraCantidad: document.querySelector("#insumos-compra-cantidad"),
+  insumosCompraUnidad: document.querySelector("#insumos-compra-unidad"),
   insumosCompraCampo: document.querySelector("#insumos-compra-field"),
   insumosCompraLabel: document.querySelector("#insumos-compra-label"),
   insumosCompraEquivale: document.querySelector("#insumos-compra-equivale"),
@@ -1946,6 +1947,26 @@ function cantidadEnBase(input, select, unidadBase, envase = null) {
   return aBase(parseFloat(String(input.value).replace(",", ".")), select?.value || unidadBase, unidadBase, envase);
 }
 
+// Un error de unidad (1000 pensado en gramos, anotado en kg) suma 1000 kg de jamon y nadie
+// se entera hasta que el stock no cierra. Cuando la cantidad es descomunal para ese insumo
+// (cien veces su minimo, o mas de 100 kg/L / 1000 piezas) se pregunta antes de guardar.
+async function confirmarCantidadDescomunal(insumo, deltaBase) {
+  const magnitud = Math.abs(deltaBase);
+  const minimo = Number(insumo.stockMinimo) || 0;
+  const piso = ["g", "ml"].includes(insumo.unidad) ? 100000 : 1000;
+  if (magnitud < Math.max(100 * minimo, piso)) return true;
+  const verbo = deltaBase >= 0 ? "sumar" : "restar";
+  const queda = (Number(insumo.stockActual) || 0) + deltaBase;
+  return confirmDialog({
+    title: "¿Es esa cantidad?",
+    message: `Vas a ${verbo} ${formatearCantidad(magnitud, insumo.unidad)} de ${insumo.nombre}` +
+      (minimo > 0 ? ` (el mínimo que tenés definido es ${formatearCantidad(minimo, insumo.unidad)})` : "") +
+      `. El stock quedaría en ${formatearCantidad(Math.max(0, queda), insumo.unidad)}. ¿Es correcto?`,
+    acceptText: "Sí, es correcto",
+    cancelText: "Corregir"
+  });
+}
+
 function updateAjusteDeltaHint(insumo) {
   const hint = dom.insumosAjusteDeltaHint;
   if (!insumo) { hint.textContent = ""; hint.className = "insumo-stepper-hint"; return; }
@@ -1965,9 +1986,9 @@ function updateAjusteDeltaHint(insumo) {
 // "= 4 kg" debajo del campo de compra: confirma cuanto entra al stock.
 function updateCompraEquivale(insumo) {
   if (!dom.insumosCompraEquivale) return;
-  const n = parseFloat(String(dom.insumosCompraCantidad.value).replace(",", "."));
-  if (!insumo || !Number.isFinite(n) || n <= 0) { dom.insumosCompraEquivale.textContent = ""; return; }
-  dom.insumosCompraEquivale.textContent = `Entran ${formatearCantidad(n * (insumo.factorConversion || 1), insumo.unidad)} al stock`;
+  const base = insumo ? cantidadEnBase(dom.insumosCompraCantidad, dom.insumosCompraUnidad, insumo.unidad, envaseDeInsumo(insumo)) : NaN;
+  if (!insumo || !Number.isFinite(base) || base <= 0) { dom.insumosCompraEquivale.textContent = ""; return; }
+  dom.insumosCompraEquivale.textContent = `Entran ${formatearCantidad(base, insumo.unidad)} al stock`;
 }
 
 // deficitBase (opcional): cuanto faltaba en la unidad BASE del insumo (ej.
@@ -1981,9 +2002,13 @@ function openInsumoAjusteSheet(insumo, deficitBase) {
   selectedInsumo = insumo;
   renderInsumoAjusteSelected(dom.insumosAjusteSelected, insumo);
   setInsumosAjusteTipo("compra");
-  dom.insumosCompraLabel.textContent = `Cantidad recibida (${insumo.unidadCompra} = ${insumo.factorConversion} ${insumo.unidad})`;
+  dom.insumosCompraLabel.textContent = "Cantidad recibida";
+  // El selector arranca en la unidad con la que se compra (kg, botella...) y se ve a la
+  // vista: antes la unidad solo estaba en una frase del titulo y un "1000" pensado en
+  // gramos entraba como 1000 kg.
+  llenarSelectorUnidad(dom.insumosCompraUnidad, insumo.unidad, String(insumo.unidadCompra || "").trim().toLowerCase(), envaseDeInsumo(insumo));
   dom.insumosCompraCantidad.value = deficitBase > 0
-    ? String(parseFloat((deficitBase / (insumo.factorConversion || 1)).toFixed(3)))
+    ? paraInput(desdeBase(deficitBase, dom.insumosCompraUnidad.value, insumo.unidad, envaseDeInsumo(insumo)))
     : "";
   // El stock se muestra en la unidad mas clara (5000 g -> 5 kg) y el selector
   // queda en esa misma, asi lo que se escribe arriba coincide con lo que se lee.
@@ -3782,6 +3807,15 @@ function bindEvents() {
 
   dom.insumosAjusteCantidad.addEventListener("input", () => updateAjusteDeltaHint(selectedInsumo));
   dom.insumosCompraCantidad.addEventListener("input", () => updateCompraEquivale(selectedInsumo));
+  dom.insumosCompraUnidad.addEventListener("change", (e) => {
+    if (!selectedInsumo) return;
+    const env = envaseDeInsumo(selectedInsumo);
+    const anterior = e.target.dataset.unidadPrevia || selectedInsumo.unidad;
+    const valor = parseFloat(String(dom.insumosCompraCantidad.value).replace(",", "."));
+    if (Number.isFinite(valor)) dom.insumosCompraCantidad.value = paraInput(desdeBase(aBase(valor, anterior, selectedInsumo.unidad, env), e.target.value, selectedInsumo.unidad, env));
+    e.target.dataset.unidadPrevia = e.target.value;
+    updateCompraEquivale(selectedInsumo);
+  });
   // Cambiar de unidad convierte lo que ya estaba escrito, no lo reinterpreta:
   // 1500 g pasa a 1,5 kg, no a 1500 kg.
   // Mismo comportamiento en calibracion y receta: cambiar de unidad convierte
@@ -3840,9 +3874,8 @@ function bindEvents() {
       let delta;
       let tipoGuardar;
       if (insumosAjusteTipo === "compra") {
-        const cantidadCompra = parseFloat(dom.insumosCompraCantidad.value);
-        if (isNaN(cantidadCompra) || cantidadCompra <= 0) throw new Error("Ingresa una cantidad valida.");
-        delta = cantidadCompra * insumo.factorConversion;
+        delta = cantidadEnBase(dom.insumosCompraCantidad, dom.insumosCompraUnidad, insumo.unidad, envaseDeInsumo(insumo));
+        if (!Number.isFinite(delta) || delta <= 0) throw new Error("Ingresa una cantidad valida.");
         tipoGuardar = "compra";
       } else {
         const nuevoStock = cantidadEnBase(dom.insumosAjusteCantidad, dom.insumosAjusteUnidad, insumo.unidad, envaseDeInsumo(insumo));
@@ -3852,6 +3885,7 @@ function bindEvents() {
         tipoGuardar = dom.insumosAjusteMotivos.querySelector("input[name='insumo-motivo']:checked")?.value;
         if (!tipoGuardar) throw new Error("Seleccioná el motivo del ajuste.");
       }
+      if (!(await confirmarCantidadDescomunal(insumo, delta))) return;
       await ajustarStockInsumo(selectedInsumoId, delta, tipoGuardar);
       const msgs = { compra: "Compra registrada", desperdicio: "Baja registrada", no_recibido: "Corrección registrada", error_conteo: "Corrección registrada" };
       setFlash(`${msgs[tipoGuardar] ?? "Ajuste registrado"}: ${insumo.nombre}.`, "success");
