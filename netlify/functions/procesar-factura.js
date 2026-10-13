@@ -201,7 +201,15 @@ exports.handler = async (event) => {
   }
 
   const catalogoProveedorConNombre = catalogoProveedor.filter((pi) => pi.insumo_id);
-  const items = (toolUse.input.items || []).map((item) => {
+  // La IA a veces devuelve "items" como texto JSON, o como algo que no es una lista
+  // (una foto borrosa o en blanco). Se normaliza: si no se puede leer una lista, es
+  // una lista vacia y la app avisa que no se detectaron productos, en vez de romperse.
+  let itemsCrudos = toolUse.input?.items;
+  if (typeof itemsCrudos === "string") {
+    try { itemsCrudos = JSON.parse(itemsCrudos); } catch { itemsCrudos = []; }
+  }
+  if (!Array.isArray(itemsCrudos)) itemsCrudos = [];
+  const items = itemsCrudos.filter((item) => item && typeof item === "object").map((item) => {
     const matchProveedor = matchearContraProveedor(item.nombreDetectado, catalogoProveedorConNombre);
     if (matchProveedor) {
       const base = { ...item, insumoId: matchProveedor.insumoId, confianza: matchProveedor.confianza };
