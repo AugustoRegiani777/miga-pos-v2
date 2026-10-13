@@ -14,6 +14,7 @@
   <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
   <link rel="icon" href="assets/icons/favicon.png" type="image/png">
   <link rel="stylesheet" href="assets/css/styles.css">
+  <script src="assets/js/tema-inicial.js"></script>
 </head>
 <body>
   <!-- Aviso de "sin conexion": lo maneja app.js (setupSyncBadge). Mientras
@@ -62,6 +63,10 @@
       <button class="version-badge" type="button" id="version-badge" hidden>🔄 Versión nueva · actualizar</button>
       <button class="novedades-badge" type="button" id="novedades-badge" hidden></button>
       <button class="sync-status-badge" type="button" id="sync-status-badge" hidden></button>
+      <label class="selector-tema">
+        <span class="visually-hidden">Tema de la pantalla</span>
+        <select id="selector-tema" aria-label="Tema de la pantalla"></select>
+      </label>
       <button class="ghost-button compact" type="button" id="logout-button">Cerrar sesión</button>
     </div>
   </header>

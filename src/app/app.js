@@ -63,6 +63,7 @@ import {
   datosRemotosDelDia
 } from "../modules/business.js";
 import { seedDatabase, getAll, getOne } from "../db/idb.js";
+import { TEMAS, temaGuardado, guardarTema, iniciarTema } from "../utils/tema.js";
 import { todayISO, centsToMoney, slugify } from "../utils/format.js";
 import {
   filterProductButtons,
@@ -4785,6 +4786,15 @@ function bindAuthEvents() {
 }
 
 
+// Tema visual de ESTE dispositivo (claro / oscuro / unicornio / automatico).
+function setupSelectorTema() {
+  const sel = document.querySelector("#selector-tema");
+  if (!sel) return;
+  sel.innerHTML = TEMAS.map((t) => `<option value="${t.id}">${t.nombre}</option>`).join("");
+  sel.value = temaGuardado();
+  sel.addEventListener("change", () => guardarTema(sel.value));
+}
+
 async function bootApp() {
   await seedDatabase();
   await seedInsumos();
@@ -4900,6 +4910,8 @@ export async function startApp() {
     window.alert(error.message || "No se pudo reiniciar este dispositivo.");
     return;
   }
+  iniciarTema();
+  setupSelectorTema();
   bindAuthEvents();
   const session = await restoreSession();
   if (session) {

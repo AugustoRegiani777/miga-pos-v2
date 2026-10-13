@@ -16,7 +16,7 @@
 
 const MARCA = "miga_base_ref";
 // Preferencias del dispositivo, no datos de la base: sobreviven al reinicio.
-const CONSERVAR = new Set([MARCA, "miga_modo_consulta"]);
+const CONSERVAR = new Set([MARCA, "miga_modo_consulta", "miga_tema"]);
 const NOMBRE_IDB = "miga-pos-local";
 
 // "https://abcd1234.supabase.co" -> "abcd1234"

@@ -4462,3 +4462,75 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .toolbar-orden-fila { display: flex; gap: 8px; align-items: center; }
 #insumos-orden-sentido { min-height: 44px; white-space: nowrap; }
 @media (max-width: 700px) { .toolbar-orden-fila { flex: 1; min-width: 0; } .toolbar-orden-fila select { flex: 1; } }
+
+/* =====================================================================
+   TEMAS (por dispositivo). El oscuro es el de :root. Cada tema redefine los mismos
+   tokens: asi todas las pantallas cambian juntas. --txt-* son los colores para TEXTO
+   (los de marca estan pensados como fondo de boton con texto blanco).
+   ===================================================================== */
+:root { color-scheme: dark; }
+
+:root[data-theme="claro"] {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5a6b7c;
+  --surface: #ffffff;
+  --page: #f4f7f6;
+  --line: #d4dce5;
+  --primary: #17324d;
+  --brand: #17324d;
+  --primary-2: #1f6f78;
+  --accent: #c8421f;
+  --ok: #20734d;
+  --low: #8a5300;
+  --out: #a32020;
+  --txt-primary: #1d4f91;
+  --txt-teal: #0f6b74;
+  --txt-ok: #1b6b44;
+  --txt-out: #a32020;
+  --txt-low: #7d4b00;
+  --txt-accent: #b33a19;
+}
+
+:root[data-theme="unicornio"] {
+  color-scheme: light;
+  --ink: #36264a;
+  --muted: #6c5a82;
+  --surface: #ffffff;
+  --page: #fdf0fa;
+  --line: #ecd5f2;
+  --primary: #7440c4;
+  --brand: #7440c4;
+  --primary-2: #0e8072;
+  --accent: #c2287a;
+  --ok: #1b7a50;
+  --low: #94590a;
+  --out: #b82339;
+  --txt-primary: #5b2fb0;
+  --txt-teal: #0b6e63;
+  --txt-ok: #176b45;
+  --txt-out: #b0203a;
+  --txt-low: #835000;
+  --txt-accent: #b01f6d;
+}
+:root[data-theme="unicornio"] body {
+  background: linear-gradient(135deg, #ffe0f3 0%, #eadcff 48%, #d3f6ec 100%) fixed;
+}
+:root[data-theme="unicornio"] .topbar {
+  background: linear-gradient(90deg, #ffd1ec, #e3d4ff 55%, #c9f3e6);
+  border-bottom-color: #e2c5ee;
+}
+:root[data-theme="unicornio"] .primary-button,
+:root[data-theme="unicornio"] .cart-confirm,
+:root[data-theme="unicornio"] #confirm-sale {
+  background: linear-gradient(90deg, #7440c4, #c2287a);
+  color: #ffffff;
+}
+
+.selector-tema select { min-height: 46px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; }
+
+/* Colores de texto con el tema: nada de verdes/rojos/naranjas claros escritos a mano */
+.receta-estimado { color: var(--txt-low); }
+.panel-up, .panel-ok { color: var(--txt-ok); }
+.panel-down, .pendiente-error { color: var(--txt-out); }
+.factura-calculo-hint { color: color-mix(in srgb, var(--ink) 78%, var(--surface)); }
