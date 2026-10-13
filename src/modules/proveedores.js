@@ -96,7 +96,7 @@ export async function seedProveedores() {
   const piIds = new Set(existingPI.map(pi => pi.id));
 
   // IDs de seed obsoletos que deben eliminarse (renombrados o corregidos)
-  const piObsoletos = ["jasa:jamon-york"];
+  const piObsoletos = ["jasa:jamon-york", "jasa:salmon"];
 
   await withStores(["proveedores", "proveedor_insumos", "configuracion"], "readwrite", (stores) => {
     for (const p of initialProveedores) {
