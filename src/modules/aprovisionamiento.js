@@ -1937,12 +1937,14 @@ export async function calibrarInsumo(insumoId, stockRealRaw, alphaRecetaOverride
 }
 
 export async function getRecetasDashboardData() {
-  const [recetas, insumos, productos, historialRecetas] = await Promise.all([
+  const [recetas, insumos, productos, historialRecetas, categorias] = await Promise.all([
     getAll("recetas"),
     getAll("insumos"),
     getAll("productos"),
-    getAll("historial_recetas")
+    getAll("historial_recetas"),
+    getAll("categorias")
   ]);
+  const categoriaMap = new Map(categorias.map(c => [c.id, c]));
   const insumoMap = new Map(insumos.map(i => [i.id, i]));
   const productoMap = new Map(productos.map(p => [p.id, p]));
   const historialPorReceta = new Map();
@@ -1969,13 +1971,25 @@ export async function getRecetasDashboardData() {
     });
   }
 
+  // Ordenado como el Menu: por categoria (sandwiches, bolleria, cafe, bebidas) y, dentro de cada
+  // una, por el orden del producto. Cada producto lleva su categoria para agruparlos en pantalla.
   return Array.from(porProducto.entries())
-    .map(([productoId, recetasDelProducto]) => ({
-      productoId,
-      productoNombre: productoMap.get(productoId)?.nombre ?? productoId,
-      recetas: recetasDelProducto
-    }))
-    .sort((a, b) => a.productoNombre.localeCompare(b.productoNombre));
+    // Un producto sin receta no aparece: se le arma desde su ficha, y desde ahi entra a esta lista.
+    .filter(([, recetasDelProducto]) => recetasDelProducto.length > 0)
+    .map(([productoId, recetasDelProducto]) => {
+      const producto = productoMap.get(productoId);
+      const categoria = categoriaMap.get(producto?.categoriaId);
+      return {
+        productoId,
+        productoNombre: producto?.nombre ?? productoId,
+        categoriaId: categoria?.id ?? "otros",
+        categoriaNombre: categoria?.nombre ?? "Otros",
+        categoriaOrden: categoria?.orden ?? 9999,
+        productoOrden: producto?.orden ?? 9999,
+        recetas: recetasDelProducto
+      };
+    })
+    .sort((a, b) => (a.categoriaOrden - b.categoriaOrden) || (a.productoOrden - b.productoOrden) || a.productoNombre.localeCompare(b.productoNombre));
 }
 
 // Crea la linea de receta que faltaba (ver el aviso de ciclo incompleto en

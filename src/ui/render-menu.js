@@ -5,6 +5,13 @@ function fmtEur(centavos) {
   return (centavos / 100).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 }
 
+// Ojo cerrado: el icono de "ocultos".
+const ICONO_OCULTO = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 5.1A10.6 10.6 0 0 1 12 5c5 0 8.7 3.4 10 7a11.8 11.8 0 0 1-3 4.3M6.2 6.3C4 7.8 2.6 9.9 2 12c1.3 3.6 5 7 10 7a10.4 10.4 0 0 0 4-.8"/></svg>';
+
+// Categorias cuya lista de ocultos esta desplegada. Vive aca (y no en el HTML) porque la lista se
+// vuelve a dibujar entera cada vez, y al tocar "Mostrar" tiene que seguir abierta.
+const categoriasConOcultosAbiertos = new Set();
+
 export function renderMenuList(el, categorias, callbacks = {}) {
   if (!categorias.length) {
     el.innerHTML = "<p class='empty-state'>No hay categorias cargadas.</p>";
@@ -12,8 +19,11 @@ export function renderMenuList(el, categorias, callbacks = {}) {
   }
 
   el.innerHTML = categorias.map(categoria => {
-    const filas = categoria.productos.map((producto, index) => {
-      const ocultoBadge = producto.activo ? "" : '<span class="prov-badge prov-badge-muted">oculto</span>';
+    // Lo que se ve y se vende arriba; lo oculto, plegado al lado del nombre de la categoria.
+    const visibles = categoria.productos.filter((p) => p.activo);
+    const ocultos = categoria.productos.filter((p) => !p.activo);
+    const filas = visibles.map((producto, index) => {
+      const ocultoBadge = "";
       const premiumBadge = producto.sandwichTipo === "premium" ? '<span class="prov-badge">de la casa</span>' : "";
       // "En prueba": se vende y se produce normal, pero todavia no se definio de
       // donde sale (ni receta, ni se compra hecho). Un producto oculto no la lleva.
@@ -44,37 +54,70 @@ export function renderMenuList(el, categorias, callbacks = {}) {
         </tr>`;
     }).join("");
 
-    const tablaHTML = categoria.productos.length
+    const tablaHTML = visibles.length
       ? `<div class="prov-table-wrap">
           <table class="prov-tabla">
             <thead><tr><th class="celda-asa"></th><th>Producto</th><th>Precio</th><th></th></tr></thead>
             <tbody>${filas}</tbody>
           </table>
          </div>`
-      : "<p class='cal-muted' style='padding:0.5rem 0'>Sin productos en esta categoria.</p>";
+      : `<p class='cal-muted' style='padding:0.5rem 0'>${ocultos.length ? "Todos los productos de esta categoria estan ocultos." : "Sin productos en esta categoria."}</p>`;
+
+    const abierto = categoriasConOcultosAbiertos.has(categoria.id);
+    const ocultosBtn = ocultos.length
+      ? `<button type="button" class="menu-ocultos-btn" data-action="toggle-ocultos" data-catid="${categoria.id}" aria-expanded="${abierto}" title="Productos ocultos: no aparecen en Caja" aria-label="${ocultos.length} oculto${ocultos.length !== 1 ? "s" : ""}">${ICONO_OCULTO}<span>${ocultos.length}</span></button>`
+      : "";
+    const ocultosPanel = ocultos.length
+      ? `<div class="menu-ocultos" data-ocultos-de="${categoria.id}" ${abierto ? "" : "hidden"}>
+          <p class="cal-muted menu-ocultos-titulo">Ocultos (no aparecen en Caja)</p>
+          ${ocultos.map((p) => `
+            <div class="menu-oculto-fila">
+              <span class="menu-oculto-nombre">${p.nombre} <span class="cal-muted">${fmtEur(p.precioCentavos)}</span></span>
+              <span class="menu-oculto-acciones">
+                <button class="ghost-button compact" type="button" data-action="toggle-activo" data-id="${p.id}">Mostrar</button>
+                <button class="ghost-button compact" type="button" data-action="edit-producto" data-id="${p.id}">Editar</button>
+              </span>
+            </div>`).join("")}
+        </div>`
+      : "";
 
     return `
       <details class="prov-card" open data-categoria-id="${categoria.id}">
         <summary class="prov-summary">
           <div class="prov-summary-main">
-            <strong>${categoria.nombre}</strong>
-            <span class="cal-muted">${categoria.productos.length} producto${categoria.productos.length !== 1 ? "s" : ""}</span>
+            <span class="menu-cat-titulo"><strong>${categoria.nombre}</strong>${ocultosBtn}</span>
+            <span class="cal-muted">${visibles.length} producto${visibles.length !== 1 ? "s" : ""}</span>
           </div>
         </summary>
         <div class="prov-detail">
+          ${ocultosPanel}
           ${tablaHTML}
           <div class="prov-add-row">
-            <button class="ghost-button compact" type="button" data-action="add-producto" data-catid="${categoria.id}">+ Agregar producto</button>
+            <button class="ghost-button compact menu-agregar" type="button" data-action="add-producto" data-catid="${categoria.id}">+ Agregar producto</button>
           </div>
+          ${categoria.id === "sandwiches" ? '<div class="menu-cat-slot" data-slot="promos"></div>' : ""}
         </div>
       </details>`;
   }).join("");
 
-  el.addEventListener("click", (e) => {
+  // onclick (y no addEventListener): la lista se dibuja muchas veces sobre el mismo elemento y los
+  // oyentes se iban acumulando, uno por cada dibujo.
+  el.onclick = (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
     e.stopPropagation();
     const action = btn.dataset.action;
+
+    if (action === "toggle-ocultos") {
+      e.preventDefault(); // dentro del titulo de la categoria: no la pliega
+      const id = btn.dataset.catid;
+      const panel = el.querySelector(`[data-ocultos-de="${id}"]`);
+      const abre = !categoriasConOcultosAbiertos.has(id);
+      if (abre) categoriasConOcultosAbiertos.add(id); else categoriasConOcultosAbiertos.delete(id);
+      if (panel) panel.hidden = !abre;
+      btn.setAttribute("aria-expanded", String(abre));
+      return;
+    }
 
     if (action === "add-producto") {
       e.preventDefault();
@@ -97,7 +140,7 @@ export function renderMenuList(el, categorias, callbacks = {}) {
       e.preventDefault();
       callbacks.onMover?.(btn.dataset.id, btn.dataset.dir);
     }
-  }, { once: false });
+  };
 }
 
 export function renderMenuInsumoSelect(selectEl, insumos, selectedId) {

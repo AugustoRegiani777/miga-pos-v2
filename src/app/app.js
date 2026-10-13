@@ -3,14 +3,14 @@ import { cargarPanel } from "../modules/panel.js";
 import { cargarCierre, guardarCierre } from "../modules/cierre.js";
 import { renderCierre, calcularDesdeFormulario } from "../ui/render-cierre.js";
 import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon } from "../modules/caja-dia.js";
-import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/render-caja-pasos.js";
+import { renderPasoApertura, renderPasoPagos, renderPasoRetiros, renderCuentaCajon } from "../ui/render-caja-pasos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
-import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
+import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
 import { habilitarArrastre } from "../ui/arrastrar-filas.js";
@@ -407,6 +407,8 @@ const dom = {
   produccionConsulta: document.querySelector("#produccion-consulta"),
   closePeriodButton: document.querySelector("#close-period-button"),
   insumosOrden: document.querySelector("#insumos-orden"),
+  insumosBuscar: document.querySelector("#insumos-buscar"),
+  insumosOrdenSentido: document.querySelector("#insumos-orden-sentido"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
   relojSimulado: document.querySelector("#reloj-simulado"),
@@ -560,6 +562,8 @@ const dom = {
   cajaPasoApertura: document.querySelector("#caja-paso-apertura"),
   cajaPasoPagos: document.querySelector("#caja-paso-pagos"),
   cajaPasoRetiros: document.querySelector("#caja-paso-retiros"),
+  cajaPasoCuenta: document.querySelector("#caja-paso-cuenta"),
+  cierreHistorialRoot: document.querySelector("#cierre-historial-root"),
   cajaPagoSheet: document.querySelector("#caja-pago-sheet"),
   cajaPagoBackdrop: document.querySelector("#caja-pago-backdrop"),
   cajaPagoForm: document.querySelector("#caja-pago-form"),
@@ -618,6 +622,7 @@ const dom = {
   menuCombosGuardar: document.querySelector("#menu-combos-guardar"),
   irAInsumosDesdeVariantes: document.querySelector("#ir-a-insumos-desde-variantes"),
   menuCombosStatus: document.querySelector("#menu-combos-status"),
+  menuCombosPanel: document.querySelector("#menu-combos-panel"),
   avisoCiclo: document.querySelector("#aviso-ciclo"),
   seccionCalibracion: document.querySelector("#seccion-calibracion"),
   menuEditTipoWrap: document.querySelector("#menu-edit-tipo-wrap"),
@@ -1333,20 +1338,6 @@ function showGestionSubView(subViewName) {
   document.querySelectorAll(".subview").forEach((section) => section.classList.toggle("active", section.id === `subview-${subViewName}`));
   document.querySelectorAll(".sub-nav-link").forEach((link) => link.classList.toggle("active", link.dataset.subview === subViewName));
   refreshGestionSubView(subViewName);
-}
-
-// "¿Por dónde empiezo?": cada puerta lleva directo a la hoja donde se hace lo que
-// la persona quiere, sin pasos intermedios.
-async function abrirPuertaDeInicio(puerta) {
-  if (puerta === "producto") {
-    showGestionSubView("menu");
-    await refreshGestionSubView("menu");
-    await openMenuProductoAdd("sandwiches");
-  } else if (puerta === "factura") {
-    showGestionSubView("insumos");
-    await refreshGestionSubView("insumos");
-    await openFacturaSheet();
-  }
 }
 
 function showView(viewName) {
@@ -2091,12 +2082,76 @@ function closeCalibracionSheet() {
 // otros dos modos se aplican encima ac, sin tocar esa funcion (sigue
 // sirviendo tal cual para todo lo demas que la usa, ej. la cola de
 // faltantes de produccion).
-function ordenarInsumosParaVista(insumos, modo) {
-  if (modo === "reciente") {
-    return insumos.slice().sort((a, b) => String(b.actualizadoEn || "").localeCompare(String(a.actualizadoEn || "")));
+// Categoria y proveedor agrupan con un encabezado; un insumo sin ese dato va al final, en "Sin asignar".
+// Sentido del orden: "normal" es el que se ve al entrar (lo mas flojo / urgente / reciente primero);
+// "invertido" lo da vuelta. Dentro de cada grupo (categoria, proveedor) se ordena por nivel de stock.
+let insumosOrdenInvertido = false;
+const TEXTO_SENTIDO = {
+  estado: ["Menor stock primero", "Mayor stock primero"],
+  categoria: ["Menor stock primero", "Mayor stock primero"],
+  proveedor: ["Menor stock primero", "Mayor stock primero"],
+  fecha: ["Más reciente primero", "Más antigua primero"],
+  sugerencia: ["Más urgente primero", "Menos urgente primero"]
+};
+function actualizarBotonSentido() {
+  const modo = dom.insumosOrden?.value || "estado";
+  const [normal, invertido] = TEXTO_SENTIDO[modo] || TEXTO_SENTIDO.estado;
+  if (!dom.insumosOrdenSentido) return;
+  dom.insumosOrdenSentido.textContent = `${insumosOrdenInvertido ? "↓" : "↑"} ${insumosOrdenInvertido ? invertido : normal}`;
+  dom.insumosOrdenSentido.setAttribute("aria-pressed", String(insumosOrdenInvertido));
+}
+// Nivel de stock: cuanto tiene respecto a su minimo (los insumos usan unidades distintas, asi que
+// la cantidad suelta no se puede comparar entre ellos).
+const nivelDeStock = (i) => (Number(i.stockMinimo) > 0 ? (Number(i.stockActual) || 0) / Number(i.stockMinimo) : Infinity);
+
+async function ordenarInsumosParaVista(insumos, modo) {
+  const sentido = insumosOrdenInvertido ? -1 : 1;
+  const porNombre = (a, b) => a.nombre.localeCompare(b.nombre);
+  const porNivel = (a, b) => (sentido * (nivelDeStock(a) - nivelDeStock(b))) || porNombre(a, b);
+  const agrupar = (clave) => insumos
+    .map((i) => ({ ...i, grupo: clave(i) || { nombre: "Sin asignar", orden: 1e9 } }))
+    .sort((a, b) => (a.grupo.orden - b.grupo.orden) || a.grupo.nombre.localeCompare(b.grupo.nombre) || porNivel(a, b))
+    .map((i) => ({ ...i, grupo: i.grupo.nombre }));
+
+  if (modo === "categoria") {
+    // La categoria de un insumo es la de los productos que lo llevan en su receta (la primera, en
+    // el orden del Menu). Sin receta: sin categoria.
+    const [recetas, productos, categorias] = await Promise.all([getAll("recetas"), getAll("productos"), getAll("categorias")]);
+    const catPorId = new Map(categorias.map((c) => [c.id, c]));
+    const prodPorId = new Map(productos.map((p) => [p.id, p]));
+    const catDeInsumo = new Map();
+    for (const r of recetas) {
+      const cat = catPorId.get(prodPorId.get(r.productoId)?.categoriaId);
+      if (!cat) continue;
+      const actual = catDeInsumo.get(r.insumoId);
+      if (!actual || (cat.orden ?? 0) < (actual.orden ?? 0)) catDeInsumo.set(r.insumoId, { nombre: cat.nombre, orden: cat.orden ?? 0 });
+    }
+    return agrupar((i) => catDeInsumo.get(i.id));
   }
-  if (modo === "cantidad") {
-    return insumos.slice().sort((a, b) => (Number(b.stockActual) || 0) - (Number(a.stockActual) || 0));
+  if (modo === "proveedor") {
+    const { items } = await listaDeComprasSmart();
+    const provDe = new Map(items.map((x) => [x.id, x.mejorSupplier ? { nombre: x.mejorSupplier.proveedorNombre, orden: 0 } : null]));
+    return agrupar((i) => provDe.get(i.id));
+  }
+  if (modo === "estado" && insumosOrdenInvertido) return insumos.slice().sort(porNivel);
+  if (modo === "sugerencia") {
+    // El mismo orden que "Que pedir": lo mas urgente de pedir primero.
+    const { items } = await listaDeComprasSmart();
+    const rango = new Map(items.map((x, n) => [x.id, n]));
+    return insumos.slice().sort((a, b) => (sentido * ((rango.get(a.id) ?? 1e9) - (rango.get(b.id) ?? 1e9))) || porNombre(a, b));
+  }
+  if (modo === "fecha") {
+    // La ultima vez que entro mercaderia (compra); los que nunca tuvieron una, al final.
+    const movs = await getAll("movimientos_insumos");
+    const ultima = new Map();
+    for (const m of movs) {
+      if (m.tipo !== "compra") continue;
+      const f = String(m.fecha || m.creadoEn || "").slice(0, 10);
+      if (f > (ultima.get(m.insumoId) || "")) ultima.set(m.insumoId, f);
+    }
+    return insumos.slice()
+      .sort((a, b) => (sentido * (ultima.get(b.id) || "").localeCompare(ultima.get(a.id) || "")) || porNombre(a, b))
+      .map((i) => ({ ...i, ultimaCompra: ultima.get(i.id) || null }));
   }
   return insumos;
 }
@@ -2229,7 +2284,12 @@ async function guardarPendienteCiclo(article) {
 
 async function renderInsumosView() {
   const insumos = await listInsumos();
-  const ordenados = ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
+  actualizarBotonSentido();
+  let ordenados = await ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
+  // Buscador: sin tildes ni mayusculas ("jamon" encuentra "Jamon york" y "Jamón serrano").
+  const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const q = norm(dom.insumosBuscar?.value);
+  if (q) ordenados = ordenados.filter((i) => norm(i.nombre).includes(q));
   renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet);
   renderCalibracionAlert(dom.calibracionAlert, insumos);
   await renderAvisoCiclo();
@@ -2584,10 +2644,30 @@ async function handleDeleteProveedorInsumo(producto) {
   }
 }
 
+async function handleEliminarProveedor(proveedor) {
+  const plan = await planEliminarProveedor(proveedor.id);
+  const lista = (n) => n.slice(0, 6).join(", ") + (n.length > 6 ? ` y ${n.length - 6} más` : "");
+  let mensaje = `¿Eliminar a ${proveedor.nombre} de la app?`;
+  mensaje += plan.aDescartar.length
+    ? ` Se eliminan también sus insumos (${plan.aDescartar.length}): ${lista(plan.aDescartar)}.`
+    : " No tiene insumos propios para eliminar.";
+  if (plan.quedan.length) mensaje += ` Se quedan ${plan.quedan.length} que otro proveedor vende o una receta usa: ${lista(plan.quedan)}.`;
+  const confirmado = await confirmDialog({ title: "Eliminar proveedor", message: mensaje, acceptText: "Sí, eliminar", cancelText: "Cancelar" });
+  if (!confirmado) return;
+  try {
+    const r = await eliminarProveedor(proveedor.id);
+    setFlash(`${r.nombre} eliminado${r.aDescartar.length ? ` con ${r.aDescartar.length} insumo${r.aDescartar.length !== 1 ? "s" : ""}` : ""}.`, "success");
+    await renderProveedoresView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo eliminar.", "error");
+  }
+}
+
 async function renderProveedoresView() {
   const data = await getProveedoresDashboardData();
   renderProveedoresList(dom.proveedoresList, data, {
     onEditProv: openProvEdit,
+    onDeleteProv: handleEliminarProveedor,
     onAddProd: openProvProdAdd,
     onEditProd: openProvProdEdit,
     onDeleteProd: handleDeleteProveedorInsumo
@@ -2867,6 +2947,12 @@ async function renderMenuView() {
     onMover: handleMoverProducto
   });
   renderCombosConfigForm();
+  // Las promos van al final de la categoria Sandwiches. renderMenuList rehace el HTML (y se
+  // lleva el panel puesto en la render anterior), asi que se vuelve a colocar cada vez; si no
+  // hay categoria Sandwiches, queda debajo de la lista.
+  const lugarPromos = dom.menuList.querySelector('[data-slot="promos"]');
+  if (lugarPromos) lugarPromos.appendChild(dom.menuCombosPanel);
+  else dom.menuList.after(dom.menuCombosPanel);
   // renderMenuList rehace el HTML en cada render, asi que el arrastre se
   // vuelve a enganchar sobre los nodos nuevos.
   habilitarArrastre(dom.menuList, {
@@ -3101,9 +3187,9 @@ async function refrescarPasosCaja() {
   const ventas = cierreDatos?.ventas || [];
   cajaFotoActual = await fotoDelCajon({ fecha: cierreFecha, ventas }).catch(() => null);
   renderPasoRetiros(dom.cajaPasoRetiros, {
-    retiros: vivos.filter((m) => m.tipo === "retiro"),
-    foto: cajaFotoActual
+    retiros: vivos.filter((m) => m.tipo === "retiro")
   });
+  renderCuentaCajon(dom.cajaPasoCuenta, { foto: cajaFotoActual });
 }
 
 async function renderCierreView() {
@@ -3119,12 +3205,16 @@ async function renderCierreView() {
     // La apertura y los pagos/retiros del dia son de ESTE dispositivo (la plata
     // del cajon no se replica entre dispositivos a proposito): con eso el cierre
     // se arma solo — ver armarCierreAutomatico.
+    // Los movimientos van PRIMERO: al leerlos se trae de la nube lo que cargaron otros
+    // dispositivos (incluida la apertura). Con la apertura primero, un dispositivo que no abrio
+    // la caja la leia vacia y el fondo del cierre salia en 0.
+    const movimientosCaja = await movimientosDelDia(cierreFecha).catch(() => []);
     cierreDatos.caja = {
       apertura: await aperturaDelDia(cierreFecha).catch(() => null),
-      movimientos: await movimientosDelDia(cierreFecha).catch(() => [])
+      movimientos: movimientosCaja
     };
     await refrescarPasosCaja().catch(() => {});
-    if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos);
+    if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos, { historialContainer: dom.cierreHistorialRoot });
   } catch (error) {
     dom.cierreRoot.textContent = `No se pudo cargar el cierre: ${error.message || error}`;
   } finally {
@@ -3778,7 +3868,9 @@ function bindEvents() {
     }
   });
 
-  dom.insumosOrden?.addEventListener("change", () => { renderInsumosView(); });
+  dom.insumosOrden?.addEventListener("change", () => { insumosOrdenInvertido = false; renderInsumosView(); });
+  dom.insumosOrdenSentido?.addEventListener("click", () => { insumosOrdenInvertido = !insumosOrdenInvertido; renderInsumosView(); });
+  dom.insumosBuscar?.addEventListener("input", () => { renderInsumosView(); });
   dom.closeInsumosAjuste.addEventListener("click", closeInsumoAjusteSheet);
   dom.insumosAjusteBackdrop.addEventListener("click", closeInsumoAjusteSheet);
   dom.closeCalibracion.addEventListener("click", closeCalibracionSheet);
@@ -3963,12 +4055,6 @@ function bindEvents() {
   });
 
   dom.abrirFactura.addEventListener("click", () => { openFacturaSheet().catch(() => {}); });
-  document.querySelector("#guia-puertas").addEventListener("click", (e) => {
-    const puerta = e.target.closest("[data-puerta]")?.dataset.puerta;
-    if (!puerta) return;
-    document.querySelector("#guia-puertas").open = false;
-    abrirPuertaDeInicio(puerta).catch(() => {});
-  });
   dom.closeFactura.addEventListener("click", closeFacturaSheet);
   dom.facturaBackdrop.addEventListener("click", closeFacturaSheet);
 

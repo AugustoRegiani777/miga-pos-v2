@@ -85,23 +85,32 @@ export function renderPasoRetiros(container, { retiros, foto }) {
           ${m.anulado ? "" : `<button type="button" class="ghost-button compact" data-anular="${esc(m.uuid)}">Anular</button>`}
         </div>`).join("");
 
-  // El mini cierre: de dónde sale lo que debería haber. Sin este desglose el
-  // número es una afirmación que no se puede discutir.
-  const cuenta = foto ? `
-    <div class="caja-cuenta">
-      <div class="cierre-row"><span>Abriste con</span><strong>${centsToMoney(foto.fondoCentavos)}</strong></div>
-      <div class="cierre-row"><span>Cobraste en efectivo</span><strong>+${centsToMoney(foto.ventasEfectivoCentavos)}</strong></div>
-      <div class="cierre-row"><span>Pagos y retiros</span><strong>${centsToMoney(foto.movimientosCentavos)}</strong></div>
-      <div class="cierre-row cierre-row--total"><span>Debería haber en el cajón</span><strong>${centsToMoney(foto.esperadoCentavos)}</strong></div>
-    </div>` : "";
-
   container.innerHTML = paso(
     3,
     "Retiros",
     retiros.length > 0 ? "hecho" : "pendiente",
     `<p class="form-instruccion">Si sacás plata durante el día, anotalo acá y mirá cómo queda el cajón.</p>
-     ${cuenta}
      ${lista}`,
     `<button class="ghost-button compact" type="button" id="caja-nuevo-retiro">Retiré plata</button>`
   );
+}
+
+// --------------------------------------------------- la cuenta del cajon (aparte)
+// El mini cierre: de dónde sale lo que debería haber. Sin este desglose el número es una
+// afirmación que no se puede discutir. Va en su PROPIA tarjeta, no adentro de Retiros: son
+// cosas distintas (anotar un retiro / mirar cómo está el cajón) y mezcladas confundían.
+export function renderCuentaCajon(container, { foto }) {
+  if (!foto) { container.innerHTML = ""; return; }
+  container.innerHTML = `
+    <section class="caja-paso caja-paso--cuenta">
+      <div class="caja-paso-head"><h2>Cuenta del cajón</h2></div>
+      <div class="caja-paso-body">
+        <div class="caja-cuenta">
+          <div class="cierre-row"><span>Abriste con</span><strong>${centsToMoney(foto.fondoCentavos)}</strong></div>
+          <div class="cierre-row"><span>Cobraste en efectivo</span><strong>+${centsToMoney(foto.ventasEfectivoCentavos)}</strong></div>
+          <div class="cierre-row"><span>Pagos y retiros</span><strong>${centsToMoney(foto.movimientosCentavos)}</strong></div>
+          <div class="cierre-row cierre-row--total"><span>Debería haber en el cajón</span><strong>${centsToMoney(foto.esperadoCentavos)}</strong></div>
+        </div>
+      </div>
+    </section>`;
 }

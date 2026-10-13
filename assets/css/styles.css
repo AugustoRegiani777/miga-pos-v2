@@ -3186,17 +3186,6 @@ details[open] > .prov-summary::before {
 /* Gestion: las 6 subpestañas son en realidad DOS ciclos distintos —
    la despensa (Insumos, Calibración, Proveedores) y el producto
    (Menú, Recetas, Variantes). Esta linea marca donde empieza el segundo. */
-/* "¿Por dónde empiezo?": discreta, plegada, con dos botones grandes al abrirla. */
-.guia-puertas { margin: 0 0 12px; padding: 0 2px; }
-.guia-puertas > summary { cursor: pointer; list-style: none; color: var(--muted); font-size: 0.9rem; min-height: 44px; display: flex; align-items: center; }
-.guia-puertas > summary::-webkit-details-marker { display: none; }
-.guia-puertas > summary::after { content: " ▾"; margin-left: 4px; }
-.guia-puertas[open] > summary::after { content: " ▴"; }
-.guia-puertas-texto { margin: 0 0 8px; font-size: 0.9rem; }
-.guia-puertas-botones { display: flex; gap: 10px; flex-wrap: wrap; }
-.guia-puerta { flex: 1 1 240px; min-height: 64px; padding: 10px 14px; text-align: left; border: 2px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
-.guia-puerta strong { font-size: 1rem; }
-.guia-puerta small { color: var(--muted); font-size: 0.85rem; }
 
 .sub-nav-sep {
   border-left: 2px solid var(--line);
@@ -4343,3 +4332,159 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
    que este abierta; con la misma altura que las demas quedaba detras y no se podia tocar. */
 #confirm-dialog-backdrop { z-index: 80; }
 #confirm-dialog { z-index: 90; }
+
+/* ---- Cierre de caja: el orden de la pantalla ----
+   Plata que hubo (fondo + ingresos), lo que se fue (plataformas + salidas con su detalle),
+   y al final lo que cuenta la persona (efectivo real + Postnet). Ingresos y salidas no se
+   tipean: se calculan y se muestran. */
+.cierre-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.cierre-ancho { grid-column: 1 / -1; }
+.cierre-calculado {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  min-height: 84px;
+}
+.cierre-calculado > span { font-weight: 700; font-size: 0.95rem; }
+.cierre-calculado > strong { font-size: 1.5rem; }
+.cierre-calculado > strong.es-mas { color: var(--txt-ok); }
+.cierre-calculado > strong.es-menos { color: var(--txt-out); }
+.cierre-calculado > small { color: var(--muted); }
+.cierre-detalle h3 { margin: 0 0 8px; font-size: 1rem; }
+.cierre-detalle-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cierre-detalle-lista li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--page);
+}
+.cierre-sin-salidas { margin: 0; color: var(--muted); }
+.cierre-row.is-detalle { padding-left: 18px; color: var(--muted); }
+.cierre-row small { margin-left: 6px; color: var(--muted); font-weight: 400; }
+.cierre-control { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+@media (max-width: 600px) { .cierre-grid { grid-template-columns: 1fr; } }
+
+/* ---- Menu: lo importante es el listado de cada categoria ---- */
+.menu-agregar { min-height: 36px; padding: 0 12px; font-size: 0.85rem; font-weight: 600; color: var(--muted); border-style: dashed; }
+.menu-cat-titulo { display: inline-flex; align-items: center; gap: 10px; }
+.menu-ocultos-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 32px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--muted);
+  font: inherit; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+}
+.menu-ocultos-btn[aria-expanded="true"] { color: var(--ink); border-color: var(--muted); }
+.menu-ocultos { margin: 0 0 10px; padding: 8px 12px; border: 1px dashed var(--line); border-radius: 8px; background: var(--page); }
+.menu-ocultos-titulo { margin: 0 0 6px; font-size: 0.85rem; }
+.menu-oculto-fila { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; flex-wrap: wrap; }
+.menu-oculto-nombre { min-width: 0; }
+.menu-oculto-acciones { display: inline-flex; gap: 6px; }
+.menu-cat-slot { margin-top: 10px; }
+.menu-promos { margin: 0; border-top: 1px solid var(--line); padding-top: 4px; }
+.menu-promos > summary { cursor: pointer; list-style: none; min-height: 40px; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+.menu-promos > summary::-webkit-details-marker { display: none; }
+.menu-promos > summary::before { content: "▸"; }
+.menu-promos[open] > summary::before { content: "▾"; }
+.menu-promos-nota { margin: 4px 0 8px; font-size: 0.85rem; }
+.menu-promos-campos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+.menu-promos-campos label { display: grid; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+.menu-promos-campos input { min-height: 40px; font-size: 1rem; }
+@media (max-width: 600px) { .menu-promos-campos { grid-template-columns: 1fr; } }
+
+/* ---- Recetas por categoria ---- */
+.receta-categoria > .prov-detail { padding-top: 4px; }
+
+/* Cada producto de Recetas es una tarjeta propia: se ve donde empieza, donde termina y cual sigue */
+.receta-categoria .receta-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0 0 4px;
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+.receta-categoria .receta-card:last-child { margin-bottom: 4px; }
+.receta-categoria .receta-card-nombre {
+  margin: 0 0 4px;
+  padding: 10px 14px;
+  font-size: 1rem;
+  background: color-mix(in srgb, var(--surface) 80%, var(--ink) 20%);
+  border-bottom: 1px solid var(--line);
+  border-left: 4px solid var(--primary-2);
+}
+.receta-categoria .receta-table { padding: 0 8px; }
+.receta-categoria .receta-table td { padding-left: 14px; padding-right: 14px; }
+
+.prov-acciones { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.prov-del-btn { color: #ff6b6b; border-color: color-mix(in srgb, #ff6b6b 45%, var(--line)); padding: 0 12px; min-width: 48px; }
+.prov-del-btn:hover { background: color-mix(in srgb, #ff6b6b 14%, var(--surface)); }
+
+/* Combo en el carrito: legible sobre su fondo rojizo oscuro */
+.combo-summary { flex-shrink: 0; }
+.combo-summary strong { color: var(--txt-accent); }
+.combo-summary span { color: var(--ink); }
+.combo-summary small { color: color-mix(in srgb, var(--ink) 80%, var(--surface)); font-weight: 600; }
+
+/* Detalle de las salidas: lista de datos, sutil (no cajas) */
+.cierre-detalle { padding: 0 2px; }
+.cierre-detalle h3 { margin: 0 0 4px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.cierre-detalle-lista { gap: 0; }
+.cierre-detalle-lista li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 6px 0; background: transparent; border: 0; border-radius: 0;
+  border-bottom: 1px dotted var(--line); font-size: 0.9rem;
+}
+.cierre-detalle-lista li:last-child { border-bottom: 0; }
+.cierre-detalle-lista li span { color: color-mix(in srgb, var(--ink) 80%, var(--surface)); font-weight: 400; }
+.cierre-detalle-lista li strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cierre-sin-salidas { font-size: 0.9rem; font-style: italic; }
+
+/* "Debería haber X": dato junto al campo, no un boton */
+.cierre-coincide { display: block; margin-top: 6px; min-height: 0; padding: 0; border: 0; background: none; font-size: 0.85rem; font-weight: 500; color: var(--muted); cursor: default; }
+.cierre-coincide.es-ok { color: var(--txt-ok); font-weight: 700; }
+.cierre-coincide.es-dif { color: var(--txt-low); font-weight: 700; }
+#cierre-contado-coincide { color: var(--muted); }
+#cierre-contado-coincide.es-ok { color: var(--txt-ok); }
+#cierre-contado-coincide.es-dif { color: var(--txt-low); }
+#cierre-tarjeta-coincide { color: var(--muted); }
+#cierre-tarjeta-coincide.es-ok { color: var(--txt-ok); }
+#cierre-tarjeta-coincide.es-dif { color: var(--txt-low); }
+
+/* Resultado del conteo: una linea sutil, no un bloque de color */
+.cierre-diff { margin-top: 10px; padding: 8px 12px; border-radius: 0 8px 8px 0; text-align: left; font-size: 0.95rem; font-weight: 700; color: var(--muted); background: var(--page); border-left: 3px solid var(--line); }
+.cierre-diff.is-ok { background: var(--page); border-left-color: var(--ok); color: var(--txt-ok); }
+.cierre-diff.is-chico { background: var(--page); border-left-color: var(--low); color: var(--txt-low); }
+.cierre-diff.is-grande { background: var(--page); border-left-color: var(--out); color: var(--txt-out); }
+.cierre-diff.is-pendiente { color: var(--muted); }
+.cierre-nota.cierre-info { font-size: 0.8rem; opacity: 0.85; }
+
+/* Gestion > Insumos: barra de acciones prolija, con el orden a la derecha */
+.stock-toolbar-ciclo { align-items: flex-end; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.toolbar-orden { margin-left: auto; display: flex; flex-direction: column; gap: 6px; }
+.toolbar-orden select { min-height: 44px; min-width: 230px; }
+.insumos-grupo { margin: 14px 2px 4px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.insumos-grupo:first-child { margin-top: 2px; }
+.stock-row-compra { margin: 2px 0 0; font-size: 0.8rem; color: var(--muted); }
+@media (max-width: 700px) {
+  .toolbar-orden { margin-left: 0; flex: 1 1 100%; flex-direction: row; align-items: center; gap: 10px; }
+  .toolbar-orden .toolbar-paso-titulo { display: block !important; white-space: nowrap; flex-basis: auto; }
+  .toolbar-orden select { flex: 1; min-width: 0; }
+}
+
+.toolbar-buscar { flex: 1 1 220px; min-width: 160px; max-width: 420px; margin: 0 auto; }
+.toolbar-buscar input { width: 100%; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; }
+.toolbar-buscar input::placeholder { color: var(--muted); }
+.toolbar-orden select { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; font: inherit; }
+@media (max-width: 700px) { .toolbar-buscar { flex: 1 1 100%; max-width: none; margin: 0; } }
+
+.toolbar-orden-fila { display: flex; gap: 8px; align-items: center; }
+#insumos-orden-sentido { min-height: 44px; white-space: nowrap; }
+@media (max-width: 700px) { .toolbar-orden-fila { flex: 1; min-width: 0; } .toolbar-orden-fila select { flex: 1; } }

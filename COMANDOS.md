@@ -45,6 +45,29 @@ La primera vez que abrís la app en un dispositivo nuevo (como tu compu) sin nin
 
 Para volver a modo consulta (solo lectura): mismo paso pero con `"1"` en vez de `"0"`.
 
+## 3b. Borrar los datos que quedan en Chrome (empezar de cero en este dispositivo)
+
+Sirve cuando un dispositivo quedó con datos viejos o de prueba (ventas, stock, sesión). **Antes de hacerlo:** mirá que la insignia de sincronización de arriba no tenga pendientes. Lo que no subió a la nube **se pierde para siempre**. Lo que ya está en la nube vuelve a bajar solo al entrar de nuevo.
+
+1. Abrí el sitio que querés limpiar (ojo: cada sitio tiene sus propios datos).
+2. **F12** → pestaña **Console**.
+3. Pegá y Enter (borra la base local, la sesión y las cachés, y recarga):
+   ```js
+   (async () => {
+     localStorage.clear();
+     sessionStorage.clear();
+     for (const db of (await indexedDB.databases?.()) || []) indexedDB.deleteDatabase(db.name);
+     for (const k of await caches.keys()) await caches.delete(k);
+     for (const r of await navigator.serviceWorker?.getRegistrations?.() || []) await r.unregister();
+     location.reload();
+   })();
+   ```
+4. Te pide iniciar sesión de nuevo (usuario y contraseña) y baja todo desde la nube.
+
+Si dice que la base "está bloqueada", cerrá las otras pestañas del mismo sitio y repetí el paso 3.
+
+Alternativa sin consola: **F12 → Application → Storage → Clear site data**.
+
 ## 4. Git — lo mínimo para el día a día
 
 ```
