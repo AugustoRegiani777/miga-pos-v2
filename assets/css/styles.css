@@ -4333,3 +4333,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   font-size: 0.9rem;
   font-weight: 600;
 }
+
+/* La confirmacion ("¿Es esa cantidad?", "Actualizar la app"...) se abre SOBRE cualquier hoja
+   que este abierta; con la misma altura que las demas quedaba detras y no se podia tocar. */
+#confirm-dialog-backdrop { z-index: 80; }
+#confirm-dialog { z-index: 90; }
