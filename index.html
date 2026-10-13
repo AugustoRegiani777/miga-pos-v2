@@ -491,7 +491,12 @@
       <div id="caja-paso-apertura"></div>
       <div id="caja-paso-pagos"></div>
       <div id="caja-paso-retiros"></div>
+      <div id="caja-paso-cuenta"></div>
 
+      <div id="cierre-root" class="panel-root" aria-live="polite"></div>
+
+      <!-- El resumen del dia va DEBAJO de "Cerrar caja": primero se cierra, despues se
+           mira o se exporta lo que quedo. -->
       <section class="cierre-export" aria-label="Resumen y exportación del día">
         <strong class="cierre-export-title">Resumen del día</strong>
         <div class="cierre-export-actions">
@@ -521,7 +526,7 @@
         <pre id="resumen-preview-text" class="resumen-preview-text"></pre>
       </section>
 
-      <div id="cierre-root" class="panel-root" aria-live="polite"></div>
+      <div id="cierre-historial-root" class="panel-root"></div>
     </section>
 
     <section class="view" id="view-gestion" aria-labelledby="gestion-title">
@@ -537,24 +542,6 @@
         <button class="nav-link sub-nav-link" type="button" data-subview="recetas">Recetas</button>
         <button class="nav-link sub-nav-link" type="button" data-subview="variantes">Variantes</button>
       </nav>
-
-      <!-- No es una lista de pasos en orden: se empieza por lo que se tiene en la
-           mano, y lo que falta se crea sobre la marcha. Plegada por defecto para no
-           estorbar a quien ya conoce el sistema. -->
-      <details class="guia-puertas" id="guia-puertas">
-        <summary>¿Por dónde empiezo?</summary>
-        <p class="cal-muted guia-puertas-texto">Según lo que tengas en la mano. Lo que falte (un insumo, un proveedor) lo creás ahí mismo.</p>
-        <div class="guia-puertas-botones">
-          <button type="button" class="guia-puerta" data-puerta="producto">
-            <strong>Quiero vender algo nuevo</strong>
-            <small>Creás el producto con su receta y, sobre la marcha, sus insumos y proveedores.</small>
-          </button>
-          <button type="button" class="guia-puerta" data-puerta="factura">
-            <strong>Me llegó mercadería</strong>
-            <small>Foto de la factura: se cargan insumos, precios y stock de una vez.</small>
-          </button>
-        </div>
-      </details>
 
       <section class="subview active" id="subview-insumos" aria-labelledby="insumos-title">
       <section class="section-heading">
@@ -1051,26 +1038,28 @@
           </form>
         </section>
 
-        <section class="panel-card" id="menu-combos-panel">
-          <h2>Promos por cantidad</h2>
-          <p class="cierre-nota">Descuento que se aplica solo en Caja cuando el carrito llega a 6 o 12 sandwiches (docena / media docena). El extra "de la casa" es por cada sandwich premium que entra en esa promo.</p>
-          <div class="cierre-form">
-            <label class="quantity-field">
-              <span>Precio de la docena (12 sandwiches, EUR)</span>
+        <!-- Las promos por cantidad se mueven solas al FINAL de la categoria Sandwiches (ver
+             renderMenuView): lo importante de esta pantalla es el listado de productos. -->
+        <details class="menu-promos" id="menu-combos-panel">
+          <summary>Promos por cantidad <span class="cal-muted">docena y media docena</span></summary>
+          <p class="cal-muted menu-promos-nota">Descuento que se aplica solo en Caja cuando el carrito llega a 6 o 12 sandwiches. El extra "de la casa" es por cada sandwich premium que entra en la promo.</p>
+          <div class="menu-promos-campos">
+            <label>
+              <span>Docena (12), €</span>
               <input id="menu-combo-docena" type="number" min="0" step="0.01" inputmode="decimal" placeholder="34.00">
             </label>
-            <label class="quantity-field">
-              <span>Precio de la media docena (6 sandwiches, EUR)</span>
+            <label>
+              <span>Media docena (6), €</span>
               <input id="menu-combo-media" type="number" min="0" step="0.01" inputmode="decimal" placeholder="19.00">
             </label>
-            <label class="quantity-field">
-              <span>Extra por sandwich "de la casa" en la promo (EUR)</span>
+            <label>
+              <span>Extra "de la casa", €</span>
               <input id="menu-combo-premium" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.30">
             </label>
           </div>
           <button type="button" class="ghost-button compact" id="menu-combos-guardar">Guardar promos</button>
           <p class="cierre-nota" id="menu-combos-status" hidden></p>
-        </section>
+        </details>
 
         <div id="menu-list"></div>
 

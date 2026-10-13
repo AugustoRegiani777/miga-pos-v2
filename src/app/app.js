@@ -3,14 +3,14 @@ import { cargarPanel } from "../modules/panel.js";
 import { cargarCierre, guardarCierre } from "../modules/cierre.js";
 import { renderCierre, calcularDesdeFormulario } from "../ui/render-cierre.js";
 import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon } from "../modules/caja-dia.js";
-import { renderPasoApertura, renderPasoPagos, renderPasoRetiros } from "../ui/render-caja-pasos.js";
+import { renderPasoApertura, renderPasoPagos, renderPasoRetiros, renderCuentaCajon } from "../ui/render-caja-pasos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
-import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
+import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
 import { habilitarArrastre } from "../ui/arrastrar-filas.js";
@@ -560,6 +560,8 @@ const dom = {
   cajaPasoApertura: document.querySelector("#caja-paso-apertura"),
   cajaPasoPagos: document.querySelector("#caja-paso-pagos"),
   cajaPasoRetiros: document.querySelector("#caja-paso-retiros"),
+  cajaPasoCuenta: document.querySelector("#caja-paso-cuenta"),
+  cierreHistorialRoot: document.querySelector("#cierre-historial-root"),
   cajaPagoSheet: document.querySelector("#caja-pago-sheet"),
   cajaPagoBackdrop: document.querySelector("#caja-pago-backdrop"),
   cajaPagoForm: document.querySelector("#caja-pago-form"),
@@ -618,6 +620,7 @@ const dom = {
   menuCombosGuardar: document.querySelector("#menu-combos-guardar"),
   irAInsumosDesdeVariantes: document.querySelector("#ir-a-insumos-desde-variantes"),
   menuCombosStatus: document.querySelector("#menu-combos-status"),
+  menuCombosPanel: document.querySelector("#menu-combos-panel"),
   avisoCiclo: document.querySelector("#aviso-ciclo"),
   seccionCalibracion: document.querySelector("#seccion-calibracion"),
   menuEditTipoWrap: document.querySelector("#menu-edit-tipo-wrap"),
@@ -1333,20 +1336,6 @@ function showGestionSubView(subViewName) {
   document.querySelectorAll(".subview").forEach((section) => section.classList.toggle("active", section.id === `subview-${subViewName}`));
   document.querySelectorAll(".sub-nav-link").forEach((link) => link.classList.toggle("active", link.dataset.subview === subViewName));
   refreshGestionSubView(subViewName);
-}
-
-// "¿Por dónde empiezo?": cada puerta lleva directo a la hoja donde se hace lo que
-// la persona quiere, sin pasos intermedios.
-async function abrirPuertaDeInicio(puerta) {
-  if (puerta === "producto") {
-    showGestionSubView("menu");
-    await refreshGestionSubView("menu");
-    await openMenuProductoAdd("sandwiches");
-  } else if (puerta === "factura") {
-    showGestionSubView("insumos");
-    await refreshGestionSubView("insumos");
-    await openFacturaSheet();
-  }
 }
 
 function showView(viewName) {
@@ -2584,10 +2573,30 @@ async function handleDeleteProveedorInsumo(producto) {
   }
 }
 
+async function handleEliminarProveedor(proveedor) {
+  const plan = await planEliminarProveedor(proveedor.id);
+  const lista = (n) => n.slice(0, 6).join(", ") + (n.length > 6 ? ` y ${n.length - 6} más` : "");
+  let mensaje = `¿Eliminar a ${proveedor.nombre} de la app?`;
+  mensaje += plan.aDescartar.length
+    ? ` Se eliminan también sus insumos (${plan.aDescartar.length}): ${lista(plan.aDescartar)}.`
+    : " No tiene insumos propios para eliminar.";
+  if (plan.quedan.length) mensaje += ` Se quedan ${plan.quedan.length} que otro proveedor vende o una receta usa: ${lista(plan.quedan)}.`;
+  const confirmado = await confirmDialog({ title: "Eliminar proveedor", message: mensaje, acceptText: "Sí, eliminar", cancelText: "Cancelar" });
+  if (!confirmado) return;
+  try {
+    const r = await eliminarProveedor(proveedor.id);
+    setFlash(`${r.nombre} eliminado${r.aDescartar.length ? ` con ${r.aDescartar.length} insumo${r.aDescartar.length !== 1 ? "s" : ""}` : ""}.`, "success");
+    await renderProveedoresView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo eliminar.", "error");
+  }
+}
+
 async function renderProveedoresView() {
   const data = await getProveedoresDashboardData();
   renderProveedoresList(dom.proveedoresList, data, {
     onEditProv: openProvEdit,
+    onDeleteProv: handleEliminarProveedor,
     onAddProd: openProvProdAdd,
     onEditProd: openProvProdEdit,
     onDeleteProd: handleDeleteProveedorInsumo
@@ -2867,6 +2876,12 @@ async function renderMenuView() {
     onMover: handleMoverProducto
   });
   renderCombosConfigForm();
+  // Las promos van al final de la categoria Sandwiches. renderMenuList rehace el HTML (y se
+  // lleva el panel puesto en la render anterior), asi que se vuelve a colocar cada vez; si no
+  // hay categoria Sandwiches, queda debajo de la lista.
+  const lugarPromos = dom.menuList.querySelector('[data-slot="promos"]');
+  if (lugarPromos) lugarPromos.appendChild(dom.menuCombosPanel);
+  else dom.menuList.after(dom.menuCombosPanel);
   // renderMenuList rehace el HTML en cada render, asi que el arrastre se
   // vuelve a enganchar sobre los nodos nuevos.
   habilitarArrastre(dom.menuList, {
@@ -3101,9 +3116,9 @@ async function refrescarPasosCaja() {
   const ventas = cierreDatos?.ventas || [];
   cajaFotoActual = await fotoDelCajon({ fecha: cierreFecha, ventas }).catch(() => null);
   renderPasoRetiros(dom.cajaPasoRetiros, {
-    retiros: vivos.filter((m) => m.tipo === "retiro"),
-    foto: cajaFotoActual
+    retiros: vivos.filter((m) => m.tipo === "retiro")
   });
+  renderCuentaCajon(dom.cajaPasoCuenta, { foto: cajaFotoActual });
 }
 
 async function renderCierreView() {
@@ -3119,12 +3134,16 @@ async function renderCierreView() {
     // La apertura y los pagos/retiros del dia son de ESTE dispositivo (la plata
     // del cajon no se replica entre dispositivos a proposito): con eso el cierre
     // se arma solo — ver armarCierreAutomatico.
+    // Los movimientos van PRIMERO: al leerlos se trae de la nube lo que cargaron otros
+    // dispositivos (incluida la apertura). Con la apertura primero, un dispositivo que no abrio
+    // la caja la leia vacia y el fondo del cierre salia en 0.
+    const movimientosCaja = await movimientosDelDia(cierreFecha).catch(() => []);
     cierreDatos.caja = {
       apertura: await aperturaDelDia(cierreFecha).catch(() => null),
-      movimientos: await movimientosDelDia(cierreFecha).catch(() => [])
+      movimientos: movimientosCaja
     };
     await refrescarPasosCaja().catch(() => {});
-    if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos);
+    if (currentView === "cierre") renderCierre(dom.cierreRoot, cierreDatos, { historialContainer: dom.cierreHistorialRoot });
   } catch (error) {
     dom.cierreRoot.textContent = `No se pudo cargar el cierre: ${error.message || error}`;
   } finally {
@@ -3963,12 +3982,6 @@ function bindEvents() {
   });
 
   dom.abrirFactura.addEventListener("click", () => { openFacturaSheet().catch(() => {}); });
-  document.querySelector("#guia-puertas").addEventListener("click", (e) => {
-    const puerta = e.target.closest("[data-puerta]")?.dataset.puerta;
-    if (!puerta) return;
-    document.querySelector("#guia-puertas").open = false;
-    abrirPuertaDeInicio(puerta).catch(() => {});
-  });
   dom.closeFactura.addEventListener("click", closeFacturaSheet);
   dom.facturaBackdrop.addEventListener("click", closeFacturaSheet);
 

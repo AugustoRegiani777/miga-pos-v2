@@ -3186,17 +3186,6 @@ details[open] > .prov-summary::before {
 /* Gestion: las 6 subpestañas son en realidad DOS ciclos distintos —
    la despensa (Insumos, Calibración, Proveedores) y el producto
    (Menú, Recetas, Variantes). Esta linea marca donde empieza el segundo. */
-/* "¿Por dónde empiezo?": discreta, plegada, con dos botones grandes al abrirla. */
-.guia-puertas { margin: 0 0 12px; padding: 0 2px; }
-.guia-puertas > summary { cursor: pointer; list-style: none; color: var(--muted); font-size: 0.9rem; min-height: 44px; display: flex; align-items: center; }
-.guia-puertas > summary::-webkit-details-marker { display: none; }
-.guia-puertas > summary::after { content: " ▾"; margin-left: 4px; }
-.guia-puertas[open] > summary::after { content: " ▴"; }
-.guia-puertas-texto { margin: 0 0 8px; font-size: 0.9rem; }
-.guia-puertas-botones { display: flex; gap: 10px; flex-wrap: wrap; }
-.guia-puerta { flex: 1 1 240px; min-height: 64px; padding: 10px 14px; text-align: left; border: 2px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
-.guia-puerta strong { font-size: 1rem; }
-.guia-puerta small { color: var(--muted); font-size: 0.85rem; }
 
 .sub-nav-sep {
   border-left: 2px solid var(--line);
@@ -4343,3 +4332,97 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
    que este abierta; con la misma altura que las demas quedaba detras y no se podia tocar. */
 #confirm-dialog-backdrop { z-index: 80; }
 #confirm-dialog { z-index: 90; }
+
+/* ---- Cierre de caja: el orden de la pantalla ----
+   Plata que hubo (fondo + ingresos), lo que se fue (plataformas + salidas con su detalle),
+   y al final lo que cuenta la persona (efectivo real + Postnet). Ingresos y salidas no se
+   tipean: se calculan y se muestran. */
+.cierre-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.cierre-ancho { grid-column: 1 / -1; }
+.cierre-calculado {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  min-height: 84px;
+}
+.cierre-calculado > span { font-weight: 700; font-size: 0.95rem; }
+.cierre-calculado > strong { font-size: 1.5rem; }
+.cierre-calculado > strong.es-mas { color: var(--txt-ok); }
+.cierre-calculado > strong.es-menos { color: var(--txt-out); }
+.cierre-calculado > small { color: var(--muted); }
+.cierre-detalle h3 { margin: 0 0 8px; font-size: 1rem; }
+.cierre-detalle-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cierre-detalle-lista li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--page);
+}
+.cierre-sin-salidas { margin: 0; color: var(--muted); }
+.cierre-row.is-detalle { padding-left: 18px; color: var(--muted); }
+.cierre-row small { margin-left: 6px; color: var(--muted); font-weight: 400; }
+.cierre-control { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+@media (max-width: 600px) { .cierre-grid { grid-template-columns: 1fr; } }
+
+/* ---- Menu: lo importante es el listado de cada categoria ---- */
+.menu-agregar { min-height: 36px; padding: 0 12px; font-size: 0.85rem; font-weight: 600; color: var(--muted); border-style: dashed; }
+.menu-cat-titulo { display: inline-flex; align-items: center; gap: 10px; }
+.menu-ocultos-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 32px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--muted);
+  font: inherit; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+}
+.menu-ocultos-btn[aria-expanded="true"] { color: var(--ink); border-color: var(--muted); }
+.menu-ocultos { margin: 0 0 10px; padding: 8px 12px; border: 1px dashed var(--line); border-radius: 8px; background: var(--page); }
+.menu-ocultos-titulo { margin: 0 0 6px; font-size: 0.85rem; }
+.menu-oculto-fila { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; flex-wrap: wrap; }
+.menu-oculto-nombre { min-width: 0; }
+.menu-oculto-acciones { display: inline-flex; gap: 6px; }
+.menu-cat-slot { margin-top: 10px; }
+.menu-promos { margin: 0; border-top: 1px solid var(--line); padding-top: 4px; }
+.menu-promos > summary { cursor: pointer; list-style: none; min-height: 40px; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+.menu-promos > summary::-webkit-details-marker { display: none; }
+.menu-promos > summary::before { content: "▸"; }
+.menu-promos[open] > summary::before { content: "▾"; }
+.menu-promos-nota { margin: 4px 0 8px; font-size: 0.85rem; }
+.menu-promos-campos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+.menu-promos-campos label { display: grid; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+.menu-promos-campos input { min-height: 40px; font-size: 1rem; }
+@media (max-width: 600px) { .menu-promos-campos { grid-template-columns: 1fr; } }
+
+/* ---- Recetas por categoria ---- */
+.receta-categoria > .prov-detail { padding-top: 4px; }
+
+/* Cada producto de Recetas es una tarjeta propia: se ve donde empieza, donde termina y cual sigue */
+.receta-categoria .receta-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0 0 4px;
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+.receta-categoria .receta-card:last-child { margin-bottom: 4px; }
+.receta-categoria .receta-card-nombre {
+  margin: 0 0 4px;
+  padding: 10px 14px;
+  font-size: 1rem;
+  background: color-mix(in srgb, var(--surface) 80%, var(--ink) 20%);
+  border-bottom: 1px solid var(--line);
+  border-left: 4px solid var(--primary-2);
+}
+.receta-categoria .receta-table { padding: 0 8px; }
+.receta-categoria .receta-table td { padding-left: 14px; padding-right: 14px; }
+
+.prov-acciones { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.prov-del-btn { color: #ff6b6b; border-color: color-mix(in srgb, #ff6b6b 45%, var(--line)); padding: 0 12px; min-width: 48px; }
+.prov-del-btn:hover { background: color-mix(in srgb, #ff6b6b 14%, var(--surface)); }

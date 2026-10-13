@@ -4,6 +4,7 @@ import { fetchProveedoresCatalogo, fetchProveedorInsumosCatalogo } from "../db/s
 import { slugify } from "../utils/format.js";
 import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot } from "./sync.js";
 import { construirInsumoNuevo } from "./catalogo-armar.js";
+import { descartarInsumo } from "./aprovisionamiento.js";
 import { guardarCatalogo } from "./catalogo-guardar.js";
 
 // `leadTimeDias` y `diasEntrega` son opcionales: hasta que la pantalla de
@@ -208,6 +209,50 @@ export async function deleteProveedorInsumo(id) {
   await putOne("proveedor_insumos", { ...current, activo: false });
   const proveedorInsumosFinal = await getAll("proveedor_insumos");
   trySyncProveedorInsumosSnapshot(proveedorInsumosFinal).catch(() => {});
+}
+
+// Eliminar un proveedor (por ejemplo uno duplicado) junto con sus insumos.
+//
+// Como en descartarInsumo, no se borra la fila: el stock se deriva del ledger y borrar dejaria
+// huerfana su historia. Desaparece de toda la app. Un insumo se va con el proveedor solo si no
+// lo vende otro proveedor ni lo usa una receta; esos quedan (y se avisa cuantos).
+export async function planEliminarProveedor(proveedorId) {
+  const [lineas, recetas, insumos] = await Promise.all([getAll("proveedor_insumos"), getAll("recetas"), getAll("insumos")]);
+  const activas = lineas.filter((l) => l.activo !== false);
+  const delProveedor = activas.filter((l) => l.proveedorId === proveedorId);
+  const ids = [...new Set(delProveedor.map((l) => l.insumoId).filter(Boolean))];
+  const aDescartar = [];
+  const quedan = [];
+  for (const id of ids) {
+    const insumo = insumos.find((i) => i.id === id);
+    if (!insumo || insumo.activo === false) continue;
+    const loVendeOtro = activas.some((l) => l.insumoId === id && l.proveedorId !== proveedorId);
+    const enReceta = recetas.some((r) => r.insumoId === id);
+    (loVendeOtro || enReceta ? quedan : aDescartar).push(insumo.nombre);
+  }
+  return { lineas: delProveedor.length, aDescartar, quedan };
+}
+
+export async function eliminarProveedor(proveedorId) {
+  const proveedor = await getOne("proveedores", proveedorId);
+  if (!proveedor) throw new Error("Proveedor no encontrado.");
+  const plan = await planEliminarProveedor(proveedorId);
+  const insumos = await getAll("insumos");
+  for (const nombre of plan.aDescartar) {
+    const insumo = insumos.find((i) => i.nombre === nombre && i.activo !== false);
+    if (insumo) await descartarInsumo(insumo.id);
+  }
+  // sus lineas (las de insumos que se quedan tambien salen: ya no las vende este proveedor)
+  const lineas = (await getAll("proveedor_insumos")).filter((l) => l.proveedorId === proveedorId && l.activo !== false);
+  const now = new Date().toISOString();
+  await withStores(["proveedor_insumos", "proveedores"], "readwrite", (stores) => {
+    for (const l of lineas) stores.proveedor_insumos.put({ ...l, activo: false, actualizadoEn: now });
+    stores.proveedores.put({ ...proveedor, activo: false, actualizadoEn: now });
+  });
+  const [provFinal, piFinal] = await Promise.all([getAll("proveedores"), getAll("proveedor_insumos")]);
+  trySyncProveedorInsumosSnapshot(piFinal).catch(() => {});
+  trySyncProveedoresSnapshot(provFinal).catch(() => {});
+  return { nombre: proveedor.nombre, ...plan };
 }
 
 export async function getProveedoresDashboardData() {

@@ -301,12 +301,16 @@ function fmtCant(n) {
   return Number.isInteger(n) ? String(n) : parseFloat(n.toFixed(2)).toString();
 }
 
+// Categorias de Recetas que estan abiertas. Viven aca porque la lista se dibuja entera cada vez
+// (por ejemplo al guardar una receta) y la que se estaba mirando tiene que seguir abierta.
+const categoriasDeRecetasAbiertas = new Set();
+
 export function renderRecetasEditor(container, data, onEdit) {
   if (data.length === 0) {
     container.innerHTML = '<p class="empty-state">No hay recetas cargadas.</p>';
     return;
   }
-  container.innerHTML = data.map(({ productoNombre, recetas }) => {
+  const tarjetaDeProducto = ({ productoNombre, recetas }) => {
     const filas = recetas.map(r => {
       const estimadoBadge = r.esEstimado ? `<span class="receta-estimado">~</span>` : "";
       const fijaBadge = r.recetaFija ? `<span class="receta-fija-badge">fija</span>` : "";
@@ -332,7 +336,32 @@ export function renderRecetasEditor(container, data, onEdit) {
         <div class="receta-card-nombre">${productoNombre}</div>
         <table class="receta-table"><tbody>${filas}</tbody></table>
       </div>`;
-  }).join("");
+  };
+
+  // Por categoria, plegadas: se entra a la que corresponde (sandwiches, bolleria, cafe, bebidas) y
+  // ahi esta lo que se quiere recetar, sin buscar entre todos los productos.
+  const grupos = [];
+  for (const item of data) {
+    let g = grupos.find((x) => x.id === item.categoriaId);
+    if (!g) { g = { id: item.categoriaId, nombre: item.categoriaNombre, productos: [] }; grupos.push(g); }
+    g.productos.push(item);
+  }
+  container.innerHTML = grupos.map((g) => `
+    <details class="prov-card receta-categoria" data-categoria-id="${g.id}" ${categoriasDeRecetasAbiertas.has(g.id) ? "open" : ""}>
+      <summary class="prov-summary">
+        <div class="prov-summary-main">
+          <strong>${g.nombre}</strong>
+          <span class="cal-muted">${g.productos.length} receta${g.productos.length !== 1 ? "s" : ""}</span>
+        </div>
+      </summary>
+      <div class="prov-detail">${g.productos.map(tarjetaDeProducto).join("")}</div>
+    </details>`).join("");
+  container.querySelectorAll("details[data-categoria-id]").forEach((d) => {
+    d.addEventListener("toggle", () => {
+      if (d.open) categoriasDeRecetasAbiertas.add(d.dataset.categoriaId);
+      else categoriasDeRecetasAbiertas.delete(d.dataset.categoriaId);
+    });
+  });
 
   container.querySelectorAll("[data-editar]").forEach(btn => {
     const recetaId = btn.dataset.editar;

@@ -58,32 +58,54 @@ export function calcularDesdeFormulario(container, ventas) {
 
 const fila = (texto, valor, clase = "") => `<div class="cierre-row ${clase}"><span>${texto}</span><strong>${valor}</strong></div>`;
 
-export function renderResultadoCierre(el, { calculo: c, error, form }) {
-  const menos = (cent) => `− ${centsToMoney(cent)}`;
+export function renderResultadoCierre(el, { calculo: c, error, form }, ctx = {}) {
   const etiquetaDif = c.nivel === null ? "Falta contar el efectivo"
     : c.nivel === "ok" ? "Caja cuadrada ✓"
     : c.diferenciaCentavos > 0 ? `Sobran ${centsToMoney(c.diferenciaCentavos)}`
     : `Faltan ${centsToMoney(-c.diferenciaCentavos)}`;
+  const plataformas = aCero(form.plataformasCentavos);
+  const tickets = ctx.tickets ?? c.tickets;
+  // Lo que se quedo en el local: lo que entro por Postnet y por el cajon. Glovo (y otras
+  // plataformas) y los paquetes de Too Good To Go que cobra la app no pasan por el local.
+  const cierreLocalCentavos = c.ventasTotalCentavos - plataformas - c.tgtgFueraDelCajon;
   el.innerHTML = `
-    ${fila("Ventas del sistema", centsToMoney(c.ventasTotalCentavos))}
-    ${c.tgtgFueraDelCajon ? fila("Too Good To Go (lo cobra la app)", menos(c.tgtgFueraDelCajon), "is-minus") : ""}
-    ${fila("Tarjeta (Postnet)", menos(aCero(form.tarjetaCentavos)), "is-minus")}
-    ${aCero(form.plataformasCentavos) > 0 ? fila("Plataformas (Glovo…)", menos(form.plataformasCentavos), "is-minus") : ""}
-    ${fila("= Efectivo que entró por ventas", centsToMoney(c.efectivoDeVentasCentavos), "is-sub")}
-    ${fila("+ Fondo con el que abriste", centsToMoney(aCero(form.fondoCentavos)))}
-    ${aCero(form.retirosCentavos) > 0 ? fila("− Retiros del cajón", menos(form.retirosCentavos), "is-minus") : ""}
-    ${fila("= Debería haber en el cajón", centsToMoney(c.esperadoEfectivoCentavos), "is-total")}
-    ${fila("Efectivo contado", c.diferenciaCentavos === null ? "—" : centsToMoney(form.contadoCentavos))}
+    ${fila(`Ventas del sistema <small>${tickets} ticket${tickets === 1 ? "" : "s"}</small>`, centsToMoney(c.ventasTotalCentavos), "is-sub")}
+    ${fila("Postnet (tarjeta)", centsToMoney(aCero(form.tarjetaCentavos)), "is-detalle")}
+    ${fila("Efectivo", centsToMoney(c.efectivoDeVentasCentavos), "is-detalle")}
+    ${plataformas > 0 ? fila("Glovo y otras plataformas", centsToMoney(plataformas), "is-detalle") : ""}
+    ${c.tgtgFueraDelCajon ? fila("Too Good To Go (lo cobra la app)", centsToMoney(c.tgtgFueraDelCajon), "is-detalle") : ""}
+    ${fila("Retiros (pagos y retiros de efectivo)", `− ${centsToMoney(aCero(form.retirosCentavos))}`, "is-minus")}
+    ${fila("Facturación del día", centsToMoney(c.ventasTotalCentavos), "is-total")}
+    ${fila("Cierre del día local", centsToMoney(cierreLocalCentavos), "is-total")}
+    <div class="cierre-control">
+      ${fila("Debería haber en el cajón", centsToMoney(c.esperadoEfectivoCentavos))}
+      ${fila("Efectivo real en caja", c.diferenciaCentavos === null ? "—" : centsToMoney(form.contadoCentavos))}
+    </div>
     <div class="cierre-diff is-${c.nivel || "pendiente"}" role="status">${etiquetaDif}</div>
     ${c.retiraCentavos !== null ? `<p class="cierre-nota">Al cerrar sacás del cajón <strong>${centsToMoney(c.retiraCentavos)}</strong> y dejás <strong>${centsToMoney(form.fondoMananaCentavos)}</strong> para mañana.</p>` : ""}
     ${[...c.alertas, error].filter(Boolean).map((a) => `<p class="cierre-alerta">⚠ ${esc(a)}</p>`).join("")}`;
 }
 
-export function renderCierre(container, datos) {
+const mas = (c) => `+ ${centsToMoney(c)}`;
+const menos = (c) => `− ${centsToMoney(c)}`;
+
+// "Pago · hielo" / "Retiro · al banco", uno por renglon, con su importe.
+function detalleDeSalidas(salidas, notaGuardada) {
+  if (salidas.length) {
+    return `<ul class="cierre-detalle-lista">${salidas.map((x) => `
+      <li><span>${x.tipo === "retiro" ? "Retiro · " : ""}${esc(x.concepto)}</span><strong>${centsToMoney(x.centavos)}</strong></li>`).join("")}</ul>`;
+  }
+  return notaGuardada
+    ? `<p class="cierre-sin-salidas">${esc(notaGuardada)}</p>`
+    : `<p class="cierre-sin-salidas">Sin pagos ni retiros en efectivo hoy.</p>`;
+}
+
+// Renderiza la pantalla de cierre. `opciones.historialContainer` (opcional): donde van los
+// "Últimos cierres", para que el resumen del dia pueda quedar entre el boton de cerrar y el historial.
+export function renderCierre(container, datos, opciones = {}) {
   const v = datos.vigente;
-  // Lo que el sistema ya sabe del dia (apertura, tarjeta, Glovo, pagos y
-  // retiros). Si ya hay un cierre guardado se muestra ESE: nunca se pisa con
-  // lo calculado.
+  // Lo que el sistema ya sabe del dia (apertura, tarjeta, Glovo, pagos y retiros). Si ya hay
+  // un cierre guardado se muestra ESE: nunca se pisa con lo calculado.
   const auto = armarCierreAutomatico({
     ventas: datos.ventas,
     apertura: datos.caja?.apertura || null,
@@ -91,10 +113,11 @@ export function renderCierre(container, datos) {
     fondoSugeridoCentavos: datos.fondoSugeridoCentavos
   });
   const fondo = v ? v.fondoInicialCentavos : auto.fondoCentavos;
-  const ventasTotal = datos.ventas.reduce((s, x) => s + (x.totalCentavos || 0), 0);
   const tgtg = datos.ventas.filter((x) => x.saleMode === "togoo");
   const tgtgTotal = tgtg.reduce((s, x) => s + (x.totalCentavos || 0), 0);
   const sistema = desgloseFormaPago(datos.ventas);
+  const salidasValor = v ? (v.retirosCentavos ?? 0) : auto.retirosCentavos;
+  const notaSalidas = v ? (v.retirosNota || auto.retirosNota) : auto.retirosNota;
 
   const aviso = datos.fuente === "local"
     ? `<p class="panel-aviso">Sin conexión: las ventas vienen de este dispositivo. El cierre se guarda igual y sube solo cuando vuelva internet.</p>` : "";
@@ -109,82 +132,79 @@ export function renderCierre(container, datos) {
         <span>${centsToMoney(c.ventasTotalCentavos)}</span>
         <span class="cierre-diff-mini is-${claseDif(c.diferenciaCentavos)}">${c.diferenciaCentavos === 0 ? "cuadra" : (c.diferenciaCentavos > 0 ? "+" : "") + centsToMoney(c.diferenciaCentavos)}</span>
       </li>`).join("")}</ul>`;
-
-  container.innerHTML = `
-    ${aviso}
-    <section class="panel-card">
-      <h2><span class="caja-paso-num">4</span> Cerrar el día</h2>
-      <!-- El cierre se arma solo con lo que ya se anoto durante el dia. Quien
-           cierra no tipea: chequea, corrige lo que no coincida, y cuenta el
-           efectivo — lo unico que el sistema NO puede (ni debe) saber. -->
-      <div class="cierre-auto">
-        <button type="button" class="primary-button secondary" id="cierre-autocompletar">Completar con lo que anotó el sistema</button>
-        <small>Trae la apertura, la tarjeta, Glovo, los pagos y los retiros del día. <strong>El efectivo lo contás vos.</strong></small>
-      </div>
-      <p class="cierre-auto-estado" id="cierre-auto-estado" role="status" hidden></p>
-      <div class="cierre-form">
-        ${campoDinero("cierre-fondo", "Fondo con el que abriste (€)", centavosAInput(fondo ?? 0), v ? "" : (datos.caja?.apertura && !datos.caja.apertura.implicita ? "Es el que anotaste al abrir la caja." : "Propuesto: lo que dejaste en el último cierre."))}
-        ${campoDinero("cierre-tarjeta", "Tarjeta (€)", centavosAInput(v ? v.tarjetaCentavos : auto.tarjetaCentavos), "Lo que cobró la Caja con tarjeta. Si el cierre de Postnet dice otra cosa, corregilo: manda el Postnet.")}
-        ${campoDinero("cierre-plataformas", "Glovo y otras plataformas (€)", centavosAInput(v ? (v.plataformasCentavos ?? null) : (auto.plataformasCentavos || null)), "Lo que cobra la plataforma. No cuenta como efectivo.")}
-        ${campoDinero("cierre-retiros", "Salidas de efectivo (€)", centavosAInput(v?.retirosCentavos ?? null), "Pagos y retiros que hiciste durante el día.")}
-        <label class="cierre-field" for="cierre-retiros-nota"><span>Detalle de las salidas</span><input type="text" id="cierre-retiros-nota" maxlength="400" value="${esc(v?.retirosNota || "")}" placeholder="proveedor, compra…"></label>
-        ${campoDinero("cierre-contado", "Efectivo contado ahora (€)", centavosAInput(v?.contadoCentavos ?? null), `<button type="button" class="cierre-coincide" id="cierre-contado-coincide" hidden></button>`)}
-        ${campoDinero("cierre-fondo-manana", "Dejás en el cajón para mañana (€)", centavosAInput(v?.fondoMananaCentavos ?? null), "Opcional. Mañana se propone como fondo.")}
-        <label class="cierre-field" for="cierre-nota"><span>Nota del cierre</span><input type="text" id="cierre-nota" maxlength="200" value="${esc(v?.nota || "")}" placeholder="opcional"></label>
-      </div>
-      ${auto.salidas.length ? `
-      <div class="cierre-salidas">
-        <h3>Salidas de efectivo de hoy</h3>
-        <ul>${auto.salidas.map((x) => `<li><span>${x.tipo === "retiro" ? "Retiro" : "Pago"}: ${esc(x.concepto)}</span><strong>− ${centsToMoney(x.centavos)}</strong></li>`).join("")}</ul>
-        <div class="cierre-row is-sub"><span>Total de salidas</span><strong>− ${centsToMoney(auto.salidasTotalCentavos)}</strong></div>
-        ${auto.ingresosCentavos > 0 ? `<div class="cierre-row"><span>Entró que no es venta (cambio, aportes)</span><strong>+ ${centsToMoney(auto.ingresosCentavos)}</strong></div>` : ""}
-        <small>Se restan del efectivo: fondo + ventas en efectivo − salidas = lo que tendría que haber en el cajón.</small>
-      </div>` : ""}
-    </section>
-
-    <section class="panel-card">
-      <h2>Resultado</h2>
-      <div id="cierre-resultado" class="cierre-resultado"></div>
-      ${vigenteHtml}
-      <button type="button" class="primary-button" id="cierre-guardar">Cerrar caja</button>
-    </section>
-
-    <section class="panel-card">
-      <h2>Ventas del sistema</h2>
-      <div class="cierre-ventas">
-        <div><small>Total del día</small><strong>${centsToMoney(ventasTotal)}</strong></div>
-        <div><small>Tickets</small><strong>${datos.ventas.length}</strong></div>
-      </div>
-      <p class="cierre-nota">Según cómo se cobró cada venta en la Caja: 💵 ${centsToMoney(sistema.efectivoCentavos)} · 💳 ${centsToMoney(sistema.tarjetaCentavos)}. Es solo una referencia: el total real de tarjeta es el del cierre de Postnet, de abajo.</p>
-      ${tgtg.length ? `
-        <label class="cierre-check">
-          <input type="checkbox" id="cierre-tgtg-cajon" ${v?.tgtgEnCajon ? "checked" : ""}>
-          <span>Too Good To Go: ${tgtg.length} paquete${tgtg.length > 1 ? "s" : ""} (${centsToMoney(tgtgTotal)}). Marcá si se cobró en el local; si lo cobra la app no entra al cajón.</span>
-        </label>` : ""}
-    </section>
-
+  const historialHtml = `
     <section class="panel-card">
       <h2>Últimos cierres</h2>
       ${historial}
     </section>`;
 
+  // El cierre se arma SOLO con lo que se anoto durante el dia, sin boton: quien cierra
+  // chequea, corrige lo que no coincida, y cuenta el efectivo (lo unico que el sistema
+  // no puede ni debe saber).
+  //
+  // Orden: la plata que hubo (fondo + ingresos), lo que se fue (plataformas + salidas, con su
+  // detalle uno por renglon), y al final lo que cuenta la persona: el efectivo real y el
+  // total de Postnet. "Ingresos" y "Salidas" no se tipean: salen de las ventas y de los pagos y
+  // retiros anotados, y se muestran calculados.
+  container.innerHTML = `
+    ${aviso}
+    <section class="panel-card">
+      <h2><span class="caja-paso-num">4</span> Cerrar el día</h2>
+      <div class="cierre-grid">
+        ${campoDinero("cierre-fondo", "Fondo con el que abriste (€)", centavosAInput(fondo ?? 0), v ? "" : (datos.caja?.apertura && !datos.caja.apertura.implicita ? "Es el que anotaste al abrir la caja." : "Propuesto: lo que dejaste en el último cierre."))}
+        <div class="cierre-calculado">
+          <span>Ingresos en efectivo</span>
+          <strong class="es-mas">${mas(auto.efectivoSistemaCentavos)}</strong>
+          <small>Se suma con cada venta cobrada en efectivo.</small>
+        </div>
+        ${campoDinero("cierre-plataformas", "Glovo y otras plataformas (€)", centavosAInput(v ? (v.plataformasCentavos ?? null) : (auto.plataformasCentavos || null)), "Lo que cobra la plataforma. No cuenta como efectivo.")}
+        <div class="cierre-calculado">
+          <span>Salidas de efectivo</span>
+          <strong class="es-menos">${menos(salidasValor)}</strong>
+          <small>Pagos y retiros que anotaste en el día.</small>
+        </div>
+        <div class="cierre-detalle cierre-ancho">
+          <h3>Detalle de las salidas</h3>
+          ${detalleDeSalidas(auto.salidas, notaSalidas)}
+        </div>
+        ${campoDinero("cierre-contado", "Efectivo real en caja (€)", centavosAInput(v?.contadoCentavos ?? null), `<button type="button" class="cierre-coincide" id="cierre-contado-coincide" hidden></button>`)}
+        ${campoDinero("cierre-tarjeta", "Cierre de Postnet · tarjeta (€)", centavosAInput(v ? v.tarjetaCentavos : auto.tarjetaCentavos), "El total del cierre de Postnet. Si dice otra cosa que lo que anotó la Caja, corregilo: manda el Postnet.")}
+        ${campoDinero("cierre-fondo-manana", "Dejás en el cajón para mañana (€)", centavosAInput(v ? (v.fondoMananaCentavos ?? null) : auto.fondoMananaCentavos), "Opcional. Mañana se propone como fondo.")}
+      </div>
+      <!-- Lo que se calcula solo y se guarda con el cierre: no se ve como campo. -->
+      <input type="hidden" id="cierre-retiros" data-money value="${esc(centavosAInput(salidasValor > 0 ? salidasValor : null))}">
+      <input type="hidden" id="cierre-retiros-nota" value="${esc(notaSalidas || "")}">
+    </section>
+
+    <section class="panel-card">
+      <h2>Resultado</h2>
+      <div id="cierre-resultado" class="cierre-resultado"></div>
+      ${tgtg.length ? `
+        <label class="cierre-check">
+          <input type="checkbox" id="cierre-tgtg-cajon" ${v?.tgtgEnCajon ? "checked" : ""}>
+          <span>Too Good To Go: ${tgtg.length} paquete${tgtg.length > 1 ? "s" : ""} (${centsToMoney(tgtgTotal)}). Marcá si se cobró en el local; si lo cobra la app no entra al cajón.</span>
+        </label>` : ""}
+      <label class="cierre-field" for="cierre-nota"><span>Comentarios si hay desajuste</span><input type="text" id="cierre-nota" maxlength="200" value="${esc(v?.nota || "")}" placeholder="opcional"></label>
+      ${vigenteHtml}
+      <button type="button" class="primary-button" id="cierre-guardar">Cerrar caja</button>
+    </section>
+    ${opciones.historialContainer ? "" : historialHtml}`;
+  if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
+
   const resultado = container.querySelector("#cierre-resultado");
   let esperadoActual = null;
   const recalcular = () => {
     const r = calcularDesdeFormulario(container, datos.ventas);
-    // Cruce contra lo que se tapeo en la Caja (ver nota "Segun como se cobro"
-    // arriba) — solo un aviso, nunca cambia el calculo: el numero que manda
-    // es el que se escribe a mano del cierre de Postnet.
+    // Cruce contra lo que se tapeo en la Caja — solo un aviso, nunca cambia el calculo: el
+    // numero que manda es el que se escribe a mano del cierre de Postnet.
     if (r.form.tarjetaCentavos !== null && !Number.isNaN(r.form.tarjetaCentavos) && Math.abs(r.form.tarjetaCentavos - sistema.tarjetaCentavos) > 1) {
       r.calculo.alertas.push(`La Caja registró ${centsToMoney(sistema.tarjetaCentavos)} en tarjeta; anotaste ${centsToMoney(r.form.tarjetaCentavos)}. Puede ser normal (propinas, redondeo) — si no, revisá el cierre de Postnet.`);
     }
-    renderResultadoCierre(resultado, r);
+    renderResultadoCierre(resultado, r, { tickets: datos.ventas.length });
     container.querySelectorAll("input[data-money]").forEach((i) => i.setAttribute("aria-invalid", Number.isNaN(parseEuros(i.value)) ? "true" : "false"));
     container.querySelector("#cierre-guardar").disabled = Boolean(r.error);
-    // "Coincide": un toque cuando lo contado es justo lo esperado. Muestra el
-    // importe, porque es lo que hay que comparar con el cajon que se tiene
-    // delante. Es un atajo para escribirlo, no un autocompletado: la persona
-    // sigue contando.
+    // "Coincide": un toque cuando lo contado es justo lo esperado. Es un atajo para escribirlo,
+    // no un autocompletado: la persona sigue contando.
     const btn = container.querySelector("#cierre-contado-coincide");
     esperadoActual = r.calculo.esperadoEfectivoCentavos;
     if (btn) {
@@ -193,26 +213,8 @@ export function renderCierre(container, datos) {
     }
     return r;
   };
-  // Todo lo que el sistema sabe, en los campos. NUNCA el efectivo contado.
   const poner = (id, texto) => { const el = container.querySelector(`#${id}`); if (el) el.value = texto; };
-  const autocompletar = () => {
-    poner("cierre-fondo", centavosAInput(auto.fondoCentavos));
-    poner("cierre-tarjeta", centavosAInput(auto.tarjetaCentavos));
-    poner("cierre-plataformas", auto.plataformasCentavos > 0 ? centavosAInput(auto.plataformasCentavos) : "");
-    poner("cierre-retiros", auto.retirosCentavos > 0 ? centavosAInput(auto.retirosCentavos) : "");
-    poner("cierre-retiros-nota", auto.retirosNota);
-    poner("cierre-fondo-manana", centavosAInput(auto.fondoMananaCentavos));
-    const estado = container.querySelector("#cierre-auto-estado");
-    if (estado) {
-      const n = auto.salidas.length;
-      estado.textContent = `Listo: ${n === 0 ? "sin pagos ni retiros anotados" : `${n} salida${n === 1 ? "" : "s"} de efectivo anotada${n === 1 ? "" : "s"}`}. Revisá los importes y contá el efectivo del cajón.`;
-      estado.hidden = false;
-    }
-    recalcular();
-    container.querySelector("#cierre-contado")?.focus();
-  };
   container.onclick = (e) => {
-    if (e.target.closest("#cierre-autocompletar")) { autocompletar(); return; }
     if (e.target.closest("#cierre-contado-coincide") && esperadoActual !== null) {
       poner("cierre-contado", centavosAInput(esperadoActual));
       recalcular();

@@ -512,12 +512,19 @@ export async function reordenarProductos(categoriaId, idsEnOrden) {
   const productos = await getAll("productos");
   const delaCategoria = productos.filter((p) => p.categoriaId === categoriaId);
   const porId = new Map(delaCategoria.map((p) => [p.id, p]));
-  // Solo se acepta un orden que contenga exactamente los mismos productos que
-  // la categoria: si llegara una lista incompleta (ej. una pantalla vieja),
-  // reordenar con ella dejaria productos sueltos al final sin que se note.
-  if (idsEnOrden.length !== delaCategoria.length || idsEnOrden.some((id) => !porId.has(id))) {
+  // Se acepta un orden de productos de ESTA categoria, sin repetir. Los OCULTOS no aparecen en
+  // la lista que se arrastra: quedan al final, en el orden que tenian. Pero si falta algun
+  // producto visible (ej. una pantalla vieja), reordenar con esa lista dejaria productos
+  // sueltos sin que se note: eso sigue siendo un error.
+  if (new Set(idsEnOrden).size !== idsEnOrden.length || idsEnOrden.some((id) => !porId.has(id))) {
     throw new Error("El orden recibido no coincide con los productos de la categoria.");
   }
+  const enLista = new Set(idsEnOrden);
+  const restantes = delaCategoria.filter((p) => !enLista.has(p.id)).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  if (restantes.some((p) => p.activo !== false)) {
+    throw new Error("El orden recibido no coincide con los productos de la categoria.");
+  }
+  idsEnOrden = [...idsEnOrden, ...restantes.map((p) => p.id)];
 
   const now = new Date().toISOString();
   await withStores(["productos"], "readwrite", (stores) => {

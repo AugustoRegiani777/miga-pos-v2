@@ -61,7 +61,12 @@ export function renderProveedoresList(el, data, callbacks = {}) {
             <strong>${proveedor.nombre}</strong>
             <span class="cal-muted">${proveedor.productos.length} insumo${proveedor.productos.length !== 1 ? "s" : ""} · ${cicloTexto}</span>
           </div>
-          <button class="ghost-button compact prov-edit-btn" data-action="edit-prov" data-id="${proveedor.id}">Editar</button>
+          <span class="prov-acciones">
+            <button class="ghost-button compact" data-action="edit-prov" data-id="${proveedor.id}">Editar</button>
+            <button class="ghost-button compact prov-del-btn" type="button" data-action="delete-prov" data-id="${proveedor.id}" aria-label="Eliminar proveedor ${proveedor.nombre}" title="Eliminar proveedor">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/></svg>
+            </button>
+          </span>
         </summary>
         <div class="prov-detail">
           ${contacto ? `<p class="prov-contact">${contacto}</p>` : ""}
@@ -85,6 +90,12 @@ export function renderProveedoresList(el, data, callbacks = {}) {
       e.preventDefault();
       const proveedor = data.find(p => p.id === btn.dataset.id);
       if (proveedor) callbacks.onEditProv?.(proveedor);
+    }
+
+    if (action === "delete-prov") {
+      e.preventDefault();
+      const proveedor = data.find(p => p.id === btn.dataset.id);
+      if (proveedor) callbacks.onDeleteProv?.(proveedor);
     }
 
     if (action === "add-prod") {
