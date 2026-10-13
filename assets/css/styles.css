@@ -4457,3 +4457,11 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 #cierre-tarjeta-coincide { color: var(--muted); }
 #cierre-tarjeta-coincide.es-ok { color: var(--txt-ok); }
 #cierre-tarjeta-coincide.es-dif { color: var(--txt-low); }
+
+/* Resultado del conteo: una linea sutil, no un bloque de color */
+.cierre-diff { margin-top: 10px; padding: 8px 12px; border-radius: 0 8px 8px 0; text-align: left; font-size: 0.95rem; font-weight: 700; color: var(--muted); background: var(--page); border-left: 3px solid var(--line); }
+.cierre-diff.is-ok { background: var(--page); border-left-color: var(--ok); color: var(--txt-ok); }
+.cierre-diff.is-chico { background: var(--page); border-left-color: var(--low); color: var(--txt-low); }
+.cierre-diff.is-grande { background: var(--page); border-left-color: var(--out); color: var(--txt-out); }
+.cierre-diff.is-pendiente { color: var(--muted); }
+.cierre-nota.cierre-info { font-size: 0.8rem; opacity: 0.85; }
