@@ -4160,3 +4160,19 @@ body.arrastrando-fila {
 }
 .panel-lista-compras-encabezado { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .panel-lista-compras-encabezado h2 { margin: 0; }
+
+/* Aviso de "hay una version nueva de la app": mas llamativo que el de cambios
+   (es una accion de la app, no de los datos) pero sin tapar nada. */
+.version-badge {
+  min-height: 46px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.version-badge:active { opacity: 0.85; }
+.version-badge:disabled { opacity: 0.6; }

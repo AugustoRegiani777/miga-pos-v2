@@ -1,3 +1,6 @@
 [build]
+  # Genera version.json con el commit publicado: la app lo compara con la version que cargo
+  # para avisar 'hay una version nueva' (ver src/utils/version.js).
+  command = '''V="${COMMIT_REF:-$(date +%s)}"; printf '{"version":"%s"}' "$V" > version.json'''
   publish = "."
   functions = "netlify/functions"
