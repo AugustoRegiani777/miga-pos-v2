@@ -475,6 +475,9 @@ export function renderFacturaLineas(container, lineas, insumos) {
           <strong>${linea.nombreDetectado || "Producto sin nombre"}</strong>
           <span class="factura-badge ${confianza}">${CONFIANZA_LABEL[confianza]}</span>
         </div>
+        <div class="factura-linea-acciones">
+          <button type="button" class="ghost-button compact factura-omitir">No cargar esta línea</button>
+        </div>
         <div class="factura-linea-campos">
           <label class="quantity-field">Cantidad
             <input type="number" step="any" class="factura-cantidad" value="${Number(linea.cantidad) || 0}">
@@ -533,6 +536,15 @@ export function renderFacturaLineas(container, lineas, insumos) {
   }
 
   container.querySelectorAll(".factura-linea").forEach(card => {
+    // A veces la factura trae compras que no son de inventario (descartables, limpieza):
+    // la linea se puede dejar afuera sin perder lo que se escribio, y volver a incluir.
+    const omitir = card.querySelector(".factura-omitir");
+    omitir.addEventListener("click", () => {
+      const ahora = card.dataset.omitida !== "1";
+      card.dataset.omitida = ahora ? "1" : "";
+      omitir.textContent = ahora ? "Incluir de nuevo" : "No cargar esta línea";
+      container.dispatchEvent(new CustomEvent("factura-omitida", { bubbles: true }));
+    });
     const select = card.querySelector(".factura-insumo-select");
     select.addEventListener("change", () => {
       const nuevoBox = card.querySelector(".factura-linea-nuevo");

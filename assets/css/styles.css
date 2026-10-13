@@ -12,7 +12,7 @@
   --primary: #17324d;
   --brand: #17324d;
   --primary-2: #1f6f78;
-  --accent: #d64b2a;
+  --accent: #cf4524;
   --ok: #20734d;
   --low: #a26400;
   --out: #a32020;
@@ -462,9 +462,9 @@ button {
   display: grid;
   gap: 4px;
   padding: 12px;
-  border: 1px solid #f0c6b8;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--surface));
   border-radius: 8px;
-  background: #fff7f4;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
 }
 
 .combo-summary strong {
@@ -491,10 +491,10 @@ button {
 .pedido-combo-hint {
   margin: -4px 0 0;
   padding: 8px 12px;
-  border: 1px solid #f0c6b8;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--surface));
   border-radius: 8px;
-  background: #fff7f4;
-  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--txt-accent);
   font-size: 0.85rem;
   font-weight: 800;
 }
@@ -844,10 +844,10 @@ button {
 #production-comment-text {
   margin-top: 8px;
   padding: 10px 12px;
-  border-left: 4px solid #d6b98d;
+  border-left: 4px solid var(--low);
   border-radius: 8px;
-  background: #fffaf2;
-  color: #6a573f;
+  background: color-mix(in srgb, var(--low) 14%, var(--surface));
+  color: var(--ink);
   font-weight: 700;
 }
 
@@ -977,7 +977,7 @@ button {
   padding: 8px 10px;
   border: 2px solid var(--low);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--low) 12%, #ffffff);
+  background: color-mix(in srgb, var(--low) 16%, var(--surface));
   color: var(--ink);
   font-weight: 800;
 }
@@ -1567,8 +1567,8 @@ button {
 /* ===== Aprovisionamiento / Insumos ===== */
 
 .calibracion-banner {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
+  background: color-mix(in srgb, var(--low) 16%, var(--surface));
+  border: 1px solid var(--low);
   border-radius: 8px;
   margin: 0 1rem 1rem;
   padding: 0.75rem 1rem;
@@ -1748,12 +1748,12 @@ button {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.85rem 1rem;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
+  border-bottom: 1px solid var(--line);
 }
 
 .calibracion-row--alerta {
-  background: #fffbeb;
-  border-left: 3px solid #fbbf24;
+  background: color-mix(in srgb, var(--low) 14%, var(--surface));
+  border-left: 3px solid var(--low);
 }
 
 .calibracion-row-info {
@@ -1824,15 +1824,15 @@ button {
 
 .cal-card {
   padding: 1rem;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
+  border-bottom: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
 .cal-card--alerta {
-  background: #fffbeb;
-  border-left: 3px solid #fbbf24;
+  background: color-mix(in srgb, var(--low) 14%, var(--surface));
+  border-left: 3px solid var(--low);
 }
 
 .cal-card-header {
@@ -1888,8 +1888,8 @@ button {
 
 /* Settings panel */
 .cal-settings-panel {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.75rem 1rem;
   margin-bottom: 1rem;
@@ -2015,7 +2015,7 @@ button {
 
 .cal-hist-table td {
   padding: 0.25rem 0.4rem;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 
@@ -2036,7 +2036,7 @@ button {
 /* ===== Vista Recetas ===== */
 
 .receta-card {
-  border-bottom: 1px solid rgba(0,0,0,0.07);
+  border-bottom: 1px solid var(--line);
   padding: 0.75rem 1rem 0.5rem;
 }
 
@@ -2054,7 +2054,7 @@ button {
 
 .receta-table td {
   padding: 0.28rem 0.3rem;
-  border-bottom: 1px solid rgba(0,0,0,0.04);
+  border-bottom: 1px solid var(--line);
 }
 
 .receta-table tr:last-child td {
@@ -2124,12 +2124,12 @@ button {
 
 .factura-linea[data-confianza="sin_match"] {
   border-color: var(--out);
-  background: color-mix(in srgb, var(--out) 6%, #ffffff);
+  background: color-mix(in srgb, var(--out) 16%, var(--surface));
 }
 
 .factura-linea[data-confianza="media"] {
   border-color: var(--low);
-  background: color-mix(in srgb, var(--low) 6%, #ffffff);
+  background: color-mix(in srgb, var(--low) 16%, var(--surface));
 }
 
 .factura-linea-head {
@@ -2275,7 +2275,7 @@ button {
 /* ===== Vista Proveedores ===== */
 
 .prov-card {
-  border-bottom: 1px solid rgba(0,0,0,0.07);
+  border-bottom: 1px solid var(--line);
 }
 
 .prov-summary {
@@ -2344,14 +2344,14 @@ details[open] > .prov-summary::before {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #64748b;
+  color: var(--muted);
   padding: 0.3rem 0.5rem;
-  border-bottom: 1px solid rgba(0,0,0,0.1);
+  border-bottom: 1px solid var(--line);
 }
 
 .prov-tabla td {
   padding: 0.45rem 0.5rem;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
 
@@ -2380,7 +2380,7 @@ details[open] > .prov-summary::before {
 
 .prov-add-row {
   padding-top: 0.75rem;
-  border-top: 1px solid rgba(0,0,0,0.06);
+  border-top: 1px solid var(--line);
   margin-top: 0.5rem;
 }
 
@@ -4270,3 +4270,54 @@ body.arrastrando-fila {
   #insumos-list .stock-row-actions { grid-column: auto; justify-content: flex-end; }
   #insumos-list .stock-row h2 { font-size: 1.1rem; }
 }
+
+/* =====================================================================
+   CONTRASTE (modo nocturno). La app es oscura en toda su extension, asi que:
+   - los colores de marca (azul, verde, rojo...) estan pensados como FONDO de
+     boton con texto blanco; usados como texto sobre fondo oscuro no se leen. Para
+     texto hay variantes claras (--txt-*), todas con 5:1 o mas.
+   - nada de blancos o crema escritos a mano: se mezcla con --surface.
+   Se verifica con test/auditoria-contraste.js (mide cada texto contra su fondo).
+   ===================================================================== */
+:root {
+  --txt-primary: #8ab4e8;
+  --txt-teal: #5cc7d1;
+  --txt-ok: #4cc38a;
+  --txt-out: #ff7b7b;
+  --txt-low: #f2b24d;
+  --txt-accent: #ff8d6e;
+}
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+#cart-sandwich-count { color: var(--muted); }
+.factura-total-valor { color: var(--txt-primary); }
+.product-meta, .aviso-ciclo-abrir, #cierre-contado-coincide { color: var(--txt-teal); }
+.prov-badge, .sale-sync { color: var(--txt-ok); }
+.caja-mov-fila .mov-importe.sale, .ldc-badge.ldc-urgente { color: var(--txt-out); }
+.caja-mov-fila .mov-importe.entra { color: var(--txt-ok); }
+.reloj-simulado button { color: var(--ink); }
+.cal-alpha-btn { color: var(--ink); border-color: var(--line); }
+.cal-alpha-btn:hover { background: var(--page); border-color: var(--muted); }
+.cal-alpha-btn.active { background: var(--primary-2); border-color: var(--primary-2); color: #ffffff; }
+.cal-setting-label, thead th, .receta-td-nombre { color: var(--muted); }
+.receta-td-nombre { color: var(--ink); }
+
+/* Factura: una linea que no se quiere cargar (compra que no es de inventario). */
+.factura-linea-acciones { display: flex; justify-content: flex-end; margin: -4px 0 0; }
+.factura-omitir { min-height: 44px; }
+.factura-linea[data-omitida="1"] { opacity: 0.6; }
+.factura-linea[data-omitida="1"] > :not(.factura-linea-head):not(.factura-linea-acciones) { display: none; }
+.factura-linea[data-omitida="1"] .factura-linea-head strong { text-decoration: line-through; }
+
+@media (max-width: 600px) {
+  /* Hojas: el titulo fijo es solo "titulo + Cerrar". La frase explicativa de debajo
+     ocupaba casi la mitad de la pantalla y dejaba las tarjetas cortadas debajo. */
+  .stock-adjust-sheet .production-sheet-header { padding: 14px 16px 8px; }
+  .stock-adjust-sheet .production-sheet-header h2 { font-size: 1.3rem; }
+  .production-sheet-header p { display: none; }
+}
+
+.sale-sync.is-synced { color: var(--txt-ok); border-color: var(--ok); }
+.ldc-pronto.ldc-badge, .ldc-badge.ldc-pronto { color: var(--txt-low); }
+.ldc-badge.ldc-urgente { color: var(--txt-out); }
+.ldc-badge.ldc-ok { color: var(--txt-ok); }
+.cart-vuelto input { background: var(--surface); color: var(--ink); }

@@ -1235,9 +1235,9 @@ async function handleFacturaLeer() {
     facturaProveedorIdActual = proveedorId;
     facturaLineasActuales = items;
     const insumos = await listInsumos();
-    dom.facturaResumen.textContent =
-      `${proveedorNombre} · ${items.length} línea${items.length === 1 ? "" : "s"} detectada${items.length === 1 ? "" : "s"}`;
+    facturaProveedorNombreActual = proveedorNombre;
     renderFacturaLineas(dom.facturaLineas, facturaLineasActuales, insumos);
+    actualizarResumenFactura();
     mostrarPasoFactura("revision");
   } catch (error) {
     setFlash(error.message || "No se pudo leer la factura.", "error");
@@ -1248,7 +1248,7 @@ async function handleFacturaLeer() {
 }
 
 function leerLineasDelFormulario() {
-  return Array.from(dom.facturaLineas.querySelectorAll(".factura-linea")).map((card) => {
+  return Array.from(dom.facturaLineas.querySelectorAll('.factura-linea:not([data-omitida="1"])')).map((card) => {
     const insumoSelect = card.querySelector(".factura-insumo-select");
     const esNuevo = insumoSelect.value === "__nuevo__";
     return {
@@ -1267,12 +1267,27 @@ function leerLineasDelFormulario() {
   });
 }
 
+// "Makro · 9 líneas detectadas" y, si se dejaron algunas afuera, cuantas se van a cargar.
+let facturaProveedorNombreActual = "";
+function actualizarResumenFactura() {
+  const total = dom.facturaLineas.querySelectorAll(".factura-linea").length;
+  const afuera = dom.facturaLineas.querySelectorAll('.factura-linea[data-omitida="1"]').length;
+  const plural = (n) => (n === 1 ? "" : "s");
+  dom.facturaResumen.textContent = afuera === 0
+    ? `${facturaProveedorNombreActual} · ${total} línea${plural(total)} detectada${plural(total)}`
+    : `${facturaProveedorNombreActual} · se cargan ${total - afuera} de ${total} línea${plural(total)}`;
+  dom.facturaConfirmar.disabled = total - afuera === 0;
+}
+
 async function handleFacturaConfirmar() {
   if (facturaInProgress) return;
   facturaInProgress = true;
   try {
     const proveedorId = facturaProveedorIdActual;
     const lineas = leerLineasDelFormulario();
+    if (lineas.length === 0) {
+      throw new Error("Dejaste afuera todas las líneas: no hay nada para cargar.");
+    }
     if (lineas.some((l) => l.cantidad <= 0)) {
       throw new Error("Todas las líneas necesitan una cantidad mayor a 0.");
     }
@@ -3957,6 +3972,7 @@ function bindEvents() {
   dom.facturaInputAdjunto.addEventListener("change", () => handleFacturaArchivoSeleccionado(dom.facturaInputAdjunto.files[0]));
   dom.facturaContinuar.addEventListener("click", handleFacturaLeer);
   dom.facturaConfirmar.addEventListener("click", handleFacturaConfirmar);
+  dom.facturaLineas.addEventListener("factura-omitida", actualizarResumenFactura);
 
   dom.closeRecetaEdit.addEventListener("click", closeRecetaEditSheet);
   dom.recetaEditBackdrop.addEventListener("click", closeRecetaEditSheet);
