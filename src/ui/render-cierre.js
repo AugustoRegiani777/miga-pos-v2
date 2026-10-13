@@ -159,6 +159,11 @@ export function renderCierre(container, datos, opciones = {}) {
         </div>
         ${campoDinero("cierre-plataformas", "Glovo y otras plataformas (€)", centavosAInput(v ? (v.plataformasCentavos ?? null) : (auto.plataformasCentavos || null)), "Lo que cobra la plataforma. No cuenta como efectivo.")}
         <div class="cierre-calculado">
+          <span>Ingresos con tarjeta (Postnet)</span>
+          <strong class="es-mas">${mas(auto.tarjetaCentavos)}</strong>
+          <small>Lo que anotó la Caja en tarjeta. Abajo va el total del cierre de Postnet, que es el que manda.</small>
+        </div>
+        <div class="cierre-calculado cierre-ancho">
           <span>Salidas de efectivo</span>
           <strong class="es-menos">${menos(salidasValor)}</strong>
           <small>Pagos y retiros que anotaste en el día.</small>
