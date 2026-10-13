@@ -625,6 +625,16 @@
           <button class="ghost-button compact" type="button" id="abrir-factura">Cargar factura</button>
           <button class="ghost-button compact" type="button" id="abrir-crear-insumo" title="Normalmente no hace falta: cargando la factura el insumo se crea solo, con su proveedor y precio">Insumo suelto</button>
         </div>
+        <label class="toolbar-orden" id="insumos-orden-field">
+          <span class="toolbar-paso-titulo">Ordenar por</span>
+          <select id="insumos-orden">
+            <option value="estado">Estado (crítico primero)</option>
+            <option value="categoria">Categoría</option>
+            <option value="fecha">Fecha de aprovisionamiento</option>
+            <option value="sugerencia">Sugerencia de compra</option>
+            <option value="proveedor">Proveedor</option>
+          </select>
+        </label>
       </section>
 
       <!-- Sheet: crear insumo suelto (sin producto ni proveedor asociado) -->
@@ -688,14 +698,6 @@
         </div>
       </section>
 
-      <label class="quantity-field" id="insumos-orden-field">
-        <span>Ordenar por</span>
-        <select id="insumos-orden">
-          <option value="estado">Estado (crítico primero)</option>
-          <option value="reciente">Recién cargado</option>
-          <option value="cantidad">Cantidad</option>
-        </select>
-      </label>
       <div class="stock-list" id="insumos-list"></div>
 
       <details class="gestion-seccion" id="seccion-calibracion">

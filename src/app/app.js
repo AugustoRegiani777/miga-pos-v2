@@ -2080,12 +2080,52 @@ function closeCalibracionSheet() {
 // otros dos modos se aplican encima ac, sin tocar esa funcion (sigue
 // sirviendo tal cual para todo lo demas que la usa, ej. la cola de
 // faltantes de produccion).
-function ordenarInsumosParaVista(insumos, modo) {
-  if (modo === "reciente") {
-    return insumos.slice().sort((a, b) => String(b.actualizadoEn || "").localeCompare(String(a.actualizadoEn || "")));
+// Categoria y proveedor agrupan con un encabezado; un insumo sin ese dato va al final, en "Sin asignar".
+async function ordenarInsumosParaVista(insumos, modo) {
+  const porNombre = (a, b) => a.nombre.localeCompare(b.nombre);
+  const agrupar = (clave) => insumos
+    .map((i) => ({ ...i, grupo: clave(i) || { nombre: "Sin asignar", orden: 1e9 } }))
+    .sort((a, b) => (a.grupo.orden - b.grupo.orden) || a.grupo.nombre.localeCompare(b.grupo.nombre) || porNombre(a, b))
+    .map((i) => ({ ...i, grupo: i.grupo.nombre }));
+
+  if (modo === "categoria") {
+    // La categoria de un insumo es la de los productos que lo llevan en su receta (la primera, en
+    // el orden del Menu). Sin receta: sin categoria.
+    const [recetas, productos, categorias] = await Promise.all([getAll("recetas"), getAll("productos"), getAll("categorias")]);
+    const catPorId = new Map(categorias.map((c) => [c.id, c]));
+    const prodPorId = new Map(productos.map((p) => [p.id, p]));
+    const catDeInsumo = new Map();
+    for (const r of recetas) {
+      const cat = catPorId.get(prodPorId.get(r.productoId)?.categoriaId);
+      if (!cat) continue;
+      const actual = catDeInsumo.get(r.insumoId);
+      if (!actual || (cat.orden ?? 0) < (actual.orden ?? 0)) catDeInsumo.set(r.insumoId, { nombre: cat.nombre, orden: cat.orden ?? 0 });
+    }
+    return agrupar((i) => catDeInsumo.get(i.id));
   }
-  if (modo === "cantidad") {
-    return insumos.slice().sort((a, b) => (Number(b.stockActual) || 0) - (Number(a.stockActual) || 0));
+  if (modo === "proveedor") {
+    const { items } = await listaDeComprasSmart();
+    const provDe = new Map(items.map((x) => [x.id, x.mejorSupplier ? { nombre: x.mejorSupplier.proveedorNombre, orden: 0 } : null]));
+    return agrupar((i) => provDe.get(i.id));
+  }
+  if (modo === "sugerencia") {
+    // El mismo orden que "Que pedir": lo mas urgente de pedir primero.
+    const { items } = await listaDeComprasSmart();
+    const rango = new Map(items.map((x, n) => [x.id, n]));
+    return insumos.slice().sort((a, b) => ((rango.get(a.id) ?? 1e9) - (rango.get(b.id) ?? 1e9)) || porNombre(a, b));
+  }
+  if (modo === "fecha") {
+    // La ultima vez que entro mercaderia (compra); los que nunca tuvieron una, al final.
+    const movs = await getAll("movimientos_insumos");
+    const ultima = new Map();
+    for (const m of movs) {
+      if (m.tipo !== "compra") continue;
+      const f = String(m.fecha || m.creadoEn || "").slice(0, 10);
+      if (f > (ultima.get(m.insumoId) || "")) ultima.set(m.insumoId, f);
+    }
+    return insumos.slice()
+      .sort((a, b) => (ultima.get(b.id) || "").localeCompare(ultima.get(a.id) || "") || porNombre(a, b))
+      .map((i) => ({ ...i, ultimaCompra: ultima.get(i.id) || null }));
   }
   return insumos;
 }
@@ -2218,7 +2258,7 @@ async function guardarPendienteCiclo(article) {
 
 async function renderInsumosView() {
   const insumos = await listInsumos();
-  const ordenados = ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
+  const ordenados = await ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
   renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet);
   renderCalibracionAlert(dom.calibracionAlert, insumos);
   await renderAvisoCiclo();

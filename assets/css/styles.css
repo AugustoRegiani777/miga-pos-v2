@@ -4465,3 +4465,16 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .cierre-diff.is-grande { background: var(--page); border-left-color: var(--out); color: var(--txt-out); }
 .cierre-diff.is-pendiente { color: var(--muted); }
 .cierre-nota.cierre-info { font-size: 0.8rem; opacity: 0.85; }
+
+/* Gestion > Insumos: barra de acciones prolija, con el orden a la derecha */
+.stock-toolbar-ciclo { align-items: flex-end; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.toolbar-orden { margin-left: auto; display: flex; flex-direction: column; gap: 6px; }
+.toolbar-orden select { min-height: 44px; min-width: 230px; }
+.insumos-grupo { margin: 14px 2px 4px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.insumos-grupo:first-child { margin-top: 2px; }
+.stock-row-compra { margin: 2px 0 0; font-size: 0.8rem; color: var(--muted); }
+@media (max-width: 700px) {
+  .toolbar-orden { margin-left: 0; flex: 1 1 100%; flex-direction: row; align-items: center; gap: 10px; }
+  .toolbar-orden .toolbar-paso-titulo { display: block !important; white-space: nowrap; flex-basis: auto; }
+  .toolbar-orden select { flex: 1; min-width: 0; }
+}

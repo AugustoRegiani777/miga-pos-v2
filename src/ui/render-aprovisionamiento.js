@@ -92,7 +92,15 @@ export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
     container.innerHTML = '<p class="empty-state">No hay insumos cargados.</p>';
     return;
   }
-  container.innerHTML = insumos.map(insumo => `
+  let grupoAnterior = null;
+  container.innerHTML = insumos.map(insumo => {
+    // Cuando se ordena por categoria o proveedor, cada grupo lleva su encabezado.
+    const encabezado = insumo.grupo !== undefined && insumo.grupo !== grupoAnterior
+      ? `<h3 class="insumos-grupo">${insumo.grupo}</h3>` : "";
+    grupoAnterior = insumo.grupo;
+    const cuando = insumo.ultimaCompra !== undefined
+      ? `<p class="stock-row-compra">${insumo.ultimaCompra ? `Última compra: ${insumo.ultimaCompra.split("-").reverse().join("/")}` : "Sin compras cargadas"}</p>` : "";
+    return `${encabezado}
     <div class="stock-row" data-id="${insumo.id}" role="button" tabindex="0">
       <div>
         <div class="stock-row-titulo">
@@ -100,12 +108,13 @@ export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
           ${onCalibrar ? `<button type="button" class="btn-calibrar-insumo" data-calibrar-fila="${insumo.id}" aria-label="Calibrar ${insumo.nombre}">Calibrar</button>` : ""}
         </div>
         <p>${stockBaseText(insumo)}</p>
+        ${cuando}
       </div>
       <div class="stock-row-actions">
         ${statusPill(insumo.estadoStock)}
       </div>
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
   // El boton va DENTRO de la fila clickeable: sin stopPropagation, tocar
   // "Calibrar" tambien abria la hoja de ajuste de stock.
   container.querySelectorAll("[data-calibrar-fila]").forEach(btn => {
