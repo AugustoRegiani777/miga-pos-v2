@@ -407,6 +407,7 @@ const dom = {
   produccionConsulta: document.querySelector("#produccion-consulta"),
   closePeriodButton: document.querySelector("#close-period-button"),
   insumosOrden: document.querySelector("#insumos-orden"),
+  insumosBuscar: document.querySelector("#insumos-buscar"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
   relojSimulado: document.querySelector("#reloj-simulado"),
@@ -2258,7 +2259,11 @@ async function guardarPendienteCiclo(article) {
 
 async function renderInsumosView() {
   const insumos = await listInsumos();
-  const ordenados = await ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
+  let ordenados = await ordenarInsumosParaVista(insumos, dom.insumosOrden?.value || "estado");
+  // Buscador: sin tildes ni mayusculas ("jamon" encuentra "Jamon york" y "Jamón serrano").
+  const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const q = norm(dom.insumosBuscar?.value);
+  if (q) ordenados = ordenados.filter((i) => norm(i.nombre).includes(q));
   renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet);
   renderCalibracionAlert(dom.calibracionAlert, insumos);
   await renderAvisoCiclo();
@@ -3838,6 +3843,7 @@ function bindEvents() {
   });
 
   dom.insumosOrden?.addEventListener("change", () => { renderInsumosView(); });
+  dom.insumosBuscar?.addEventListener("input", () => { renderInsumosView(); });
   dom.closeInsumosAjuste.addEventListener("click", closeInsumoAjusteSheet);
   dom.insumosAjusteBackdrop.addEventListener("click", closeInsumoAjusteSheet);
   dom.closeCalibracion.addEventListener("click", closeCalibracionSheet);

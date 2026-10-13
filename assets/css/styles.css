@@ -4478,3 +4478,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   .toolbar-orden .toolbar-paso-titulo { display: block !important; white-space: nowrap; flex-basis: auto; }
   .toolbar-orden select { flex: 1; min-width: 0; }
 }
+
+.toolbar-buscar { flex: 1 1 220px; min-width: 160px; max-width: 420px; margin: 0 auto; }
+.toolbar-buscar input { width: 100%; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; }
+.toolbar-buscar input::placeholder { color: var(--muted); }
+.toolbar-orden select { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; font: inherit; }
+@media (max-width: 700px) { .toolbar-buscar { flex: 1 1 100%; max-width: none; margin: 0; } }
