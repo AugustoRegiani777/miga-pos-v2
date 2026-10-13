@@ -4,3 +4,5 @@ node_modules/
 
 # Notas privadas con claves (el repositorio es publico)
 COMANDOS.local.md
+# generado en cada publicacion (netlify.toml)
+version.json

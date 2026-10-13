@@ -8,6 +8,7 @@ import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
+import { leerVersionPublicada } from "../utils/version.js";
 import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
@@ -356,6 +357,7 @@ const dom = {
   syncStatusBadge: document.querySelector("#sync-status-badge"),
   offlineBanner: document.querySelector("#offline-banner"),
   novedadesBadge: document.querySelector("#novedades-badge"),
+  versionBadge: document.querySelector("#version-badge"),
   avisoPedidos: document.querySelector("#aviso-pedidos"),
   avisoPedidosTexto: document.querySelector("#aviso-pedidos-texto"),
   avisoPedidosVer: document.querySelector("#aviso-pedidos-ver"),
@@ -790,6 +792,65 @@ function setRefrescarCatalogoTextoNovedades() {
   dom.refrescarCatalogo.textContent = novedadesUltimo.total > 0
     ? `⬇ Traer ${novedadesUltimo.texto}`
     : "Buscar cambios";
+}
+
+// ---- Aviso de "hay una version nueva de la app" -------------------------------
+// Una pestana abierta no baja el codigo nuevo sola: sigue corriendo el que cargo, por
+// dias si hace falta (el riesgo de CLAUDE.md 8.7). Cada tanto se mira la version
+// publicada (version.json); si cambio, aparece el aviso arriba. NUNCA se recarga solo
+// (podria cortar una venta): actualiza la persona, al tocar el aviso.
+let versionCargada = null;
+let actualizandoApp = false;
+
+async function revisarVersionAhora() {
+  if (!versionCargada || document.hidden || !navigator.onLine) return;
+  const publicada = await leerVersionPublicada();
+  if (publicada && publicada !== versionCargada) dom.versionBadge.hidden = false;
+}
+
+async function iniciarAvisoDeVersion() {
+  versionCargada = await leerVersionPublicada(); // sin version.json (tu compu): no hay aviso
+  if (!versionCargada) return;
+  window.setInterval(revisarVersionAhora, 5 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") revisarVersionAhora();
+  });
+  window.addEventListener("online", revisarVersionAhora);
+  dom.versionBadge.addEventListener("click", () => { actualizarApp().catch(() => {}); });
+}
+
+// Recargar pierde lo que esta solo en pantalla (un carrito sin cobrar, un formulario a
+// medio llenar), asi que ahi se pregunta. Lo que esta guardado en el dispositivo (ventas
+// pendientes de enviar, el stock, la sesion) NO se pierde: sobrevive a la recarga.
+async function actualizarApp() {
+  if (actualizandoApp) return;
+  actualizandoApp = true;
+  try {
+    const hojaAbierta = document.querySelector(".stock-adjust-sheet.open:not(#confirm-dialog), .production-sheet.open");
+    if (cart.size > 0 || hojaAbierta) {
+      const seguir = await confirmDialog({
+        title: "Actualizar la app",
+        message: cart.size > 0
+          ? "Hay un carrito sin cobrar: si actualizás ahora, se pierde. ¿Actualizar igual?"
+          : "Hay un formulario abierto: si actualizás ahora, se pierde lo que no guardaste. ¿Actualizar igual?",
+        acceptText: "Actualizar igual",
+        cancelText: "Esperar"
+      });
+      if (!seguir) return;
+    }
+    dom.versionBadge.disabled = true;
+    dom.versionBadge.textContent = "Actualizando...";
+    // Lo pendiente de enviar sale ANTES de recargar. Sin internet no se espera: queda
+    // guardado en el dispositivo y sale solo despues.
+    await Promise.race([
+      processSyncQueue({ force: true }).catch(() => {}),
+      new Promise((resolve) => window.setTimeout(resolve, 4000))
+    ]);
+    try { sessionStorage.setItem("miga_app_actualizada", "1"); } catch { /* ignorar */ }
+    window.location.reload();
+  } finally {
+    actualizandoApp = false;
+  }
 }
 
 function setupNovedades() {
@@ -4614,6 +4675,13 @@ async function bootApp() {
   setupAutoSync();
   setupSyncBadge();
   setupNovedades();
+  iniciarAvisoDeVersion().catch(() => {});
+  try {
+    if (sessionStorage.getItem("miga_app_actualizada")) {
+      sessionStorage.removeItem("miga_app_actualizada");
+      setFlash("App actualizada.", "success");
+    }
+  } catch { /* ignorar */ }
   setupAvisosPedidos();
   // Sin await: si tarda o falla (sin internet), no puede demorar el arranque.
   inicializarNovedadesSiHaceFalta().then(revisarNovedadesAhora).catch(() => {});
