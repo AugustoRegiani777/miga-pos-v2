@@ -1,35 +1,44 @@
 import { esEntornoDePrueba } from "../utils/entorno.js";
 import { refDeBase } from "../utils/base-de-datos.js";
 
-const PROD_URL = "https://iknytfgqkdddtqpykgab.supabase.co";
-const PROD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlrbnl0Zmdxa2RkZHRxcHlrZ2FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NjY1OTQsImV4cCI6MjA5ODI0MjU5NH0.1qAJ71w1DaZu1i0G5an6AOuLwyu4_OU-uMvms4AjM0w";
+// LA BASE REAL. Desde el 13/10/2026 es el proyecto de Supabase "yfveeikzckvqlndmhwut"
+// (antes era la base de pruebas, que se limpio y paso a ser la real: empezar de
+// cero con la estructura nueva). La base anterior ("iknytfgqkdddtqpykgab") queda
+// intacta como archivo y ya no la usa ninguna app. La anon key es publica por
+// diseño: lo que protege los datos son las reglas (RLS) y el usuario con
+// contraseña, no esta clave.
+const PROD_URL = "https://yfveeikzckvqlndmhwut.supabase.co";
+const PROD_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlmdmVlaWt6Y2t2cWxuZG1od3V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNTkxODEsImV4cCI6MjEwNTczNTE4MX0.NXywXQHsFzoa_OH4DR0Ei5nMyio-vk4ar50_ajtF2Wg";
 
-// Proyecto de staging — se completa una vez creado desde el dashboard de
-// Supabase (branch arquitectura-productos-v2). Hasta que estos dos campos
-// tengan valor, correr local sigue apuntando a produccion sin romper nada.
-const STAGING_URL = "https://yfveeikzckvqlndmhwut.supabase.co";
-const STAGING_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlmdmVlaWt6Y2t2cWxuZG1od3V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNTkxODEsImV4cCI6MjEwNTczNTE4MX0.NXywXQHsFzoa_OH4DR0Ei5nMyio-vk4ar50_ajtF2Wg";
+// Base de pruebas: todavia no existe una nueva (la anterior es ahora la real).
+// Mientras estos dos campos esten vacios, correr en tu compu, en una IP de tu red
+// o en un sitio de pruebas de Netlify NO habla con ninguna base: la app anda sin
+// conexion y nada se guarda en la nube. Es a proposito, para que probar algo nunca
+// escriba en la base real. Cuando se cree la base de pruebas, se completan aca.
+const STAGING_URL = "";
+const STAGING_ANON_KEY = "";
+const SIN_BASE_DE_PRUEBAS = "https://sin-base-de-pruebas.invalid";
 
-// Se usa staging solo si la pagina se abrio desde un lugar de pruebas: tu compu,
-// una IP de tu red, o un sitio de pruebas de Netlify (ver la regla completa en
-// utils/entorno.js). La tablet real (unodemigapos.netlify.app) es SIEMPRE
-// produccion: esa direccion esta escrita ahi y gana sobre cualquier otra regla,
-// asi que no hay forma de que termine apuntando por error a la base de prueba.
-const usarStaging = typeof location !== "undefined" && esEntornoDePrueba(location.hostname) && STAGING_URL;
+// Se considera "lugar de pruebas" tu compu, una IP de tu red o un sitio de pruebas
+// de Netlify (ver la regla completa en utils/entorno.js). La tablet real
+// (unodemigapos.netlify.app) es SIEMPRE la base real: esa direccion esta escrita
+// ahi y gana sobre cualquier otra regla.
+const esLugarDePruebas = typeof location !== "undefined" && esEntornoDePrueba(location.hostname);
 
 // Hay migraciones que solo tienen sentido en la base de prueba (ej. dejar
-// visible todo el catalogo para probar). En la tablet real esto es false
-// siempre, por lo mismo que arriba.
-export const ENTORNO_DE_PRUEBA = Boolean(usarStaging);
+// visible todo el catalogo para probar). En la tablet real esto es false siempre.
+export const ENTORNO_DE_PRUEBA = esLugarDePruebas;
 
-const SUPABASE_URL = usarStaging ? STAGING_URL : PROD_URL;
+const SUPABASE_URL = esLugarDePruebas ? (STAGING_URL || SIN_BASE_DE_PRUEBAS) : PROD_URL;
 // Con que base habla este dispositivo. Cada dispositivo anota la suya (ver
 // utils/base-de-datos.js) para no mezclar lo guardado de una base con otra.
 export const BASE_REF = refDeBase(SUPABASE_URL);
-const SUPABASE_ANON_KEY = usarStaging ? STAGING_ANON_KEY : PROD_ANON_KEY;
+const SUPABASE_ANON_KEY = esLugarDePruebas ? (STAGING_ANON_KEY || "sin-base-de-pruebas") : PROD_ANON_KEY;
 
-if (usarStaging) {
-  console.warn(`[Miga POS] Corriendo contra STAGING (${STAGING_URL}) — no produccion.`);
+if (esLugarDePruebas) {
+  console.warn(STAGING_URL
+    ? `[Miga POS] Corriendo contra la base de PRUEBAS (${STAGING_URL}) — no la real.`
+    : "[Miga POS] Lugar de pruebas SIN base de pruebas: nada se guarda en la nube.");
 }
 
 const BASE = `${SUPABASE_URL}/rest/v1`;

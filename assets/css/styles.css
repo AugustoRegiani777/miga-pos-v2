@@ -2615,20 +2615,6 @@ details[open] > .prov-summary::before {
 .ldc-prov-group .ldc-row { padding-left: 1.4rem; border-bottom: none; }
 .ldc-prov-group .ldc-row:last-child { border-bottom: none; }
 
-/* Reloj simulado (solo staging/local) — franja fija arriba de todo, para
-   que sea imposible confundirla con la app real. */
-.reloj-simulado {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 0.4rem 0.75rem;
-  background: var(--accent);
-  color: #fff;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
 .resumen-preview {
   flex-direction: column;
   align-items: stretch;
@@ -2656,16 +2642,6 @@ details[open] > .prov-summary::before {
   font-size: 0.8rem;
   line-height: 1.35;
   white-space: pre;
-}
-
-.reloj-simulado button {
-  border: none;
-  border-radius: 999px;
-  padding: 0.25rem 0.75rem;
-  background: var(--surface);
-  color: var(--accent);
-  font-weight: 700;
-  cursor: pointer;
 }
 
 /* ================= Panel (dashboard simple) ================= */
@@ -4181,7 +4157,6 @@ body.arrastrando-fila {
 @media (max-width: 600px) {
   /* Zonas seguras del iPhone (muesca arriba, barra de inicio abajo). */
   body { padding-bottom: env(safe-area-inset-bottom, 0px); }
-  .reloj-simulado { padding-top: calc(0.4rem + env(safe-area-inset-top, 0px)); }
 
   /* Barra superior: una fila fina (marca + avisos + salir) y debajo el menu, que se
      desliza con un degradado a la derecha que avisa que hay mas. */
@@ -4288,7 +4263,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .prov-badge, .sale-sync { color: var(--txt-ok); }
 .caja-mov-fila .mov-importe.sale, .ldc-badge.ldc-urgente { color: var(--txt-out); }
 .caja-mov-fila .mov-importe.entra { color: var(--txt-ok); }
-.reloj-simulado button { color: var(--ink); }
 .cal-alpha-btn { color: var(--ink); border-color: var(--line); }
 .cal-alpha-btn:hover { background: var(--page); border-color: var(--muted); }
 .cal-alpha-btn.active { background: var(--primary-2); border-color: var(--primary-2); color: #ffffff; }

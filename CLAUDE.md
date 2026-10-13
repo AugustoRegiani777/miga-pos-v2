@@ -68,6 +68,17 @@ Misma app, mejoras grandes añadidas por capas:
 
 ---
 
+## 3.1 Corte del 13/10/2026 — se empezó de cero
+
+La base que usaba la tablet hasta esa fecha (`iknytfgqkdddtqpykgab`) tenía datos no confiables (estructura vieja, errores de 3 meses) y **queda intacta como archivo**: ninguna app la usa. La base de pruebas (`yfveeikzckvqlndmhwut`, con el esquema nuevo ya probado) se limpió de datos transaccionales y pasó a ser **la base real**, con el catálogo ya cargado y el stock en cero.
+
+Consecuencias que hay que respetar:
+- **Nada de pruebas automáticas contra `yfveeikzckvqlndmhwut`**: es la base real. Antes de volver a probar con datos hace falta crear una base de pruebas nueva (con el esquema de `sql/staging/`) y completar `STAGING_URL`/`STAGING_ANON_KEY` en `src/db/supabase.js`. Mientras esos campos estén vacíos, los lugares de pruebas corren sin conexión a propósito.
+- Cada dispositivo anota con qué base trabaja (`src/utils/base-de-datos.js`, marca `miga_base_ref`). Si lo guardado es de otra base o de una versión sin marca, se borra solo al arrancar, antes de enviar o leer nada.
+- La función de facturas (`netlify/functions/procesar-factura.js`) lee la base que digan `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` en las variables de entorno de Netlify.
+
+---
+
 ## 4. Stack técnico
 
 | Capa | Tecnología | Notas |
@@ -79,7 +90,7 @@ Misma app, mejoras grandes añadidas por capas:
 | Hosting | Netlify (`unodemigapos.netlify.app`) | Deploy automático desde GitHub, push a `main` |
 | Auth | Supabase Auth | Email + contraseña (`grant_type=password`), implementado |
 | Service Worker | No existe | Ver sección 3, punto 1 — verificado 01/09/2026, no hace falta |
-| Entornos | Producción (`unodemigapos.netlify.app`, rama `main`, Supabase real) y Pruebas (localhost / IP de red / sitio de Netlify con `staging` en el nombre, rama `arquitectura-productos-v2`, Supabase staging) | La regla vive en `src/utils/entorno.js` y la tablet real es SIEMPRE producción. Ver `COMANDOS.md` |
+| Entornos | **Real** (`unodemigapos.netlify.app`, rama `main`, Supabase `yfveeikzckvqlndmhwut`). **Pruebas**: hoy NO hay base de pruebas (localhost / IP de red / sitio con `staging` en el nombre corren sin conexión: nada se guarda en la nube). Rama de trabajo: `arquitectura-productos-v2` | La regla vive en `src/utils/entorno.js` y `src/db/supabase.js`; la tablet real es SIEMPRE la base real. Ver "Corte del 13/10/2026" abajo |
 
 **Principio fundamental:** Sin dependencias externas en runtime. Todo lo que corre en la tablet tiene que funcionar offline.
 

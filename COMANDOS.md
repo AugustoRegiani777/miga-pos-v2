@@ -117,7 +117,7 @@ Sirve para abrir la app de pruebas desde el celu, la tablet o la compu de otra p
 2. **Branch to deploy:** `arquitectura-productos-v2` (no `main`).
 3. **Build command:** vacío. **Publish directory:** `.` (ya lo dice `netlify.toml`).
 4. **Site name:** uno que lleve `staging`, por ejemplo `miga-pos-staging`.
-5. *(Solo si querés probar la lectura de facturas con IA)* **Site settings → Environment variables:** `ANTHROPIC_API_KEY`, `SUPABASE_URL` = la de staging (`https://yfveeikzckvqlndmhwut.supabase.co`) y `SUPABASE_SERVICE_ROLE_KEY` = la clave **service_role de staging** (Supabase staging → Project Settings → API). Sin estas, todo anda igual menos "Cargar factura" con foto.
+5. *(Solo si querés probar la lectura de facturas con IA)* **Site settings → Environment variables:** `ANTHROPIC_API_KEY`, `SUPABASE_URL` = la de la base que va a leer (hoy la real: `https://yfveeikzckvqlndmhwut.supabase.co`) y `SUPABASE_SERVICE_ROLE_KEY` = la clave **service_role** de esa base (Supabase → Project Settings → API). Sin estas, todo anda igual menos "Cargar factura" con foto.
 
 Cada `git push` a `arquitectura-productos-v2` redespliega solo ese sitio. El sitio real (`unodemigapos`) sigue desplegando `main` y no se entera.
 
