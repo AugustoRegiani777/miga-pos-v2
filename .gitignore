@@ -6,3 +6,6 @@ node_modules/
 COMANDOS.local.md
 # generado en cada publicacion (netlify.toml)
 version.json
+
+# Copias de seguridad de las bases (datos del negocio: no van a git)
+backups/
