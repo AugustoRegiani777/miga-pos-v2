@@ -954,6 +954,13 @@ function setupSyncBadge() {
   });
 }
 
+// En el celular, abrir una hoja y enfocar el primer campo abre el teclado de golpe y
+// tapa la mitad del formulario antes de verlo. Ahi se deja que la persona toque el campo.
+function enfocar(elemento) {
+  try { if (window.matchMedia("(max-width: 600px)").matches) return; } catch { /* sigue */ }
+  elemento?.focus();
+}
+
 // Reemplaza window.confirm con un modal propio (mismo estilo que el resto de
 // la app). Devuelve una Promise<boolean> igual que confirm(), asi que se usa
 // con await en el lugar de la llamada.
@@ -1116,7 +1123,7 @@ function openCrearInsumoSheet() {
   dom.crearInsumoMin.value = "";
   dom.crearInsumoCrit.value = "";
   setCrearInsumoSheetOpen(true);
-  dom.crearInsumoNombre.focus();
+  enfocar(dom.crearInsumoNombre);
 }
 
 function closeCrearInsumoSheet() {
@@ -1713,7 +1720,7 @@ function selectProductionProduct(product) {
   selectedProductionProductId = product.id;
   setProductionSheetOpen(true);
   renderProductionView().then(() => {
-    dom.productionQuantity.focus();
+    enfocar(dom.productionQuantity);
   });
 }
 
@@ -1745,7 +1752,7 @@ function openStockAdjustSheet(product) {
   dom.stockAdjustReason.value = "Recuento de stock";
   renderStockAdjustSelection();
   setStockAdjustSheetOpen(true);
-  dom.stockAdjustQuantity.focus();
+  enfocar(dom.stockAdjustQuantity);
   dom.stockAdjustQuantity.select();
 }
 
@@ -1972,7 +1979,7 @@ function openInsumoAjusteSheet(insumo, deficitBase) {
   updateAjusteDeltaHint(insumo);
   updateCompraEquivale(insumo);
   setInsumosAjusteSheetOpen(true);
-  dom.insumosCompraCantidad.focus();
+  enfocar(dom.insumosCompraCantidad);
 }
 
 // Abre el siguiente insumo de colaFaltantesInsumos (ver dom.insumoWarningUpdate
@@ -2030,7 +2037,7 @@ function openCalibracionSheet(insumo) {
     calibracionAlphaReceta = newSettings.alphaReceta;
   });
   setInsumosCalibracionSheetOpen(true);
-  dom.calibracionCantidad.focus();
+  enfocar(dom.calibracionCantidad);
 }
 
 function closeCalibracionSheet() {
@@ -2236,7 +2243,7 @@ function openRecetaEditSheet(receta) {
   dom.recetaEditCantidad.value = paraInput(receta.cantidadPorUnidad);
   recetaEditUnidadBase = receta.unidad;
   setRecetaEditSheetOpen(true);
-  dom.recetaEditCantidad.focus();
+  enfocar(dom.recetaEditCantidad);
   dom.recetaEditCantidad.select();
 }
 
@@ -2280,7 +2287,7 @@ function openProvEdit(proveedor) {
   dom.provEditLead.value = String(proveedor.leadTimeDias ?? 0);
   marcarDiasEntrega(proveedor.diasEntrega);
   setProvEditSheetOpen(true);
-  dom.provEditNombre.focus();
+  enfocar(dom.provEditNombre);
 }
 
 function openProvAdd() {
@@ -2295,7 +2302,7 @@ function openProvAdd() {
   dom.provEditLead.value = "0";
   marcarDiasEntrega(null);
   setProvEditSheetOpen(true);
-  dom.provEditNombre.focus();
+  enfocar(dom.provEditNombre);
 }
 
 // Los siete botones de dias de entrega, prendidos segun lo guardado.
@@ -2397,7 +2404,7 @@ async function openProvProdAdd(proveedorId) {
   provProdProductosDisponibles = await listProducts();
   await refrescarProvProdReceta();
   setProvProdSheetOpen(true);
-  dom.provProdNombre.focus();
+  enfocar(dom.provProdNombre);
 }
 
 async function openProvProdEdit(producto) {
@@ -2416,7 +2423,7 @@ async function openProvProdEdit(producto) {
   provProdProductosDisponibles = await listProducts();
   await refrescarProvProdReceta();
   setProvProdSheetOpen(true);
-  dom.provProdNombre.focus();
+  enfocar(dom.provProdNombre);
 }
 
 function closeProvProd() {
@@ -2664,7 +2671,7 @@ async function openMenuProductoAdd(categoriaId) {
   aplicarMenuModo("receta", { selectorVisible: true });
   renderMenuRecetaEditorView();
   setMenuEditSheetOpen(true);
-  dom.menuEditNombre.focus();
+  enfocar(dom.menuEditNombre);
 }
 
 async function openMenuProductoEdit(producto, { modoInicial } = {}) {
@@ -2713,7 +2720,7 @@ async function openMenuProductoEdit(producto, { modoInicial } = {}) {
   else aplicarMenuModo(modoInicial || "pendiente", { selectorVisible: true });
   renderMenuRecetaEditorView();
   setMenuEditSheetOpen(true);
-  dom.menuEditNombre.focus();
+  enfocar(dom.menuEditNombre);
 }
 
 function closeMenuEdit() {
@@ -2892,7 +2899,7 @@ async function openVarianteGrupoAdd() {
   renderVariantesOpcionesRowsView();
   renderVariantesProductosChecklist(dom.varianteGrupoProductosChecklist, [], variantesProductosDisponibles);
   setVarianteGrupoSheetOpen(true);
-  dom.varianteGrupoNombre.focus();
+  enfocar(dom.varianteGrupoNombre);
 }
 
 async function openVarianteGrupoEdit(grupo) {
@@ -2907,7 +2914,7 @@ async function openVarianteGrupoEdit(grupo) {
   renderVariantesOpcionesRowsView();
   renderVariantesProductosChecklist(dom.varianteGrupoProductosChecklist, grupo.productoIds, variantesProductosDisponibles);
   setVarianteGrupoSheetOpen(true);
-  dom.varianteGrupoNombre.focus();
+  enfocar(dom.varianteGrupoNombre);
 }
 
 function closeVarianteGrupoSheet() {
@@ -3475,7 +3482,7 @@ function bindEvents() {
   dom.clearSalesSearch.addEventListener("click", () => {
     dom.salesSearch.value = "";
     filterProductButtons(dom.salesSearch, dom.salesSearchEmpty);
-    dom.salesSearch.focus();
+    enfocar(dom.salesSearch);
   });
 
   dom.clearCart.addEventListener("click", () => {
@@ -4492,7 +4499,7 @@ function bindEvents() {
         .filter((x) => x.activo !== false)
         .map((x) => `<option value="${String(x.nombre).replace(/"/g, "&quot;")}"></option>`).join("");
       setSheetOpen(dom.cajaPagoSheet, dom.cajaPagoBackdrop, true);
-      dom.cajaPagoImporte.focus();
+      enfocar(dom.cajaPagoImporte);
       return;
     }
     await manejarAnular(event);
@@ -4537,7 +4544,7 @@ function bindEvents() {
       dom.cajaRetiroForm.reset();
       pintarCuentaRetiro();
       setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, true);
-      dom.cajaRetiroImporte.focus();
+      enfocar(dom.cajaRetiroImporte);
       return;
     }
     await manejarAnular(event);
