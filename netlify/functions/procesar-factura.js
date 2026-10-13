@@ -31,7 +31,7 @@ const Anthropic = AnthropicModule.default || AnthropicModule;
 // de Netlify define SUPABASE_URL con la de staging, junto con su propia
 // SUPABASE_SERVICE_ROLE_KEY: sin esto la funcion leeria el catalogo de la base
 // real aunque la app estuviera en staging.
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://iknytfgqkdddtqpykgab.supabase.co";
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://yfveeikzckvqlndmhwut.supabase.co";
 
 async function supabaseQuery(path) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
