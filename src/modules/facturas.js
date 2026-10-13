@@ -3,15 +3,57 @@ import { todayISO } from "../utils/format.js";
 import { construirInsumoNuevo, construirLineaProveedor } from "./catalogo-armar.js";
 import { guardarCatalogo } from "./catalogo-guardar.js";
 
-// Convierte un archivo (foto o adjunto) a data URL base64, formato que
-// espera la funcion serverless.
-export function archivoABase64(file) {
+function leerComoDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+}
+
+// Una foto sale del celular de varios MB (un iPhone: 12 megapixeles, a veces en HEIC) y
+// viaja en base64, que pesa un tercio mas. Eso pasa el limite de lo que acepta la
+// funcion (6 MB), el de la IA (5 MB por imagen) y tarda mucho con mala señal. Antes de
+// enviarla se achica a un tamaño de sobra para leer una factura y se pasa a JPEG: el
+// navegador decodifica HEIC solo, asi que de paso se resuelve el formato del iPhone.
+const LADO_MAXIMO_FOTO = 2400;
+const CALIDAD_FOTO = 0.88;
+
+async function achicarImagen(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode(); // respeta la orientacion de la camara (EXIF) en los navegadores actuales
+    const escala = Math.min(1, LADO_MAXIMO_FOTO / Math.max(img.naturalWidth, img.naturalHeight));
+    const ancho = Math.max(1, Math.round(img.naturalWidth * escala));
+    const alto = Math.max(1, Math.round(img.naturalHeight * escala));
+    const canvas = document.createElement("canvas");
+    canvas.width = ancho;
+    canvas.height = alto;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; // un PNG con transparencia no se vuelve negro al pasar a JPEG
+    ctx.fillRect(0, 0, ancho, alto);
+    ctx.drawImage(img, 0, 0, ancho, alto);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", CALIDAD_FOTO));
+    if (!blob) throw new Error("No se pudo achicar la imagen.");
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Convierte un archivo (foto o adjunto) a data URL base64, formato que
+// espera la funcion serverless. Los PDF van tal cual; las imagenes se achican.
+// Si por algun motivo no se puede achicar, se manda el original (puede andar igual).
+export async function archivoABase64(file) {
+  if (file.type === "application/pdf") return leerComoDataUrl(file);
+  try {
+    return await leerComoDataUrl(await achicarImagen(file));
+  } catch {
+    return leerComoDataUrl(file);
+  }
 }
 
 // Llama a la funcion serverless que lee la factura con IA. La imagen viaja

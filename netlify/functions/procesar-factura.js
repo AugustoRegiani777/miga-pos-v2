@@ -166,7 +166,7 @@ exports.handler = async (event) => {
   if (mediaType !== "application/pdf" && !TIPOS_IMAGEN.includes(mediaType)) {
     return {
       statusCode: 400,
-      body: `Formato no soportado (${mediaType}). Usa una foto JPG/PNG o un PDF — por ejemplo, una foto tomada en iPhone (HEIC) no funciona, hay que convertirla o usar la camara del Android.`
+      body: `Formato no soportado (${mediaType}). Usa una foto JPG/PNG o un PDF. La app ya convierte las fotos del celular (incluido HEIC del iPhone) antes de enviarlas: si ves esto, el archivo no era una imagen comun.`
     };
   }
 
