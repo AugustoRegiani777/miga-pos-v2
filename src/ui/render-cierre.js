@@ -185,10 +185,7 @@ export function renderCierre(container, datos, opciones = {}) {
       <h2>Resultado</h2>
       <div id="cierre-resultado" class="cierre-resultado"></div>
       ${tgtg.length ? `
-        <label class="cierre-check">
-          <input type="checkbox" id="cierre-tgtg-cajon" ${v?.tgtgEnCajon ? "checked" : ""}>
-          <span>Too Good To Go: ${tgtg.length} paquete${tgtg.length > 1 ? "s" : ""} (${centsToMoney(tgtgTotal)}). Marcá si se cobró en el local; si lo cobra la app no entra al cajón.</span>
-        </label>` : ""}
+        <p class="cierre-nota cierre-info">Too Good To Go: ${tgtg.length} paquete${tgtg.length > 1 ? "s" : ""} (${centsToMoney(tgtgTotal)}). Solo informativo: lo cobra la app, como Glovo, y no entra al cajón ni al cierre del local.</p>` : ""}
       <label class="cierre-field" for="cierre-nota"><span>Comentarios si hay desajuste</span><input type="text" id="cierre-nota" maxlength="200" value="${esc(v?.nota || "")}" placeholder="opcional"></label>
       ${vigenteHtml}
       <button type="button" class="primary-button" id="cierre-guardar">Cerrar caja</button>
