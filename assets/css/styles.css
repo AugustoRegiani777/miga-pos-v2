@@ -4432,3 +4432,17 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .combo-summary strong { color: var(--txt-accent); }
 .combo-summary span { color: var(--ink); }
 .combo-summary small { color: color-mix(in srgb, var(--ink) 80%, var(--surface)); font-weight: 600; }
+
+/* Detalle de las salidas: lista de datos, sutil (no cajas) */
+.cierre-detalle { padding: 0 2px; }
+.cierre-detalle h3 { margin: 0 0 4px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.cierre-detalle-lista { gap: 0; }
+.cierre-detalle-lista li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 6px 0; background: transparent; border: 0; border-radius: 0;
+  border-bottom: 1px dotted var(--line); font-size: 0.9rem;
+}
+.cierre-detalle-lista li:last-child { border-bottom: 0; }
+.cierre-detalle-lista li span { color: color-mix(in srgb, var(--ink) 80%, var(--surface)); font-weight: 400; }
+.cierre-detalle-lista li strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cierre-sin-salidas { font-size: 0.9rem; font-style: italic; }
