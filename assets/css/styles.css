@@ -4426,3 +4426,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .prov-acciones { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
 .prov-del-btn { color: #ff6b6b; border-color: color-mix(in srgb, #ff6b6b 45%, var(--line)); padding: 0 12px; min-width: 48px; }
 .prov-del-btn:hover { background: color-mix(in srgb, #ff6b6b 14%, var(--surface)); }
+
+/* Combo en el carrito: legible sobre su fondo rojizo oscuro */
+.combo-summary { flex-shrink: 0; }
+.combo-summary strong { color: var(--txt-accent); }
+.combo-summary span { color: var(--ink); }
+.combo-summary small { color: color-mix(in srgb, var(--ink) 80%, var(--surface)); font-weight: 600; }
