@@ -2142,6 +2142,21 @@ async function ordenarInsumosParaVista(insumos, modo) {
       const actual = catDeInsumo.get(r.insumoId);
       if (!actual || (cat.orden ?? 0) < (actual.orden ?? 0)) catDeInsumo.set(r.insumoId, { nombre: cat.nombre, orden: cat.orden ?? 0 });
     }
+    // Los tipos de leche (avena, soja, sin lactosa...) no estan en ninguna receta: se eligen al
+    // vender, desde el grupo de variante "Tipo de leche". Tienen la categoria de los productos
+    // a los que ese grupo se aplica (los cafes), igual que la leche entera.
+    for (const grupo of gruposVariantesActual || []) {
+      for (const productoId of grupo.productoIds || []) {
+        if (String(productoId).startsWith("promo-")) continue;
+        const cat = catPorId.get(prodPorId.get(productoId)?.categoriaId);
+        if (!cat) continue;
+        for (const opcion of grupo.opciones || []) {
+          if (!opcion.insumoId) continue;
+          const actual = catDeInsumo.get(opcion.insumoId);
+          if (!actual || (cat.orden ?? 0) < (actual.orden ?? 0)) catDeInsumo.set(opcion.insumoId, { nombre: cat.nombre, orden: cat.orden ?? 0 });
+        }
+      }
+    }
     return agrupar((i) => catDeInsumo.get(i.id));
   }
   if (modo === "proveedor") {
