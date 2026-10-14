@@ -389,6 +389,7 @@ const dom = {
   cartSandwichCount: document.querySelector("#cart-sandwich-count"),
   cartTotal: document.querySelector("#cart-total"),
   pagoCon: document.querySelector("#pago-con"),
+  pagoTogooNota: document.querySelector("#pago-togoo-nota"),
   vueltoResultado: document.querySelector("#vuelto-resultado"),
   vueltoValor: document.querySelector("#vuelto-valor"),
   confirmSale: document.querySelector("#confirm-sale"),
@@ -1420,6 +1421,20 @@ function renderReservedStock() {
 // La tarjeta no tiene vuelto que calcular — el "Pago con" es una ayuda-memoria
 // de efectivo (ver recalcularVuelto), asi que se oculta con tarjeta y se
 // limpia si habia algo tipeado.
+// Con el carrito todo en Too Good To Go (lo cobra la app), la forma de pago no aplica: los botones
+// se apagan para que no confundan. Si el carrito lleva algo que si se cobra aca (ej. un cafe, que no
+// controla stock y se cobra normal), vuelven a estar disponibles.
+function actualizarPagoSegunToGoo() {
+  const items = Array.from(cart.values());
+  const todoToGoo = cartMode === "togoo" && items.every((item) => effectiveSaleMode(item) === "togoo");
+  for (const b of [dom.pagoFormaEfectivo, dom.pagoFormaTarjeta, dom.pagoFormaGlovo]) {
+    b.disabled = todoToGoo;
+    b.classList.toggle("is-apagado", todoToGoo);
+  }
+  dom.pagoTogooNota.hidden = !todoToGoo;
+  dom.cartVuelto.hidden = todoToGoo || formaPagoActual !== "efectivo";
+}
+
 function setFormaPago(forma) {
   formaPagoActual = forma;
   dom.pagoFormaEfectivo.classList.toggle("active", forma === "efectivo");
@@ -1431,6 +1446,7 @@ function setFormaPago(forma) {
   // Ni tarjeta ni Glovo tocan el cajon: no hay vuelto que calcular.
   dom.cartVuelto.hidden = forma !== "efectivo";
   if (forma !== "efectivo") resetVuelto();
+  actualizarPagoSegunToGoo();
 }
 
 function setCartMode(mode) {
@@ -1590,6 +1606,7 @@ function effectiveSaleMode(item) {
 }
 
 function renderCurrentCart() {
+  actualizarPagoSegunToGoo();
   const items = Array.from(cart.values());
   const pricing = calculateCartPricing(items.filter((item) => effectiveSaleMode(item) === "normal"));
   const hasTogoo = items.some((item) => effectiveSaleMode(item) === "togoo");

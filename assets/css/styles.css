@@ -4549,3 +4549,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .insumo-merma-fila { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 8px 0; }
 .insumo-merma-fila label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--muted); }
 .insumo-merma-fila input { min-height: 44px; width: 130px; }
+
+.pago-forma-button.is-apagado { opacity: 0.4; cursor: not-allowed; }
+.pago-togoo-nota { margin: 6px 0; font-size: 0.85rem; color: var(--muted); }
