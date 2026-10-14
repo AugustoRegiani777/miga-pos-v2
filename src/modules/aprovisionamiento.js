@@ -2336,23 +2336,28 @@ async function cargarGruposVariantes(stores) {
 export const SUFIJO_DESCAFEINADO = "Descafeinado";
 const INSUMO_CAFE = "cafe";
 const INSUMO_CAFE_DESCAFEINADO = "cafe-descafeinado";
+//
+// Un producto puede tener VARIOS grupos (ej. el Ice caramel: tipo de leche y tipo de sirope). Las
+// opciones elegidas van todas juntas en opcionNombre, separadas por " + " ("Avena + Frutos rojos").
+// Cada linea de la receta busca el grupo al que pertenece SU insumo y toma de ahi la opcion que
+// corresponda (los nombres de las opciones no se repiten entre grupos).
 export function separarOpcion(opcionNombre) {
   const partes = String(opcionNombre || "").split(" + ").map((s) => s.trim()).filter(Boolean);
-  return { descafeinado: partes.includes(SUFIJO_DESCAFEINADO), opcion: partes.find((p) => p !== SUFIJO_DESCAFEINADO) || null };
+  return { descafeinado: partes.includes(SUFIJO_DESCAFEINADO), partes: partes.filter((p) => p !== SUFIJO_DESCAFEINADO) };
 }
 function resolverLineaEfectiva(receta, opcionNombreCompleta, grupos) {
-  const { descafeinado, opcion: opcionNombre } = separarOpcion(opcionNombreCompleta);
-  const base = resolverLineaSinCafe(receta, opcionNombre, grupos);
+  const { descafeinado, partes } = separarOpcion(opcionNombreCompleta);
+  const base = resolverLineaSinCafe(receta, partes, grupos);
   if (descafeinado && base.insumoId === INSUMO_CAFE) return { ...base, insumoId: INSUMO_CAFE_DESCAFEINADO };
   return base;
 }
-function resolverLineaSinCafe(receta, opcionNombre, grupos) {
-  if (!opcionNombre) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
+function resolverLineaSinCafe(receta, partes, grupos) {
+  if (!partes.length) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
   const grupo = grupos.find((g) => (g.opciones || []).some((o) => o.insumoId === receta.insumoId));
   if (!grupo) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
-  const opcionElegida = grupo.opciones.find((o) => o.nombre === opcionNombre);
+  const opcionElegida = grupo.opciones.find((o) => partes.includes(o.nombre));
   if (!opcionElegida) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
-  const override = receta.variantesCantidad?.[opcionNombre];
+  const override = receta.variantesCantidad?.[opcionElegida.nombre];
   const cantidad = typeof override === "number" && override > 0 ? override : receta.cantidadPorUnidad;
   return { insumoId: opcionElegida.insumoId, cantidad };
 }

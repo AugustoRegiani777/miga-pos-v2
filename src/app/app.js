@@ -122,6 +122,10 @@ let selectedGrupoVarianteId = "";
 let grupoVarianteMode = "add";
 let lecheSheetOpen = false;
 let productoPendienteSeleccion = null;
+// La ventanita de opciones puede hacer varias preguntas seguidas (leche -> sirope).
+let pasosSeleccion = [];
+let elegidasSeleccion = [];
+let pasoSeleccion = 0;
 
 // Grupos de variante (ej: "Tipo de leche") que preguntan una opcion en caja
 // antes de sumar el producto al carrito — editables desde Gestion >
@@ -1465,13 +1469,13 @@ function addToCart(product, opcionNombre = null) {
 const esCafe = (product) => product.categoriaId === "cafe";
 
 function handleProductTap(product) {
-  const grupoVariante = gruposVariantesActual.find((g) => g.productoIds.includes(product.id));
-  if (grupoVariante) {
-    abrirSelectorOpciones(product, grupoVariante.titulo, grupoVariante.opciones.map((o) => o.nombre));
+  const grupos = gruposVariantesActual.filter((g) => g.productoIds.includes(product.id));
+  if (grupos.length) {
+    iniciarSeleccion(product, grupos.map((g) => ({ titulo: g.titulo, opciones: g.opciones.map((o) => o.nombre) })));
     return;
   }
   if (esCafe(product)) {
-    abrirSelectorOpciones(product, "¿Cómo lo querés?", []);
+    iniciarSeleccion(product, [{ titulo: "¿Cómo lo querés?", opciones: [] }]);
     return;
   }
   if (PRODUCTOS_CON_BEBIDA_A_ELEGIR.has(product.id)) {
@@ -1479,7 +1483,7 @@ function handleProductTap(product) {
       .filter((p) => p.categoriaId === "bebidas")
       .sort((a, b) => (a.orden || 0) - (b.orden || 0))
       .map((p) => p.nombre);
-    abrirSelectorOpciones(product, "¿Qué bebida?", opcionesBebida);
+    iniciarSeleccion(product, [{ titulo: "¿Qué bebida?", opciones: opcionesBebida }]);
     return;
   }
   addToCart(product);
@@ -1495,29 +1499,50 @@ function setLecheSheetOpen(isOpen) {
 
 // Modal generico de "elegi una opcion antes de sumar al carrito" — lo usan
 // tanto la seleccion de leche como la seleccion de bebida en Promo bebida.
-function abrirSelectorOpciones(product, titulo, opciones) {
+function iniciarSeleccion(product, pasos) {
   productoPendienteSeleccion = product;
-  dom.lecheSheetTitulo.textContent = titulo;
-  dom.lecheProductoNombre.textContent = product.nombre;
+  pasosSeleccion = pasos;
+  elegidasSeleccion = [];
+  pasoSeleccion = 0;
   dom.lecheDecaf.checked = false;
-  dom.lecheDecafFila.hidden = !esCafe(product);
-  dom.lecheAgregar.hidden = opciones.length > 0;
-  dom.lecheOpciones.innerHTML = opciones
+  mostrarPasoSeleccion();
+  setLecheSheetOpen(true);
+}
+
+function mostrarPasoSeleccion() {
+  const product = productoPendienteSeleccion;
+  const paso = pasosSeleccion[pasoSeleccion];
+  const varios = pasosSeleccion.length > 1;
+  dom.lecheSheetTitulo.textContent = paso.titulo;
+  dom.lecheProductoNombre.textContent = varios ? `${product.nombre} · ${pasoSeleccion + 1} de ${pasosSeleccion.length}` : product.nombre;
+  // El interruptor "Descafeinado" va en la primera pregunta, para que quede elegido antes de la leche.
+  dom.lecheDecafFila.hidden = !(esCafe(product) && pasoSeleccion === 0);
+  dom.lecheAgregar.hidden = paso.opciones.length > 0;
+  dom.lecheOpciones.innerHTML = paso.opciones
     .map((op) => `<button type="button" class="leche-opcion" data-opcion="${op}">${op}</button>`)
     .join("");
-  setLecheSheetOpen(true);
 }
 
 function closeLecheSheet() {
   setLecheSheetOpen(false);
   productoPendienteSeleccion = null;
+  pasosSeleccion = [];
+  elegidasSeleccion = [];
+  pasoSeleccion = 0;
 }
 
 function seleccionarOpcion(nombreElegido) {
   if (!productoPendienteSeleccion) return;
+  if (nombreElegido) elegidasSeleccion.push(nombreElegido);
+  // Si faltan preguntas (leche -> sirope), se muestra la siguiente; recien al final se suma al carrito.
+  if (pasoSeleccion + 1 < pasosSeleccion.length) {
+    pasoSeleccion += 1;
+    mostrarPasoSeleccion();
+    return;
+  }
   const decaf = esCafe(productoPendienteSeleccion) && dom.lecheDecaf.checked;
-  const opcion = decaf ? [nombreElegido, SUFIJO_DESCAFEINADO].filter(Boolean).join(" + ") : (nombreElegido || null);
-  addToCart(productoPendienteSeleccion, opcion);
+  const partes = [elegidasSeleccion[0], decaf ? SUFIJO_DESCAFEINADO : null, ...elegidasSeleccion.slice(1)].filter(Boolean);
+  addToCart(productoPendienteSeleccion, partes.join(" + ") || null);
   closeLecheSheet();
 }
 
