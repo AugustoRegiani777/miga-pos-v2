@@ -27,7 +27,11 @@ const esLugarDePruebas = typeof location !== "undefined" && esEntornoDePrueba(lo
 
 // Hay migraciones que solo tienen sentido en la base de prueba (ej. dejar
 // visible todo el catalogo para probar). En la tablet real esto es false siempre.
-export const ENTORNO_DE_PRUEBA = esLugarDePruebas;
+// Solo si de verdad hay una base de pruebas configurada: sin ella, un lugar de pruebas corre sin
+// conexion, y estas migraciones (que reactivan productos, cambian precios, borran insumos) no
+// tienen nada que hacer ahi. Si no, bastaba apuntar una prueba a la base real para que tocaran
+// el catalogo real (pasó el 14/10/2026: reactivaron los productos que el dueño habia ocultado).
+export const ENTORNO_DE_PRUEBA = Boolean(esLugarDePruebas && STAGING_URL);
 
 const SUPABASE_URL = esLugarDePruebas ? (STAGING_URL || SIN_BASE_DE_PRUEBAS) : PROD_URL;
 // Con que base habla este dispositivo. Cada dispositivo anota la suya (ver
