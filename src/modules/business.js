@@ -371,8 +371,11 @@ export function mapVentaRemota(row) {
 // eso ya es identico en todos los dispositivos via seed + sync de catalogo;
 // lo unico que de verdad varia por dispositivo es el stock EN VIVO, y eso
 // se trae de Supabase.
-export async function datosRemotosDelDia(fecha) {
-  const [productosLocales, stockRemoto, ventasRemotas, movimientosDesde, comentarioRow] = await Promise.all([
+// conPendientesLocales: el dispositivo que opera puede tener movimientos que todavia no subieron a la
+// nube (recien hechos, o una cola trabada). Con esto se suman a lo de la nube —sin repetir los que ya
+// estan, por uuid— para que la pantalla muestre lo de TODOS los dispositivos y ademas lo propio.
+export async function datosRemotosDelDia(fecha, { conPendientesLocales = false } = {}) {
+  const [productosLocales, stockRemoto, ventasRemotas, movimientosRemotos, comentarioRow] = await Promise.all([
     listProducts(),
     fetchStockProductos(),
     fetchVentasDelDia(fecha),
@@ -380,7 +383,20 @@ export async function datosRemotosDelDia(fecha) {
     fetchConfiguracionCompartida(productionCommentKey(fecha)).catch(() => null)
   ]);
 
+  let movimientosDesde = movimientosRemotos;
   const stockById = new Map(stockRemoto.map((row) => [row.id, Number(row.stock_actual)]));
+  if (conPendientesLocales) {
+    const uuidsNube = new Set(movimientosRemotos.map((m) => m.uuid).filter(Boolean));
+    const pendientes = (await getAll("movimientos_stock")).filter((m) => m.fecha >= fecha && m.uuid && !uuidsNube.has(m.uuid));
+    movimientosDesde = [
+      ...movimientosRemotos,
+      ...pendientes.map((m) => ({ uuid: m.uuid, producto_id: m.productoId, tipo: m.tipo, motivo: m.motivo, cantidad: m.cantidad, fecha: m.fecha, creado_en: m.creadoEn }))
+    ];
+    for (const m of pendientes) {
+      const delta = Number.isFinite(m.stockNuevo) && Number.isFinite(m.stockAnterior) ? m.stockNuevo - m.stockAnterior : Number(m.cantidad) || 0;
+      if (stockById.has(m.productoId)) stockById.set(m.productoId, stockById.get(m.productoId) + delta);
+    }
+  }
   const productos = productosLocales.map((p) => ({
     ...p,
     stockActual: stockById.has(p.id) ? stockById.get(p.id) : p.stockActual

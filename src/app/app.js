@@ -1717,12 +1717,19 @@ async function renderProductionView() {
   // lo local, que es lo mas fresco de este dispositivo.
   let snapshot = null;
   let historicoProduccion = null;
-  if (navigator.onLine && getPendingSyncCount() === 0) {
+  let soloLocal = false;
+  if (navigator.onLine) {
     try {
-      const remoto = await datosRemotosDelDia(todayISO());
+      // Con internet SIEMPRE se mira la nube (lo de todos los dispositivos), mas lo propio que aun no subio.
+      const remoto = await datosRemotosDelDia(todayISO(), { conPendientesLocales: true });
       snapshot = remoto.snapshot;
       historicoProduccion = remoto.historico;
-    } catch { /* sin conexion o la nube no contesta: se usa lo local */ }
+    } catch (error) {
+      console.warn("[Produccion] no se pudo traer el dia de la nube, se muestra lo de este dispositivo:", error?.message || error);
+      soloLocal = true;
+    }
+  } else {
+    soloLocal = true;
   }
   if (!snapshot) {
     snapshot = await productionSnapshot();
@@ -1739,7 +1746,8 @@ async function renderProductionView() {
     (total, product) => total + (Number(product.cantidadProducida) || 0),
     0
   );
-  dom.productionDateText.textContent = `Fecha: ${snapshot.fecha}. Total cargado en sandwiches: ${totalSandwichesProduced}. Toca un producto en sandwiches, bolleria o bebidas para sumar o restar stock.`;
+  dom.productionDateText.textContent = `Fecha: ${snapshot.fecha}. Total cargado en sandwiches: ${totalSandwichesProduced}. Toca un producto en sandwiches, bolleria o bebidas para sumar o restar stock.` +
+    (soloLocal ? " ⚠ Sin conexión con la nube: se ve solo lo hecho en este dispositivo." : "");
   dom.productionCommentText.hidden = !snapshot.comentarios?.length;
   dom.productionCommentText.innerHTML = snapshot.comentarios?.length
     ? `
