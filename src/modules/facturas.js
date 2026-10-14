@@ -1,4 +1,5 @@
 import { getAll } from "../db/idb.js";
+import { getMermas, pctDeMerma, cantidadDeMerma } from "./mermas.js";
 import { todayISO } from "../utils/format.js";
 import { construirInsumoNuevo, construirLineaProveedor } from "./catalogo-armar.js";
 import { guardarCatalogo } from "./catalogo-guardar.js";
@@ -113,6 +114,7 @@ export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = nul
   const actuales = new Map();
   const movimientos = [];
   const lineasProveedor = [];
+  const mermas = await getMermas();
 
   for (const op of operaciones) {
     // cantidadPorUnidad viene de la IA (o de una factura anterior de este mismo
@@ -127,7 +129,10 @@ export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = nul
     const base = actuales.get(op.insumo.id) || op.insumo;
     const stockAnterior = Number(base.stockActual) || 0;
     const stockNuevo = stockAnterior + delta;
-    actuales.set(op.insumo.id, { ...base, stockActual: stockNuevo, actualizadoEn: now });
+    // Merma de compra (ver mermas.js): lo que entra se registra completo (coincide con la factura) y la
+    // merma se resta como un renglon aparte, asi el stock queda con lo util.
+    const merma = cantidadDeMerma(delta, pctDeMerma(mermas, op.insumo.id));
+    actuales.set(op.insumo.id, { ...base, stockActual: stockNuevo - merma, actualizadoEn: now });
 
     movimientos.push({
       uuid: crypto.randomUUID(),
@@ -139,6 +144,18 @@ export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = nul
       fecha,
       creadoEn: now
     });
+    if (merma > 0) {
+      movimientos.push({
+        uuid: crypto.randomUUID(),
+        insumoId: op.insumo.id,
+        tipo: "desperdicio",
+        cantidad: -merma,
+        stockAnterior: stockNuevo,
+        stockNuevo: stockNuevo - merma,
+        fecha,
+        creadoEn: now
+      });
+    }
 
     lineasProveedor.push(construirLineaProveedor({
       proveedorId,

@@ -1252,6 +1252,21 @@
           </div>
         </div>
       </div>
+      <details class="insumo-merma" id="insumo-merma">
+        <summary>Merma de compra: <strong id="insumo-merma-pct">0 %</strong> <span class="cal-muted">— lo que se pierde al comprar</span></summary>
+        <p class="form-instruccion">Si de lo que entra una parte no se usa (cuero, piel, líquido), anotá el porcentaje: cada compra suma lo que entra y resta la merma sola.</p>
+        <div class="insumo-merma-fila">
+          <label>Merma (%) <input type="number" id="insumo-merma-input" min="0" max="89" step="0.1" inputmode="decimal" placeholder="0"></label>
+          <button type="button" class="ghost-button compact" id="insumo-merma-guardar">Guardar</button>
+        </div>
+        <p class="form-instruccion">O medí un corte real: lo que pesó entero y lo que quedó útil. El porcentaje pasa a ser el de los últimos cortes.</p>
+        <div class="insumo-merma-fila">
+          <label>Entró <input type="number" id="insumo-corte-entra" min="0" step="any" inputmode="decimal" placeholder="5000"></label>
+          <label>Quedó útil <input type="number" id="insumo-corte-util" min="0" step="any" inputmode="decimal" placeholder="4000"></label>
+          <button type="button" class="ghost-button compact" id="insumo-corte-guardar">Registrar corte</button>
+        </div>
+        <p class="cal-muted" id="insumo-merma-nota">Mismas unidades que el stock del insumo.</p>
+      </details>
       <div class="sheet-footer">
         <button class="primary-button" type="submit">Guardar</button>
         <button type="button" class="ghost-button compact" id="insumo-pausar" title="No se borra nada: sale de las listas y de los avisos hasta que lo reactives">Pausar este insumo (por ahora no lo uso)</button>

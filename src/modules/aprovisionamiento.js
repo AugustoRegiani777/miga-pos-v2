@@ -1,5 +1,6 @@
 import { getAll, getOne, putOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
+import { getMermas, pctDeMerma, cantidadDeMerma } from "./mermas.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount, hayPendientesDeTipo } from "./sync.js";
 import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
@@ -1814,11 +1815,15 @@ export async function ajustarStockInsumo(insumoId, cantidad, tipo) {
   const stockNuevo = stockAnterior + cantidad;
   if (stockNuevo < 0) throw new Error(`Stock resultante negativo para ${insumo.nombre}.`);
 
+  // Merma de compra (ver mermas.js): si este insumo pierde una parte al comprarlo, se resta sola.
+  const merma = tipo === "compra" ? cantidadDeMerma(cantidad, pctDeMerma(await getMermas(), insumoId)) : 0;
+  const stockFinal = stockNuevo - merma;
+
   // Todos los ajustes corrigen el baseline junto con el stock para que la calibración
   // vea solo consumo real de sandwiches, no compras ni pérdidas.
   const AJUSTA_BASELINE = new Set(["compra", "desperdicio", "no_recibido", "error_conteo"]);
   const ultimaCalibracion = AJUSTA_BASELINE.has(tipo) && insumo.ultimaCalibracion
-    ? { ...insumo.ultimaCalibracion, stockEnCalibracion: (insumo.ultimaCalibracion.stockEnCalibracion || 0) + cantidad }
+    ? { ...insumo.ultimaCalibracion, stockEnCalibracion: (insumo.ultimaCalibracion.stockEnCalibracion || 0) + cantidad - merma }
     : insumo.ultimaCalibracion;
 
   // INCIDENTE (04/10/2026): este movimiento se guardaba SOLO en la tablet y
@@ -1829,14 +1834,18 @@ export async function ajustarStockInsumo(insumoId, cantidad, tipo) {
   // sea que la compra se perdia sin dejar rastro. Todo movimiento que mueve
   // stock tiene que viajar.
   const movimiento = { uuid: crypto.randomUUID(), insumoId, tipo, cantidad, stockAnterior, stockNuevo, fecha, creadoEn: now };
+  const movimientoMerma = merma > 0
+    ? { uuid: crypto.randomUUID(), insumoId, tipo: "desperdicio", cantidad: -merma, stockAnterior: stockNuevo, stockNuevo: stockFinal, fecha, creadoEn: now }
+    : null;
 
   // Escribir sincrónico — sin await adentro
   await withStores(["insumos", "movimientos_insumos"], "readwrite", (stores) => {
-    stores.insumos.put({ ...insumo, stockActual: stockNuevo, ultimaCalibracion, actualizadoEn: now });
+    stores.insumos.put({ ...insumo, stockActual: stockFinal, ultimaCalibracion, actualizadoEn: now });
     stores.movimientos_insumos.add(movimiento);
+    if (movimientoMerma) stores.movimientos_insumos.add(movimientoMerma);
   });
 
-  trySyncMovimientosInsumos([movimiento]).catch(() => {});
+  trySyncMovimientosInsumos(movimientoMerma ? [movimiento, movimientoMerma] : [movimiento]).catch(() => {});
   return movimiento;
 }
 

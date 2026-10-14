@@ -16,6 +16,7 @@ import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrd
 import { habilitarArrastre } from "../ui/arrastrar-filas.js";
 import { revisarCicloInsumos, pendientesDelCiclo, resumenPendientes } from "../modules/ciclo-insumos.js";
 import { renderPendientesCiclo, leerPendiente } from "../ui/render-ciclo.js";
+import { getMermas, pctDeMerma, guardarMerma, registrarCorte, pullMermasDesdeNube } from "../modules/mermas.js";
 import { cargarCombosConfigLocal, getCombosConfigActual, guardarCombosConfig, pullCombosConfigDesdeNube } from "../modules/combos.js";
 import { revisarNovedades, marcarNovedadesTraidas, inicializarNovedadesSiHaceFalta } from "../modules/novedades.js";
 import { resumenDelDia as resumenPedidosDelDia, pedidosPorEntregar, textoPorEntregar } from "../modules/avisos-pedidos.js";
@@ -157,7 +158,8 @@ async function pullCatalogoCompleto() {
     pullInsumosDesdeNube(),
     pullProveedoresDesdeNube(),
     pullVariantesGruposDesdeNube(),
-    pullCombosConfigDesdeNube()
+    pullCombosConfigDesdeNube(),
+    pullMermasDesdeNube()
   ]);
   // Antes de reconciliar el stock: corrige envases mal puestos (una sola vez)
   // sobre lo que acabo de bajar la nube, porque algunos insumos no vienen del
@@ -419,6 +421,13 @@ const dom = {
   insumosEnPausaN: document.querySelector("#insumos-en-pausa-n"),
   insumosEnPausaLista: document.querySelector("#insumos-en-pausa-lista"),
   insumoPausar: document.querySelector("#insumo-pausar"),
+  insumoMermaPct: document.querySelector("#insumo-merma-pct"),
+  insumoMermaInput: document.querySelector("#insumo-merma-input"),
+  insumoMermaGuardar: document.querySelector("#insumo-merma-guardar"),
+  insumoCorteEntra: document.querySelector("#insumo-corte-entra"),
+  insumoCorteUtil: document.querySelector("#insumo-corte-util"),
+  insumoCorteGuardar: document.querySelector("#insumo-corte-guardar"),
+  insumoMermaNota: document.querySelector("#insumo-merma-nota"),
   insumosOrdenSentido: document.querySelector("#insumos-orden-sentido"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
@@ -2058,6 +2067,7 @@ function openInsumoAjusteSheet(insumo, deficitBase) {
   selectedInsumoId = insumo.id;
   selectedInsumo = insumo;
   renderInsumoAjusteSelected(dom.insumosAjusteSelected, insumo);
+  renderMermaDelInsumo().catch(() => {});
   setInsumosAjusteTipo("compra");
   dom.insumosCompraLabel.textContent = "Cantidad recibida";
   // El selector arranca en la unidad con la que se compra (kg, botella...) y se ve a la
@@ -2385,6 +2395,31 @@ async function handleReactivarInsumo(insumoId) {
   } catch (error) {
     setFlash(error.message || "No se pudo reactivar.", "error");
   }
+}
+
+async function renderMermaDelInsumo() {
+  const pct = selectedInsumoId ? pctDeMerma(await getMermas(), selectedInsumoId) : 0;
+  dom.insumoMermaPct.textContent = `${pct} %`;
+  dom.insumoMermaInput.value = pct ? String(pct) : "";
+  const insumo = selectedInsumoId ? await getOne("insumos", selectedInsumoId) : null;
+  dom.insumoMermaNota.textContent = insumo ? `Unidad de este insumo: ${insumo.unidad} (por ejemplo, 5000 y 4000 ${insumo.unidad}).` : "";
+}
+
+async function handleGuardarMerma() {
+  try {
+    await guardarMerma(selectedInsumoId, dom.insumoMermaInput.value || 0);
+    setFlash("Merma guardada: se aplica en las próximas compras.", "success");
+    await renderMermaDelInsumo();
+  } catch (error) { setFlash(error.message || "No se pudo guardar.", "error"); }
+}
+
+async function handleRegistrarCorte() {
+  try {
+    const { pct, cortes } = await registrarCorte(selectedInsumoId, dom.insumoCorteEntra.value, dom.insumoCorteUtil.value);
+    dom.insumoCorteEntra.value = ""; dom.insumoCorteUtil.value = "";
+    setFlash(`Corte registrado. Merma: ${pct} % (promedio de ${cortes} corte${cortes === 1 ? "" : "s"}).`, "success");
+    await renderMermaDelInsumo();
+  } catch (error) { setFlash(error.message || "No se pudo registrar.", "error"); }
 }
 
 async function handlePausarInsumo() {
@@ -4000,6 +4035,8 @@ function bindEvents() {
   dom.insumosOrdenSentido?.addEventListener("click", () => { insumosOrdenInvertido = !insumosOrdenInvertido; renderInsumosView(); });
   dom.insumosBuscar?.addEventListener("input", () => { renderInsumosView(); });
   dom.insumoPausar?.addEventListener("click", handlePausarInsumo);
+  dom.insumoMermaGuardar?.addEventListener("click", handleGuardarMerma);
+  dom.insumoCorteGuardar?.addEventListener("click", handleRegistrarCorte);
   dom.insumosEnPausaLista?.addEventListener("click", (e) => {
     const b = e.target.closest("[data-reactivar]");
     if (b) handleReactivarInsumo(b.dataset.reactivar);

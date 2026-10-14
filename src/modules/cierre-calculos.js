@@ -100,8 +100,10 @@ export function centavosAInput(centavos) {
 // de Postnet es la fuente de verdad de cuanto entro realmente por tarjeta
 // (la Caja puede tener un toque equivocado); esto solo ayuda a detectarlo.
 export function desgloseFormaPago(ventas) {
+  // Too Good To Go lo cobra la app: no es efectivo, ni tarjeta, ni Glovo, sin importar cual medio de
+  // pago haya quedado marcado en la Caja. Se descuenta aparte (tgtgFueraDelCajon), asi que no entra aca.
   const suma = (forma) => ventas
-    .filter((v) => (v.formaPago || "efectivo") === forma)
+    .filter((v) => v.saleMode !== "togoo" && (v.formaPago || "efectivo") === forma)
     .reduce((total, v) => total + (v.totalCentavos || 0), 0);
   return { efectivoCentavos: suma("efectivo"), tarjetaCentavos: suma("tarjeta"), glovoCentavos: suma("glovo") };
 }

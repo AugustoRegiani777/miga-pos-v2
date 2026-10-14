@@ -4543,3 +4543,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .insumos-en-pausa > summary { cursor: pointer; font-weight: 700; min-height: 40px; display: flex; align-items: center; gap: 8px; }
 .insumo-en-pausa-fila { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
 #insumo-pausar { margin-top: 8px; width: 100%; color: var(--muted); }
+
+.insumo-merma { margin: 14px 0 6px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.insumo-merma > summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; gap: 8px; }
+.insumo-merma-fila { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 8px 0; }
+.insumo-merma-fila label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.insumo-merma-fila input { min-height: 44px; width: 130px; }

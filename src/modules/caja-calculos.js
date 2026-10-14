@@ -71,19 +71,15 @@ export function ventasEnCajon(ventas, { tgtgEnCajon = false, plataformasCentavos
   const vigentes = lista(ventas).filter((v) => !v.anulada);
   const { efectivoCentavos, tarjetaCentavos } = desgloseFormaPago(vigentes);
   const tgtgCentavos = suma(vigentes.filter((v) => v.saleMode === "togoo"), (v) => cent(v.totalCentavos));
-  // Solo descuenta el TGTG que estaba contado como efectivo; si se tapeo como
-  // tarjeta ya no estaba en efectivoCentavos y restarlo lo contaria dos veces.
-  const tgtgEfectivoCentavos = suma(
-    vigentes.filter((v) => v.saleMode === "togoo" && (v.formaPago || "efectivo") === "efectivo"),
-    (v) => cent(v.totalCentavos)
-  );
-  const fueraDelCajon = (tgtgEnCajon ? 0 : tgtgEfectivoCentavos) + cent(plataformasCentavos);
+  // desgloseFormaPago ya deja fuera el Too Good To Go (lo cobra la app, sin importar el medio de pago
+  // marcado), asi que no hay nada que restar. Solo si se dijo que ese dia se cobro en el local, entra.
+  const fueraDelCajon = cent(plataformasCentavos);
   return {
     ventasTotalCentavos: suma(vigentes, (v) => cent(v.totalCentavos)),
     tickets: vigentes.length,
     tgtgCentavos,
     ventasTarjetaCentavos: tarjetaCentavos, // cruce de control, no la verdad de la tarjeta
-    ventasEfectivoCentavos: efectivoCentavos - fueraDelCajon
+    ventasEfectivoCentavos: efectivoCentavos + (tgtgEnCajon ? tgtgCentavos : 0) - fueraDelCajon
   };
 }
 
