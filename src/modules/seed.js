@@ -87,7 +87,7 @@ export const initialInsumos = [
   // Leche por ml, y se cuenta por botella de 1 L (1000 ml): mentalmente una
   // botella ES un litro, asi que el envase se llama como se lo nombra en el
   // mostrador, no como lo factura el proveedor (que puede traer cajas de 6).
-  { id: "leche-normal",     nombre: "Leche entera",        unidad: "ml",       unidadCompra: "botella", factorConversion: 1000, stockActual: 0, stockMinimo: 6750, stockCritico: 3375, esEstimado: true,  activo: true },
+  { id: "leche-normal",     nombre: "Leche entera",        unidad: "ml",       unidadCompra: "botella", factorConversion: 1500, stockActual: 0, stockMinimo: 6750, stockCritico: 3375, esEstimado: true,  activo: true },
   // Leche avena ~5 bebidas/día = 750ml/día estimado
   { id: "leche-avena",      nombre: "Leche de avena",      unidad: "ml",       unidadCompra: "botella", factorConversion: 1000, stockActual: 0, stockMinimo: 2250, stockCritico: 1125, esEstimado: true,  activo: true },
   // Leche sin lactosa ~5 bebidas/día = 750ml/día estimado
