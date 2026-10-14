@@ -2134,6 +2134,9 @@ async function ordenarInsumosParaVista(insumos, modo) {
     const prodPorId = new Map(productos.map((p) => [p.id, p]));
     const catDeInsumo = new Map();
     for (const r of recetas) {
+      // Las promos ("Promo bebida", "Promo Cafe con leche") viven en Sandwiches pero llevan
+      // leche o una bebida: no definen la categoria del insumo.
+      if (String(r.productoId).startsWith("promo-")) continue;
       const cat = catPorId.get(prodPorId.get(r.productoId)?.categoriaId);
       if (!cat) continue;
       const actual = catDeInsumo.get(r.insumoId);
