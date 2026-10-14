@@ -710,6 +710,10 @@
       </section>
 
       <div class="stock-list" id="insumos-list"></div>
+      <details class="insumos-en-pausa" id="insumos-en-pausa" hidden>
+        <summary>En pausa (<span id="insumos-en-pausa-n">0</span>) <span class="cal-muted">— no aparecen como críticos ni en la lista de compras</span></summary>
+        <div id="insumos-en-pausa-lista"></div>
+      </details>
 
       <details class="gestion-seccion" id="seccion-calibracion">
         <summary><strong>Calibración</strong> <span class="gestion-seccion-hint">— verificar consumo real de cada insumo</span></summary>
@@ -1250,6 +1254,7 @@
       </div>
       <div class="sheet-footer">
         <button class="primary-button" type="submit">Guardar</button>
+        <button type="button" class="ghost-button compact" id="insumo-pausar" title="No se borra nada: sale de las listas y de los avisos hasta que lo reactives">Pausar este insumo (por ahora no lo uso)</button>
       </div>
     </form>
   </section>

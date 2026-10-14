@@ -1,4 +1,4 @@
-import { getAll, getOne, countAll, withStores, requestToPromise } from "../db/idb.js";
+import { getAll, getOne, putOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount } from "./sync.js";
@@ -891,6 +891,33 @@ export async function descartarInsumo(insumoId) {
   if (suyas.length > 0) trySyncProveedorInsumosSnapshot(piFinal).catch(() => {});
 
   return { nombre: insumo.nombre, lineasProveedor: suyas.length };
+}
+
+// Pausar un insumo: "por ahora no lo uso". Sale de las listas, de la lista de compras y de los
+// avisos (no vuelve a aparecer como "critico" sin que se use), pero NO se toca nada mas: ni su
+// stock ni su historial, ni sus lineas de proveedor, ni las recetas que lo llevan (si un producto
+// sigue vendiendose, simplemente no descuenta este insumo). Se vuelve atras con reactivarInsumo.
+export async function pausarInsumo(insumoId) {
+  const insumo = await getOne("insumos", insumoId);
+  if (!insumo) throw new Error("Ese insumo no existe en este dispositivo.");
+  await putOne("insumos", { ...insumo, activo: false, actualizadoEn: new Date().toISOString() });
+  trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
+  return { nombre: insumo.nombre };
+}
+
+export async function reactivarInsumo(insumoId) {
+  const insumo = await getOne("insumos", insumoId);
+  if (!insumo) throw new Error("Ese insumo no existe en este dispositivo.");
+  await putOne("insumos", { ...insumo, activo: true, actualizadoEn: new Date().toISOString() });
+  trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
+  return { nombre: insumo.nombre };
+}
+
+// Los que estan fuera de circulacion (pausados o descartados), para poder reactivarlos.
+export async function listInsumosEnPausa() {
+  return (await getAll("insumos"))
+    .filter((i) => i.activo === false)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
 // Sacar un insumo de la receta de un producto.

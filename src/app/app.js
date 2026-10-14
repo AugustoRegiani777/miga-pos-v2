@@ -9,7 +9,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, SUFIJO_DESCAFEINADO, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, SUFIJO_DESCAFEINADO, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -415,6 +415,10 @@ const dom = {
   closePeriodButton: document.querySelector("#close-period-button"),
   insumosOrden: document.querySelector("#insumos-orden"),
   insumosBuscar: document.querySelector("#insumos-buscar"),
+  insumosEnPausa: document.querySelector("#insumos-en-pausa"),
+  insumosEnPausaN: document.querySelector("#insumos-en-pausa-n"),
+  insumosEnPausaLista: document.querySelector("#insumos-en-pausa-lista"),
+  insumoPausar: document.querySelector("#insumo-pausar"),
   insumosOrdenSentido: document.querySelector("#insumos-orden-sentido"),
   refrescarCatalogo: document.querySelector("#refrescar-catalogo"),
   refrescarCatalogoStatus: document.querySelector("#refrescar-catalogo-status"),
@@ -2362,6 +2366,48 @@ async function guardarPendienteCiclo(article) {
   }
 }
 
+async function renderInsumosEnPausa() {
+  const enPausa = await listInsumosEnPausa();
+  dom.insumosEnPausa.hidden = enPausa.length === 0;
+  dom.insumosEnPausaN.textContent = String(enPausa.length);
+  dom.insumosEnPausaLista.innerHTML = enPausa.map((i) => `
+    <div class="insumo-en-pausa-fila">
+      <span>${i.nombre}</span>
+      <button type="button" class="ghost-button compact" data-reactivar="${i.id}">Reactivar</button>
+    </div>`).join("");
+}
+
+async function handleReactivarInsumo(insumoId) {
+  try {
+    const { nombre } = await reactivarInsumo(insumoId);
+    setFlash(`"${nombre}" volvió a tus insumos.`, "success");
+    await renderInsumosView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo reactivar.", "error");
+  }
+}
+
+async function handlePausarInsumo() {
+  const insumoId = selectedInsumoId;
+  if (!insumoId) return;
+  const insumo = await getOne("insumos", insumoId);
+  const confirmado = await confirmDialog({
+    title: `¿Pausar ${insumo?.nombre || "este insumo"}?`,
+    message: "Por ahora no lo usás: sale de la lista, de la lista de compras y de los avisos (no aparece como crítico). No se borra nada: queda en \"En pausa\" y lo reactivás cuando quieras.",
+    acceptText: "Sí, pausarlo",
+    cancelText: "Dejarlo"
+  });
+  if (!confirmado) return;
+  try {
+    const { nombre } = await pausarInsumo(insumoId);
+    closeInsumoAjusteSheet();
+    setFlash(`"${nombre}" quedó en pausa.`, "success");
+    await renderInsumosView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo pausar.", "error");
+  }
+}
+
 async function renderInsumosView() {
   const insumos = await listInsumos();
   actualizarBotonSentido();
@@ -2371,6 +2417,7 @@ async function renderInsumosView() {
   const q = norm(dom.insumosBuscar?.value);
   if (q) ordenados = ordenados.filter((i) => norm(i.nombre).includes(q));
   renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet);
+  await renderInsumosEnPausa();
   renderCalibracionAlert(dom.calibracionAlert, insumos);
   await renderAvisoCiclo();
   if (insumosListaComprasVisible) {
@@ -3952,6 +3999,11 @@ function bindEvents() {
   dom.insumosOrden?.addEventListener("change", () => { insumosOrdenInvertido = false; renderInsumosView(); });
   dom.insumosOrdenSentido?.addEventListener("click", () => { insumosOrdenInvertido = !insumosOrdenInvertido; renderInsumosView(); });
   dom.insumosBuscar?.addEventListener("input", () => { renderInsumosView(); });
+  dom.insumoPausar?.addEventListener("click", handlePausarInsumo);
+  dom.insumosEnPausaLista?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-reactivar]");
+    if (b) handleReactivarInsumo(b.dataset.reactivar);
+  });
   dom.closeInsumosAjuste.addEventListener("click", closeInsumoAjusteSheet);
   dom.insumosAjusteBackdrop.addEventListener("click", closeInsumoAjusteSheet);
   dom.closeCalibracion.addEventListener("click", closeCalibracionSheet);

@@ -4538,3 +4538,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 /* Ventanita de la leche: interruptor "Descafeinado" arriba de las opciones */
 .leche-decaf { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--page); min-height: 52px; }
 #leche-agregar { width: 100%; margin-top: 12px; }
+
+.insumos-en-pausa { margin: 14px 0; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 10px; }
+.insumos-en-pausa > summary { cursor: pointer; font-weight: 700; min-height: 40px; display: flex; align-items: center; gap: 8px; }
+.insumo-en-pausa-fila { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+#insumo-pausar { margin-top: 8px; width: 100%; color: var(--muted); }
