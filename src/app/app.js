@@ -9,7 +9,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, SUFIJO_DESCAFEINADO, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -373,6 +373,9 @@ const dom = {
   lecheSheetTitulo: document.querySelector("#leche-sheet-titulo"),
   lecheProductoNombre: document.querySelector("#leche-producto-nombre"),
   lecheOpciones: document.querySelector("#leche-opciones"),
+  lecheDecafFila: document.querySelector("#leche-decaf-fila"),
+  lecheDecaf: document.querySelector("#leche-decaf"),
+  lecheAgregar: document.querySelector("#leche-agregar"),
   salesSearch: document.querySelector("#sales-search"),
   clearSalesSearch: document.querySelector("#clear-sales-search"),
   salesSearchEmpty: document.querySelector("#sales-search-empty"),
@@ -1457,10 +1460,18 @@ function addToCart(product, opcionNombre = null) {
   renderCurrentCart();
 }
 
+// Los cafes (categoria Cafe) se pueden pedir descafeinados. El interruptor va en la misma ventanita
+// de la leche; los cafes sin leche abren esa ventanita con solo el interruptor y "Agregar".
+const esCafe = (product) => product.categoriaId === "cafe";
+
 function handleProductTap(product) {
   const grupoVariante = gruposVariantesActual.find((g) => g.productoIds.includes(product.id));
   if (grupoVariante) {
     abrirSelectorOpciones(product, grupoVariante.titulo, grupoVariante.opciones.map((o) => o.nombre));
+    return;
+  }
+  if (esCafe(product)) {
+    abrirSelectorOpciones(product, "¿Cómo lo querés?", []);
     return;
   }
   if (PRODUCTOS_CON_BEBIDA_A_ELEGIR.has(product.id)) {
@@ -1488,6 +1499,9 @@ function abrirSelectorOpciones(product, titulo, opciones) {
   productoPendienteSeleccion = product;
   dom.lecheSheetTitulo.textContent = titulo;
   dom.lecheProductoNombre.textContent = product.nombre;
+  dom.lecheDecaf.checked = false;
+  dom.lecheDecafFila.hidden = !esCafe(product);
+  dom.lecheAgregar.hidden = opciones.length > 0;
   dom.lecheOpciones.innerHTML = opciones
     .map((op) => `<button type="button" class="leche-opcion" data-opcion="${op}">${op}</button>`)
     .join("");
@@ -1501,7 +1515,9 @@ function closeLecheSheet() {
 
 function seleccionarOpcion(nombreElegido) {
   if (!productoPendienteSeleccion) return;
-  addToCart(productoPendienteSeleccion, nombreElegido);
+  const decaf = esCafe(productoPendienteSeleccion) && dom.lecheDecaf.checked;
+  const opcion = decaf ? [nombreElegido, SUFIJO_DESCAFEINADO].filter(Boolean).join(" + ") : (nombreElegido || null);
+  addToCart(productoPendienteSeleccion, opcion);
   closeLecheSheet();
 }
 
@@ -3667,6 +3683,7 @@ function bindEvents() {
     const boton = event.target.closest(".leche-opcion");
     if (boton) seleccionarOpcion(boton.dataset.opcion);
   });
+  dom.lecheAgregar.addEventListener("click", () => seleccionarOpcion(null));
   dom.closeProductionSheet.addEventListener("click", closeProductionSheet);
   dom.productionSheetBackdrop.addEventListener("click", closeProductionSheet);
   dom.openNuevoPedido.addEventListener("click", openNuevoPedidoSheet);

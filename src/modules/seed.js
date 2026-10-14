@@ -67,7 +67,7 @@ export const initialInsumos = [
   // 9.4 × 30g = ~282g/día
   { id: "tomate",           nombre: "Tomate",              unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 850,  stockCritico: 425,  esEstimado: true,  activo: false },
   // 9.4 × 27g = ~254g/día
-  { id: "palta",            nombre: "Palta",               unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 750,  stockCritico: 400,  esEstimado: false, activo: false },
+  { id: "palta",            nombre: "Aguacate",               unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 750,  stockCritico: 400,  esEstimado: false, activo: false },
   // 9.4 × 33g = ~310g/día
   { id: "atun",             nombre: "Atun",                unidad: "g",        unidadCompra: "kg",      factorConversion: 1000, stockActual: 0, stockMinimo: 950,  stockCritico: 475,  esEstimado: false, activo: false },
   // 8.7 × 20g = ~174g/día

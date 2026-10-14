@@ -2328,7 +2328,25 @@ async function cargarGruposVariantes(stores) {
 // receta.variantesCantidad[opcionNombre] — ver menu.js/render-menu.js. Si no
 // hay override para esa opcion (o es invalido), se usa la cantidad base de
 // la receta tal cual.
-function resolverLineaEfectiva(receta, opcionNombre, grupos) {
+//
+// El cafe descafeinado no es un grupo: es un agregado a la opcion de la venta ("Entera + Descafeinado",
+// o solo "Descafeinado" en un cafe sin leche). Cambia el insumo del cafe por el descafeinado, con la
+// misma cantidad; la leche se resuelve igual que siempre. Quedan las dos cosas guardadas en
+// opcionNombre, asi que deshacer la venta devuelve exactamente lo mismo.
+export const SUFIJO_DESCAFEINADO = "Descafeinado";
+const INSUMO_CAFE = "cafe";
+const INSUMO_CAFE_DESCAFEINADO = "cafe-descafeinado";
+export function separarOpcion(opcionNombre) {
+  const partes = String(opcionNombre || "").split(" + ").map((s) => s.trim()).filter(Boolean);
+  return { descafeinado: partes.includes(SUFIJO_DESCAFEINADO), opcion: partes.find((p) => p !== SUFIJO_DESCAFEINADO) || null };
+}
+function resolverLineaEfectiva(receta, opcionNombreCompleta, grupos) {
+  const { descafeinado, opcion: opcionNombre } = separarOpcion(opcionNombreCompleta);
+  const base = resolverLineaSinCafe(receta, opcionNombre, grupos);
+  if (descafeinado && base.insumoId === INSUMO_CAFE) return { ...base, insumoId: INSUMO_CAFE_DESCAFEINADO };
+  return base;
+}
+function resolverLineaSinCafe(receta, opcionNombre, grupos) {
   if (!opcionNombre) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };
   const grupo = grupos.find((g) => (g.opciones || []).some((o) => o.insumoId === receta.insumoId));
   if (!grupo) return { insumoId: receta.insumoId, cantidad: receta.cantidadPorUnidad };

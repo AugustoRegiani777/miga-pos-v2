@@ -4534,3 +4534,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .panel-up, .panel-ok { color: var(--txt-ok); }
 .panel-down, .pendiente-error { color: var(--txt-out); }
 .factura-calculo-hint { color: color-mix(in srgb, var(--ink) 78%, var(--surface)); }
+
+/* Ventanita de la leche: interruptor "Descafeinado" arriba de las opciones */
+.leche-decaf { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--page); min-height: 52px; }
+#leche-agregar { width: 100%; margin-top: 12px; }
