@@ -1669,8 +1669,24 @@ async function renderProductionView() {
   dom.produccionConsulta.style.display = "none";
   dom.closePeriodButton.hidden = false;
   await loadProducts();
-  const snapshot = await productionSnapshot();
-  const historicoProduccion = await stockHistoricoPorFecha(snapshot.fecha);
+  // Lo que pasa en el dia lo hacen todos los dispositivos (la tablet, otra tablet, el celu): el
+  // registro de todos esta en la nube. Si este dispositivo no hizo la produccion o las ventas,
+  // en su copia local no aparecen y TODO se veia como "de ayer". Con internet y sin nada
+  // pendiente por subir se toma el dia de la nube (misma fuente que el modo consulta); si no,
+  // lo local, que es lo mas fresco de este dispositivo.
+  let snapshot = null;
+  let historicoProduccion = null;
+  if (navigator.onLine && getPendingSyncCount() === 0) {
+    try {
+      const remoto = await datosRemotosDelDia(todayISO());
+      snapshot = remoto.snapshot;
+      historicoProduccion = remoto.historico;
+    } catch { /* sin conexion o la nube no contesta: se usa lo local */ }
+  }
+  if (!snapshot) {
+    snapshot = await productionSnapshot();
+    historicoProduccion = await stockHistoricoPorFecha(snapshot.fecha);
+  }
   const conAyer = (lista) => lista.map((p) => ({ ...p, cantidadAyer: historicoProduccion.get(p.id)?.stockAlInicio ?? 0 }));
   snapshot.sandwiches = conAyer(snapshot.sandwiches);
   snapshot.bolleria = conAyer(snapshot.bolleria);

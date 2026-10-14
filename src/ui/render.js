@@ -39,7 +39,33 @@ function formatProductionTime(isoString) {
 // el resumen de cada producto en Produccion — nunca incluye ventas/devoluciones,
 // esas se resumen aparte en "Vendidos hoy" (ver productionSnapshot en
 // business.js, que ya las deja afuera de movimientosProduccion).
-function labelForMovement(movement) {
+// Como se llama lo que se produjo, segun el producto: "6 sandwiches", "6 chipas", "2 cinnamon rolls".
+// Antes decia siempre "sandwiches", tambien para la chipa o las medialunas.
+const PALABRAS_QUE_NO_SON_EL_NOMBRE = new Set(["au", "de", "con", "y", "ddl", "havana"]);
+const PLURAL_CON_S_AUNQUE_TERMINE_EN_CONSONANTE = new Set(["roll", "croissant", "pain", "cookie"]);
+function pluralDeProducto(nombre) {
+  const palabras = String(nombre || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!palabras.length) return "unidades";
+  // La palabra que lleva el plural es la que nombra la cosa: "pain au chocolat" -> pains,
+  // "alfajor havana" -> alfajores, "mini croissant ddl" -> croissants, "cinnamon roll" -> rolls.
+  const corte = palabras.findIndex((p, i) => i > 0 && PALABRAS_QUE_NO_SON_EL_NOMBRE.has(p));
+  const i = corte > 0 ? corte - 1 : palabras.length - 1;
+  const p = palabras[i];
+  let plural;
+  if (/[sx]$/.test(p)) plural = p;
+  else if (/[aeiouáéíóú]$/.test(p)) plural = p + "s";
+  else if (PLURAL_CON_S_AUNQUE_TERMINE_EN_CONSONANTE.has(p)) plural = p + "s";
+  else plural = p + "es";
+  palabras[i] = plural;
+  return palabras.join(" ");
+}
+function unidadesDeProducto(product, cantidad) {
+  const uno = Math.abs(Number(cantidad)) === 1;
+  if (!product || product.categoriaId === "sandwiches") return uno ? "sandwich" : "sandwiches";
+  return uno ? String(product.nombre || "unidad").trim().toLowerCase() : pluralDeProducto(product.nombre);
+}
+
+function labelForMovement(movement, product) {
   const absoluteQuantity = Math.abs(Number(movement.cantidad) || 0);
   if (movement.tipo === "ajuste_stock") {
     const motivo = movement.motivo || "Ajuste de stock";
@@ -49,7 +75,7 @@ function labelForMovement(movement) {
     const signo = movement.cantidad > 0 ? "+" : "-";
     return `${motivo}: ${signo}${absoluteQuantity}`;
   }
-  return `${movement.cantidad} sandwiches`;
+  return `${movement.cantidad} ${unidadesDeProducto(product, movement.cantidad)}`;
 }
 
 export function productionSummaryLines(product) {
@@ -58,7 +84,7 @@ export function productionSummaryLines(product) {
   }
   return product.movimientosProduccion.map((movement) => {
     const timeLabel = formatProductionTime(movement.creadoEn);
-    return `${labelForMovement(movement)} ${timeLabel}hs`;
+    return `${labelForMovement(movement, product)} ${timeLabel}hs`;
   });
 }
 
