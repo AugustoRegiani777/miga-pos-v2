@@ -3150,6 +3150,7 @@ function renderCombosConfigForm() {
 }
 
 let menuCombosGuardarInProgress = false;
+let menuCombosAvisoTimeout = null;
 
 async function handleGuardarCombosConfig() {
   if (menuCombosGuardarInProgress) return;
@@ -3161,15 +3162,33 @@ async function handleGuardarCombosConfig() {
     return;
   }
   menuCombosGuardarInProgress = true;
-  dom.menuCombosGuardar.disabled = true;
+  // El aviso de arriba de la pantalla no se ve si estas mas abajo: el feedback va en el propio boton.
+  const boton = dom.menuCombosGuardar;
+  const textoOriginal = boton.dataset.texto || boton.textContent;
+  boton.dataset.texto = textoOriginal;
+  window.clearTimeout(menuCombosAvisoTimeout);
+  boton.disabled = true;
+  boton.classList.remove("is-guardado", "is-error");
+  boton.textContent = "Guardando...";
+  dom.menuCombosStatus.hidden = true;
   try {
     await guardarCombosConfig({ docePrecioCentavos, seisPrecioCentavos, premiumExtraCentavos });
     setFlash("Promos actualizadas.", "success");
+    boton.classList.add("is-guardado");
+    boton.textContent = "✓ Guardado";
+    dom.menuCombosStatus.textContent = `Promos guardadas a las ${new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}. Ya valen en la Caja.`;
+    dom.menuCombosStatus.hidden = false;
   } catch (error) {
     setFlash(error.message || "No se pudieron guardar las promos.", "error");
+    boton.classList.add("is-error");
+    boton.textContent = "No se guardó — reintentar";
   } finally {
     menuCombosGuardarInProgress = false;
-    dom.menuCombosGuardar.disabled = false;
+    boton.disabled = false;
+    menuCombosAvisoTimeout = window.setTimeout(() => {
+      boton.classList.remove("is-guardado", "is-error");
+      boton.textContent = textoOriginal;
+    }, 3500);
   }
 }
 

@@ -4552,3 +4552,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 
 .pago-forma-button.is-apagado { opacity: 0.4; cursor: not-allowed; }
 .pago-togoo-nota { margin: 6px 0; font-size: 0.85rem; color: var(--muted); }
+
+#menu-combos-guardar.is-guardado { background: var(--ok); border-color: var(--ok); color: #ffffff; }
+#menu-combos-guardar.is-error { background: var(--out); border-color: var(--out); color: #ffffff; }
