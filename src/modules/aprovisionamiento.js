@@ -1,7 +1,7 @@
 import { getAll, getOne, putOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
-import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount } from "./sync.js";
+import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount, hayPendientesDeTipo } from "./sync.js";
 import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
@@ -42,7 +42,9 @@ export async function createInsumo({ nombre, unidad, unidadCompra, factorConvers
 // ANTES de esperar la red y escribir con ese dato ya viejo pisa cualquier
 // venta/produccion que haya pasado mientras tanto en este dispositivo).
 export async function pullInsumosDesdeNube() {
+  const inicioPull = new Date().toISOString();
   const remotos = await fetchInsumosCatalogo();
+  const pendienteInsumos = hayPendientesDeTipo("insumos_snapshot");
 
   await withStores(["insumos"], "readwrite", async (stores) => {
     for (const r of remotos) {
@@ -60,6 +62,14 @@ export async function pullInsumosDesdeNube() {
         actualizadoEn: new Date().toISOString()
         // stockActual deliberadamente ausente — sobrevive el spread de arriba.
       });
+    }
+    // Un insumo borrado en la nube no puede seguir en la copia local: la proxima subida de
+    // insumos lo revive. Guardas: respuesta vacia, algo sin subir, o tocado despues de empezar.
+    if (remotos.length > 0 && !pendienteInsumos) {
+      const idsRemotos = new Set(remotos.map((r) => r.id));
+      for (const i of await requestToPromise(stores.insumos.getAll())) {
+        if (!idsRemotos.has(i.id) && !(String(i.actualizadoEn || "") > inicioPull)) stores.insumos.delete(i.id);
+      }
     }
   });
 

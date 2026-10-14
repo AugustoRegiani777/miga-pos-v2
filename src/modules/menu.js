@@ -296,6 +296,7 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
 // tiene que pasar DENTRO de la misma transaccion en la que se escribe, nunca
 // minutos (ni milisegundos) antes.
 export async function pullCatalogoDesdeNube() {
+  const inicioPull = new Date().toISOString();
   const [categoriasRemotas, productosRemotos, recetasRemotas] = await Promise.all([
     fetchCategoriasCatalogo(),
     fetchProductosCatalogo(),
@@ -305,6 +306,7 @@ export async function pullCatalogoDesdeNube() {
   // Se lee ANTES de abrir la transaccion: adentro no se puede await nada que
   // no sea requestToPromise sobre la propia transaccion (CLAUDE.md 8.1).
   const pendienteCatalogo = hayPendientesDeTipo("catalogo_snapshot");
+  const pendienteRecetas = hayPendientesDeTipo("recetas_snapshot");
   let podados = [];
 
   await withStores(["categorias", "productos", "recetas"], "readwrite", async (stores) => {
@@ -344,6 +346,17 @@ export async function pullCatalogoDesdeNube() {
         ...(r.variantes_cantidad ? { variantesCantidad: r.variantes_cantidad } : {}),
         actualizadoEn: r.actualizado_en || new Date().toISOString()
       });
+    }
+
+    // Las recetas que ya no estan en la nube (una linea que se quito desde otro dispositivo, o un
+    // insumo que se borro) tampoco pueden quedar en la copia local: la proxima subida de recetas
+    // las revive, o falla entera por la clave foranea si el insumo ya no existe. Mismas guardas
+    // que abajo: respuesta vacia, algo sin subir, o una receta tocada despues de empezar el pull.
+    if (recetasRemotas.length > 0 && !pendienteRecetas) {
+      const idsRemotos = new Set(recetasRemotas.map((r) => r.id));
+      for (const r of await requestToPromise(stores.recetas.getAll())) {
+        if (!idsRemotos.has(r.id) && !(String(r.actualizadoEn || "") > inicioPull)) stores.recetas.delete(r.id);
+      }
     }
 
     // Y lo que este pull NO hacia hasta ahora: borrar de la copia local los
