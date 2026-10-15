@@ -84,7 +84,10 @@ let cartTotalCentavosActual = 0;
 let currentView = "caja";
 let saleInProgress = false;
 let cartMode = "normal";
-let formaPagoActual = "efectivo"; // "efectivo" | "tarjeta" | "glovo" — se pide al cobrar, se resetea a efectivo (la mas comun) despues de cada venta.
+// "efectivo" | "tarjeta" | "glovo" | null. NINGUNA viene preseleccionada: quien cobra TIENE que elegir
+// (o marcar Too Good To Go) y recien entonces se habilita "Confirmar venta". Vuelve a null despues de
+// cada venta, asi no se cobra con el medio de la venta anterior sin darse cuenta.
+let formaPagoActual = null;
 let productionInProgress = false;
 let productionCommentInProgress = false;
 let stockAdjustInProgress = false;
@@ -390,6 +393,7 @@ const dom = {
   cartTotal: document.querySelector("#cart-total"),
   pagoCon: document.querySelector("#pago-con"),
   pagoTogooNota: document.querySelector("#pago-togoo-nota"),
+  pagoFormaGrupo: document.querySelector(".pago-forma"),
   vueltoResultado: document.querySelector("#vuelto-resultado"),
   vueltoValor: document.querySelector("#vuelto-valor"),
   confirmSale: document.querySelector("#confirm-sale"),
@@ -1424,15 +1428,25 @@ function renderReservedStock() {
 // Con el carrito todo en Too Good To Go (lo cobra la app), la forma de pago no aplica: los botones
 // se apagan para que no confundan. Si el carrito lleva algo que si se cobra aca (ej. un cafe, que no
 // controla stock y se cobra normal), vuelven a estar disponibles.
-function actualizarPagoSegunToGoo() {
+function carritoTodoToGoo() {
   const items = Array.from(cart.values());
-  const todoToGoo = cartMode === "togoo" && items.every((item) => effectiveSaleMode(item) === "togoo");
-  for (const b of [dom.pagoFormaEfectivo, dom.pagoFormaTarjeta, dom.pagoFormaGlovo]) {
-    b.disabled = todoToGoo;
-    b.classList.toggle("is-apagado", todoToGoo);
-  }
+  return cartMode === "togoo" && items.every((item) => effectiveSaleMode(item) === "togoo");
+}
+
+// Con el carrito todo en Too Good To Go los botones de forma de pago NO se muestran (no hay nada que
+// elegir: lo cobra la app) y "Confirmar venta" queda habilitado por ToGoo mismo. Si no, el boton
+// esta bloqueado hasta que se elige Efectivo, Tarjeta o Glovo.
+function actualizarPagoSegunToGoo() {
+  const todoToGoo = carritoTodoToGoo();
+  dom.pagoFormaGrupo.hidden = todoToGoo;
   dom.pagoTogooNota.hidden = !todoToGoo;
   dom.cartVuelto.hidden = todoToGoo || formaPagoActual !== "efectivo";
+  const hayCarrito = cart.size > 0;
+  const falta = hayCarrito && !todoToGoo && !formaPagoActual;
+  // renderCart habilita el boton con el carrito; aca se le suma la condicion del pago.
+  if (hayCarrito && !saleInProgress) dom.confirmSale.disabled = falta;
+  dom.confirmSale.textContent = falta ? "Elegí la forma de pago" : "Confirmar venta";
+  dom.pagoFormaGrupo.classList.toggle("falta-elegir", falta);
 }
 
 function setFormaPago(forma) {
@@ -1606,7 +1620,6 @@ function effectiveSaleMode(item) {
 }
 
 function renderCurrentCart() {
-  actualizarPagoSegunToGoo();
   const items = Array.from(cart.values());
   const pricing = calculateCartPricing(items.filter((item) => effectiveSaleMode(item) === "normal"));
   const hasTogoo = items.some((item) => effectiveSaleMode(item) === "togoo");
@@ -1620,6 +1633,7 @@ function renderCurrentCart() {
     changeQuantity,
     { ...pricing, totalCentavos: cartTotalCentavosActual }
   );
+  actualizarPagoSegunToGoo();
   recalcularVuelto();
 }
 
@@ -3715,6 +3729,11 @@ async function handleMarcarEntregado(pedido) {
 
 async function handleConfirmSale() {
   if (saleInProgress) return;
+  if (!carritoTodoToGoo() && !formaPagoActual) {
+    setSaleMessage("Elegí la forma de pago: Efectivo, Tarjeta o Glovo (o marcá Too Good To Go).");
+    actualizarPagoSegunToGoo();
+    return;
+  }
   try {
     saleInProgress = true;
     dom.confirmSale.disabled = true;
@@ -3726,7 +3745,8 @@ async function handleConfirmSale() {
       unitOrders: item.unitOrders,
       opcionNombre: item.opcionNombre || null
     }));
-    const sale = await confirmSale(items, formaPagoActual);
+    // Too Good To Go no tiene forma de pago (lo cobra la app, y los calculos del cierre lo ignoran).
+    const sale = await confirmSale(items, carritoTodoToGoo() ? "efectivo" : formaPagoActual);
     cart.clear();
     resetVuelto();
     setSaleMessage(
@@ -3734,7 +3754,7 @@ async function handleConfirmSale() {
       true
     );
     setCartMode("normal");
-    setFormaPago("efectivo");
+    setFormaPago(null);
     // Sync fire-and-forget — nunca bloquea la caja
     const { venta, detalles, movimientosStock, movimientosInsumos } = sale._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
@@ -3745,6 +3765,7 @@ async function handleConfirmSale() {
     renderCurrentCart();
   } finally {
     saleInProgress = false;
+    actualizarPagoSegunToGoo();
   }
 }
 
@@ -3818,6 +3839,7 @@ function bindEvents() {
     setSaleMessage("");
     renderReservedStock();
     resetVuelto();
+    setFormaPago(null);
     renderCurrentCart();
   });
   dom.confirmSale.addEventListener("click", handleConfirmSale);
