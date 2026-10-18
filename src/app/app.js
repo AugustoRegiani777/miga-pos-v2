@@ -2222,11 +2222,19 @@ function actualizarBotonSentido() {
 // Nivel de stock: cuanto tiene respecto a su minimo (los insumos usan unidades distintas, asi que
 // la cantidad suelta no se puede comparar entre ellos).
 const nivelDeStock = (i) => (Number(i.stockMinimo) > 0 ? (Number(i.stockActual) || 0) / Number(i.stockMinimo) : Infinity);
+// Lo que se ve en cada insumo es su estado (Critico / Bajo / OK, segun su stock critico y minimo). El orden
+// tiene que seguir ESE estado: antes seguia otro calculo (si le alcanza hasta la proxima compra) y la lista
+// quedaba mezclada respecto de lo que se lee en pantalla. Dentro de un mismo estado, el mas flojo primero.
+const RANGO_ESTADO = { critico: 0, bajo: 1, ok: 2 };
+const rangoDeEstado = (i) => RANGO_ESTADO[i.estadoStock] ?? 3;
 
 async function ordenarInsumosParaVista(insumos, modo) {
   const sentido = insumosOrdenInvertido ? -1 : 1;
   const porNombre = (a, b) => a.nombre.localeCompare(b.nombre);
-  const porNivel = (a, b) => (sentido * (nivelDeStock(a) - nivelDeStock(b))) || porNombre(a, b);
+  const porNivel = (a, b) =>
+    (sentido * (rangoDeEstado(a) - rangoDeEstado(b)))
+    || (sentido * (nivelDeStock(a) - nivelDeStock(b)))
+    || porNombre(a, b);
   const agrupar = (clave) => insumos
     .map((i) => ({ ...i, grupo: clave(i) || { nombre: "Sin asignar", orden: 1e9 } }))
     .sort((a, b) => (a.grupo.orden - b.grupo.orden) || a.grupo.nombre.localeCompare(b.grupo.nombre) || porNivel(a, b))
@@ -2270,7 +2278,7 @@ async function ordenarInsumosParaVista(insumos, modo) {
     const provDe = new Map(items.map((x) => [x.id, x.mejorSupplier ? { nombre: x.mejorSupplier.proveedorNombre, orden: 0 } : null]));
     return agrupar((i) => provDe.get(i.id));
   }
-  if (modo === "estado" && insumosOrdenInvertido) return insumos.slice().sort(porNivel);
+  if (modo === "estado") return insumos.slice().sort(porNivel);
   if (modo === "sugerencia") {
     // El mismo orden que "Que pedir": lo mas urgente de pedir primero.
     const { items } = await listaDeComprasSmart();
