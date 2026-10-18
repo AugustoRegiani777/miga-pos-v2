@@ -90,12 +90,16 @@ export async function saveGrupoVariante({ id, nombre, titulo, opciones, producto
     }
   }
 
+  // `modo: "interruptor"` (ej. Cafe normal / descafeinado): en la Caja no es una pregunta, es un
+  // interruptor dentro de la misma ventanita. Se conserva al editar el grupo.
+  const previo = grupos.find((g) => g.id === grupoId);
   const grupoGuardado = {
     id: grupoId,
     nombre: nombreLimpio,
     titulo: String(titulo || "").trim() || `¿Qué ${nombreLimpio.toLowerCase()}?`,
     opciones: opcionesFinales,
-    productoIds: productoIds || []
+    productoIds: productoIds || [],
+    ...(previo?.modo ? { modo: previo.modo } : {})
   };
 
   const index = grupos.findIndex((g) => g.id === grupoId);
@@ -116,17 +120,30 @@ export async function deleteGrupoVariante(grupoId) {
   return gruposFinal;
 }
 
-// Asigna (o saca) un producto de un grupo — usado desde el desplegable
-// "Variante" del formulario de Menu, sin pasar por la pantalla de Variantes.
-// grupoId null/"" saca al producto de cualquier grupo al que pertenezca.
-export async function setProductoGrupoVariante(productoId, grupoId) {
+// Cambia el grupo de un producto — usado desde el desplegable "Variante" del formulario de Menu.
+// Un producto puede estar en VARIOS grupos (ej. el Ice caramel: tipo de leche, tipo de sirope y cafe
+// normal/descafeinado), pero ese desplegable solo muestra uno. Por eso solo se toca el que se
+// cambio: se saca del grupo que tenia (grupoPrevioId) y se suma al elegido. Los demas quedan como estan.
+// Antes se lo sacaba de TODOS los otros grupos cada vez que se guardaba el producto.
+export async function setProductoGrupoVariante(productoId, grupoId, grupoPrevioId = null) {
+  const nuevo = grupoId || null;
+  const previo = grupoPrevioId || null;
+  if (nuevo === previo) return getGruposVariantes();
   const grupos = await getGruposVariantes();
-  const gruposFinal = grupos.map((g) => ({
-    ...g,
-    productoIds: g.id === grupoId
-      ? Array.from(new Set([...g.productoIds, productoId]))
-      : g.productoIds.filter((id) => id !== productoId)
-  }));
+  const gruposFinal = grupos.map((g) => {
+    if (g.id === nuevo) return { ...g, productoIds: Array.from(new Set([...g.productoIds, productoId])) };
+    if (g.id === previo) return { ...g, productoIds: g.productoIds.filter((id) => id !== productoId) };
+    return g;
+  });
+  await putOne("configuracion", { id: CONFIG_ID, valor: gruposFinal, actualizadoEn: new Date().toISOString() });
+  trySyncVariantesGrupos(gruposFinal).catch(() => {});
+  return gruposFinal;
+}
+
+// Al borrar un producto: sale de TODOS los grupos (no quedan apuntando a algo que ya no existe).
+export async function quitarProductoDeTodosLosGrupos(productoId) {
+  const grupos = await getGruposVariantes();
+  const gruposFinal = grupos.map((g) => ({ ...g, productoIds: g.productoIds.filter((id) => id !== productoId) }));
   await putOne("configuracion", { id: CONFIG_ID, valor: gruposFinal, actualizadoEn: new Date().toISOString() });
   trySyncVariantesGrupos(gruposFinal).catch(() => {});
   return gruposFinal;

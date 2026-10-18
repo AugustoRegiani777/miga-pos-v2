@@ -4,7 +4,7 @@ import { trySyncCatalogoSnapshot, trySyncRecetasSnapshot, trySyncProductoElimina
 import { fetchCategoriasCatalogo, fetchProductosCatalogo, fetchRecetasCatalogo, contarReferenciasProducto, deleteProductoRemoto } from "../db/supabase.js";
 import { construirInsumoNuevo, construirLineaProveedor, lineaProveedorCompleta, construirEspejoReventa, construirProveedorNuevo } from "./catalogo-armar.js";
 import { guardarCatalogo } from "./catalogo-guardar.js";
-import { getInsumoAGrupoVariante, setProductoGrupoVariante } from "./variantes.js";
+import { getInsumoAGrupoVariante, quitarProductoDeTodosLosGrupos } from "./variantes.js";
 import { clasificarBloqueosEliminacion, mensajeBloqueoEliminacion } from "./menu-calculos.js";
 
 // Se reexporta para que app.js siga pidiendole todo lo del Menu a un solo
@@ -483,7 +483,7 @@ export async function eliminarProducto(id) {
   // Si el producto estaba asignado a un grupo de variante (ej. "Tipo de
   // leche"), sacarlo de ahi: el grupo guarda una lista de productoIds y
   // quedaria apuntando a un producto que ya no existe.
-  await setProductoGrupoVariante(id, null);
+  await quitarProductoDeTodosLosGrupos(id);
 
   await withStores(["productos", "recetas", "historial_recetas"], "readwrite", (stores) => {
     for (const receta of recetasDelProducto) stores.recetas.delete(receta.id);

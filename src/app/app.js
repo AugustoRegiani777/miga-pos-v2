@@ -9,7 +9,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, SUFIJO_DESCAFEINADO, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -296,6 +296,7 @@ let menuInsumosDisponibles = [];
 let menuProveedoresDisponibles = [];
 // La variante que se esta creando dentro del alta de un producto. null = el
 // desplegable esta en un grupo que ya existe (o en "Ninguna").
+let menuGrupoPrevioId = "";
 let menuVarianteNueva = null;
 // Como se consigue el producto que se esta creando/editando: "receta",
 // "reventa" (se compra hecho) o "pendiente" (en prueba). Ver index.html.
@@ -383,7 +384,6 @@ const dom = {
   lecheProductoNombre: document.querySelector("#leche-producto-nombre"),
   lecheOpciones: document.querySelector("#leche-opciones"),
   lecheDecafFila: document.querySelector("#leche-decaf-fila"),
-  lecheDecaf: document.querySelector("#leche-decaf"),
   lecheAgregar: document.querySelector("#leche-agregar"),
   salesSearch: document.querySelector("#sales-search"),
   clearSalesSearch: document.querySelector("#clear-sales-search"),
@@ -1507,18 +1507,19 @@ function addToCart(product, opcionNombre = null) {
   renderCurrentCart();
 }
 
-// Los cafes (categoria Cafe) se pueden pedir descafeinados. El interruptor va en la misma ventanita
-// de la leche; los cafes sin leche abren esa ventanita con solo el interruptor y "Agregar".
-const esCafe = (product) => product.categoriaId === "cafe";
+// Grupos de variante con modo "interruptor" (ej. Tipo de cafe: Normal / Descafeinado): no son una
+// pregunta, son un interruptor dentro de la misma ventanita. Se configuran en Gestion > Variantes
+// (que productos lo llevan y que insumo descuenta la opcion encendida). Los productos que no tienen
+// otra pregunta (ej. el Expresso) abren la ventanita con solo el interruptor y "Agregar".
+const esInterruptor = (grupo) => grupo.modo === "interruptor" && (grupo.opciones || []).length >= 2;
 
 function handleProductTap(product) {
   const grupos = gruposVariantesActual.filter((g) => g.productoIds.includes(product.id));
-  if (grupos.length) {
-    iniciarSeleccion(product, grupos.map((g) => ({ titulo: g.titulo, opciones: g.opciones.map((o) => o.nombre) })));
-    return;
-  }
-  if (esCafe(product)) {
-    iniciarSeleccion(product, [{ titulo: "¿Cómo lo querés?", opciones: [] }]);
+  const preguntas = grupos.filter((g) => !esInterruptor(g));
+  const interruptores = grupos.filter(esInterruptor);
+  if (preguntas.length || interruptores.length) {
+    const pasos = preguntas.map((g) => ({ titulo: g.titulo, opciones: g.opciones.map((o) => o.nombre) }));
+    iniciarSeleccion(product, pasos.length ? pasos : [{ titulo: interruptores[0].titulo || "¿Cómo lo querés?", opciones: [] }], interruptores);
     return;
   }
   if (PRODUCTOS_CON_BEBIDA_A_ELEGIR.has(product.id)) {
@@ -1542,12 +1543,21 @@ function setLecheSheetOpen(isOpen) {
 
 // Modal generico de "elegi una opcion antes de sumar al carrito" — lo usan
 // tanto la seleccion de leche como la seleccion de bebida en Promo bebida.
-function iniciarSeleccion(product, pasos) {
+let interruptoresSeleccion = [];
+
+function iniciarSeleccion(product, pasos, interruptores = []) {
   productoPendienteSeleccion = product;
   pasosSeleccion = pasos;
+  interruptoresSeleccion = interruptores;
   elegidasSeleccion = [];
   pasoSeleccion = 0;
-  dom.lecheDecaf.checked = false;
+  // Un interruptor por grupo: la opcion encendida es la segunda (la primera es la normal).
+  dom.lecheDecafFila.innerHTML = interruptores.map((g) => `
+    <label class="toggle-switch leche-decaf">
+      <input type="checkbox" data-interruptor="${g.id}">
+      <span class="toggle-slider"></span>
+      <span class="toggle-label">${g.opciones[1].nombre}</span>
+    </label>`).join("");
   mostrarPasoSeleccion();
   setLecheSheetOpen(true);
 }
@@ -1558,8 +1568,8 @@ function mostrarPasoSeleccion() {
   const varios = pasosSeleccion.length > 1;
   dom.lecheSheetTitulo.textContent = paso.titulo;
   dom.lecheProductoNombre.textContent = varios ? `${product.nombre} · ${pasoSeleccion + 1} de ${pasosSeleccion.length}` : product.nombre;
-  // El interruptor "Descafeinado" va en la primera pregunta, para que quede elegido antes de la leche.
-  dom.lecheDecafFila.hidden = !(esCafe(product) && pasoSeleccion === 0);
+  // Los interruptores van en la primera pregunta, para que queden elegidos antes de la leche.
+  dom.lecheDecafFila.hidden = !(interruptoresSeleccion.length > 0 && pasoSeleccion === 0);
   dom.lecheAgregar.hidden = paso.opciones.length > 0;
   dom.lecheOpciones.innerHTML = paso.opciones
     .map((op) => `<button type="button" class="leche-opcion" data-opcion="${op}">${op}</button>`)
@@ -1583,8 +1593,10 @@ function seleccionarOpcion(nombreElegido) {
     mostrarPasoSeleccion();
     return;
   }
-  const decaf = esCafe(productoPendienteSeleccion) && dom.lecheDecaf.checked;
-  const partes = [elegidasSeleccion[0], decaf ? SUFIJO_DESCAFEINADO : null, ...elegidasSeleccion.slice(1)].filter(Boolean);
+  const encendidos = interruptoresSeleccion
+    .filter((g) => dom.lecheDecafFila.querySelector(`[data-interruptor="${g.id}"]`)?.checked)
+    .map((g) => g.opciones[1].nombre);
+  const partes = [elegidasSeleccion[0], ...encendidos, ...elegidasSeleccion.slice(1)].filter(Boolean);
   addToCart(productoPendienteSeleccion, partes.join(" + ") || null);
   closeLecheSheet();
 }
@@ -3013,6 +3025,7 @@ async function openMenuProductoEdit(producto, { modoInicial } = {}) {
     .map((c) => `<option value="${c.id}" ${c.id === producto.categoriaId ? "selected" : ""}>${c.nombre}</option>`)
     .join("");
   menuVarianteNueva = null;
+  menuGrupoPrevioId = grupoActual?.id || "";
   populateMenuVarianteSelect(grupoActual?.id || "");
   // Plegada, salvo que el producto ya tenga una variante: ahi si hay algo que ver.
   dom.menuVarianteDetalles.open = Boolean(grupoActual);
@@ -4770,7 +4783,7 @@ function bindEvents() {
       if (varianteAGuardar) {
         await saveGrupoVariante({ ...varianteAGuardar, productoIds: [productoGuardado.id] });
       } else {
-        await setProductoGrupoVariante(productoGuardado.id, dom.menuEditVariante.value || null);
+        await setProductoGrupoVariante(productoGuardado.id, dom.menuEditVariante.value || null, menuGrupoPrevioId);
       }
       await refreshGruposVariantes();
       setFlash(menuProductoMode === "edit" ? "Producto actualizado." : "Producto agregado.", "success");

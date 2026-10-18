@@ -17,7 +17,7 @@ export function renderVariantesGruposList(el, grupos, callbacks = {}) {
         <summary class="prov-summary">
           <div class="prov-summary-main">
             <strong>${grupo.nombre}</strong>
-            <span class="cal-muted">${grupo.titulo} · ${productosTexto}</span>
+            <span class="cal-muted">${grupo.titulo} · ${productosTexto}${grupo.modo === "interruptor" ? " · interruptor en la Caja" : ""}</span>
           </div>
           <button class="ghost-button compact prov-edit-btn" type="button" data-action="edit-grupo" data-id="${grupo.id}">Editar</button>
         </summary>

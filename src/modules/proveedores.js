@@ -1,8 +1,8 @@
-import { getAll, getOne, putOne, withStores } from "../db/idb.js";
+import { getAll, getOne, putOne, withStores, requestToPromise } from "../db/idb.js";
 import { PROVEEDORES_SEED_VERSION, initialProveedores, initialProveedorInsumos } from "./seed.js";
 import { fetchProveedoresCatalogo, fetchProveedorInsumosCatalogo } from "../db/supabase.js";
 import { slugify } from "../utils/format.js";
-import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot } from "./sync.js";
+import { trySyncProveedoresSnapshot, trySyncProveedorInsumosSnapshot, hayPendientesDeTipo } from "./sync.js";
 import { construirInsumoNuevo } from "./catalogo-armar.js";
 import { descartarInsumo } from "./aprovisionamiento.js";
 import { guardarCatalogo } from "./catalogo-guardar.js";
@@ -45,12 +45,14 @@ export async function createProveedor({ nombre, tel, email, notas, diasCiclo, le
 // catalogo" en Gestion) — sin campos en vivo que proteger aca, es un
 // reemplazo directo de lo local por lo que haya en la nube.
 export async function pullProveedoresDesdeNube() {
+  const inicioPull = new Date().toISOString();
+  const pendienteLineas = hayPendientesDeTipo("proveedor_insumos_snapshot");
   const [proveedoresRemotos, proveedorInsumosRemotos] = await Promise.all([
     fetchProveedoresCatalogo(),
     fetchProveedorInsumosCatalogo()
   ]);
 
-  await withStores(["proveedores", "proveedor_insumos"], "readwrite", (stores) => {
+  await withStores(["proveedores", "proveedor_insumos"], "readwrite", async (stores) => {
     for (const p of proveedoresRemotos) {
       stores.proveedores.put({
         id: p.id,
@@ -75,6 +77,15 @@ export async function pullProveedoresDesdeNube() {
         precioUnitarioCentavos: pi.precio_unitario_centavos,
         activo: pi.activo
       });
+    }
+    // Una linea que ya no esta en la nube (se borro un insumo o se limpio algo desde otro dispositivo) no
+    // puede quedar aca: la proxima subida la revive o la rechaza por clave foranea. Mismas guardas que
+    // las recetas: respuesta vacia, algo sin subir, o una linea tocada despues de empezar el pull.
+    if (proveedorInsumosRemotos.length > 0 && !pendienteLineas) {
+      const idsRemotos = new Set(proveedorInsumosRemotos.map((x) => x.id));
+      for (const l of await requestToPromise(stores.proveedor_insumos.getAll())) {
+        if (!idsRemotos.has(l.id) && !(String(l.actualizadoEn || "") > inicioPull)) stores.proveedor_insumos.delete(l.id);
+      }
     }
   });
 

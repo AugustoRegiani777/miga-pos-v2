@@ -144,7 +144,7 @@ const SEED_VERSION_KEY = "insumos_seed_version";
 // (stock, minimos y las recetas que la usan). Sin eso, 3 L de minimo pasarian
 // a leerse como 3 ml.
 const ENVASES_NORMALIZADOS_V11 = {
-  "leche-normal":      { unidadCompra: "botella", factorConversion: 1000 },
+  "leche-normal":      { unidadCompra: "botella", factorConversion: 1500 }, // la botella de leche entera trae 1,5 L (factura de Metro)
   "leche-avena":       { unidadCompra: "botella", factorConversion: 1000 },
   "leche-sin-lactosa": { unidadCompra: "botella", factorConversion: 1000 },
   "leche-de-soja":     { unidadCompra: "botella", factorConversion: 1000, unidad: "ml", escalarPor: 1000 },
@@ -2393,7 +2393,9 @@ export function separarOpcion(opcionNombre) {
 }
 function resolverLineaEfectiva(receta, opcionNombreCompleta, grupos) {
   const { descafeinado, partes } = separarOpcion(opcionNombreCompleta);
-  const base = resolverLineaSinCafe(receta, partes, grupos);
+  // Primero manda lo configurado en Gestion > Variantes (el grupo "Tipo de cafe" dice que insumo
+  // descuenta "Descafeinado"). Solo si ese grupo no esta en este dispositivo, se usa el de siempre.
+  const base = resolverLineaSinCafe(receta, descafeinado ? [...partes, SUFIJO_DESCAFEINADO] : partes, grupos);
   if (descafeinado && base.insumoId === INSUMO_CAFE) return { ...base, insumoId: INSUMO_CAFE_DESCAFEINADO };
   return base;
 }

@@ -19,7 +19,10 @@ import {
   pushCierreCaja,
   pushSesionCaja,
   pushMovimientosCaja,
-  pushArqueoCaja
+  pushArqueoCaja,
+  fetchInsumosCatalogo,
+  fetchProductosCatalogo,
+  fetchProveedoresCatalogo
 } from "../db/supabase.js";
 
 // ---------------------------------------------------------------------------
@@ -229,6 +232,23 @@ export function hayPendientesDeTipo(type) {
 
 // ---- Ejecucion ------------------------------------------------------------
 
+// Un snapshot de recetas o de lineas de proveedor puede traer filas que apuntan a algo que YA NO existe
+// en la nube (un insumo o un producto borrado desde otro dispositivo, o una linea creada por una
+// factura sobre un insumo que se elimino despues). La nube rechaza el lote ENTERO con un 409 (clave
+// foranea, 23503) y, como la operacion guarda su copia vieja, fallaba igual en cada reintento: la cola
+// quedaba trabada para siempre. Ante ese error se vuelve a enviar sin las filas huerfanas.
+async function pushConReparacionDeClaves(payload, push, validas) {
+  try {
+    return await push(payload);
+  } catch (error) {
+    const esClaveForanea = error?.status === 409 && /23503/.test(String(error.message));
+    if (!esClaveForanea) throw error;
+    const buenas = await validas(payload);
+    if (buenas.length === payload.length) throw error;
+    return push(buenas);
+  }
+}
+
 async function executeOp(op) {
   switch (op.type) {
     case "venta":
@@ -240,7 +260,12 @@ async function executeOp(op) {
     case "insumos_snapshot":
       return pushInsumosSnapshot(op.payload);
     case "recetas_snapshot":
-      return pushRecetasSnapshot(op.payload);
+      return pushConReparacionDeClaves(op.payload, pushRecetasSnapshot, async (recetas) => {
+        const [productos, insumos] = await Promise.all([fetchProductosCatalogo(), fetchInsumosCatalogo()]);
+        const P = new Set(productos.map((x) => x.id));
+        const I = new Set(insumos.map((x) => x.id));
+        return recetas.filter((r) => P.has(r.productoId) && I.has(r.insumoId));
+      });
     // Borrado definitivo de un producto. Va DESPUES de los dos snapshots en la
     // cola (se encola ultimo, y el drenado respeta el orden) porque un
     // snapshot que todavia estuviera pendiente de antes del borrado todavia
@@ -268,7 +293,12 @@ async function executeOp(op) {
     case "proveedores_snapshot":
       return pushProveedoresSnapshot(op.payload);
     case "proveedor_insumos_snapshot":
-      return pushProveedorInsumosSnapshot(op.payload);
+      return pushConReparacionDeClaves(op.payload, pushProveedorInsumosSnapshot, async (lineas) => {
+        const [insumos, proveedores] = await Promise.all([fetchInsumosCatalogo(), fetchProveedoresCatalogo()]);
+        const I = new Set(insumos.map((x) => x.id));
+        const P = new Set(proveedores.map((x) => x.id));
+        return lineas.filter((l) => P.has(l.proveedorId) && (!l.insumoId || I.has(l.insumoId)));
+      });
     case "movimiento_stock":
       return pushMovimientoStock(op.payload);
     case "venta_anulada":
