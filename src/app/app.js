@@ -460,6 +460,7 @@ const dom = {
   cierreHoy: document.querySelector("#cierre-hoy"),
   panelRoot: document.querySelector("#panel-root"),
   panelDate: document.querySelector("#panel-date"),
+  panelEstado: document.querySelector("#panel-estado"),
   panelPrev: document.querySelector("#panel-prev"),
   panelNext: document.querySelector("#panel-next"),
   panelHoy: document.querySelector("#panel-hoy"),
@@ -3311,20 +3312,35 @@ async function refreshView(viewName = currentView) {
 // Panel: ventas, horarios pico y stock. Lee de la nube (verdad de todos los
 // dispositivos) y, sin conexion, cae a lo guardado en este dispositivo.
 let panelFecha = null;
-let panelCargando = false;
+let panelPedido = 0; // numero del ultimo pedido: solo el ultimo puede dibujar (los viejos se descartan)
 
-async function renderPanelView() {
+// Al cambiar de dia se muestra YA que se esta cargando ese dia (y lo anterior se atenua), en vez de
+// dejar los numeros del dia anterior como si fueran del nuevo. Si se cambia de dia otra vez antes de
+// que termine, el resultado viejo se descarta: antes se dibujaba igual y quedaba el dia equivocado.
+async function renderPanelView({ forzar = false } = {}) {
   if (!panelFecha) panelFecha = todayISO();
   dom.panelDate.value = panelFecha;
-  if (panelCargando) return;
-  panelCargando = true;
+  const pedido = ++panelPedido;
+  const fecha = panelFecha;
+  dom.panelRoot.classList.add("panel-cargando");
+  dom.panelRoot.setAttribute("aria-busy", "true");
+  dom.panelEstado.textContent = `Cargando el día ${fecha.split("-").reverse().join("/")}…`;
+  dom.panelEstado.classList.remove("es-error");
+  dom.panelEstado.hidden = false;
   try {
-    const datos = await cargarPanel(panelFecha);
+    const datos = await cargarPanel(fecha, { forzar });
+    if (pedido !== panelPedido) return; // se pidio otro dia mientras tanto
     if (currentView === "panel") renderPanel(dom.panelRoot, datos);
+    dom.panelEstado.hidden = true;
   } catch (error) {
-    dom.panelRoot.textContent = `No se pudo cargar el panel: ${error.message || error}`;
+    if (pedido !== panelPedido) return;
+    dom.panelEstado.textContent = `No se pudo cargar el día ${fecha}: ${error.message || error}. Tocá ↻ Actualizar para reintentar.`;
+    dom.panelEstado.classList.add("es-error");
   } finally {
-    panelCargando = false;
+    if (pedido === panelPedido) {
+      dom.panelRoot.classList.remove("panel-cargando");
+      dom.panelRoot.removeAttribute("aria-busy");
+    }
   }
 }
 
@@ -4972,7 +4988,7 @@ function bindEvents() {
   dom.panelPrev.addEventListener("click", () => setPanelFecha(sumarDias(panelFecha || todayISO(), -1)));
   dom.panelNext.addEventListener("click", () => setPanelFecha(sumarDias(panelFecha || todayISO(), 1)));
   dom.panelHoy.addEventListener("click", () => setPanelFecha(todayISO()));
-  dom.panelRefresh.addEventListener("click", () => renderPanelView());
+  dom.panelRefresh.addEventListener("click", () => renderPanelView({ forzar: true }));
 
   window.addEventListener("hashchange", () => {
     const viewName = window.location.hash.replace("#", "") || "caja";

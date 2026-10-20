@@ -20,10 +20,33 @@ async function ventasLocalesRango(desde, hasta) {
     .map((v) => ({ ...v, saleMode: v.saleMode || "normal", detalles: detallesPorVenta.get(v.id) || [] }));
 }
 
+// Las ventas de un rango se traen una vez y se reusan al pasar de un dia al de al lado: cada dia
+// mira 14 dias y casi todos se repiten, asi que navegar no tiene por que volver a pedirlos. Se
+// trae de mas hacia atras para poder retroceder varios dias sin pedir de nuevo. Lo que incluye
+// "hoy" vence rapido (se siguen vendiendo cosas); lo ya cerrado, mas lento. "Actualizar" fuerza.
+const DIAS_DE_MARGEN_ATRAS = 7;
+const VIGENCIA_DIA_EN_CURSO_MS = 45 * 1000;
+const VIGENCIA_DIAS_CERRADOS_MS = 5 * 60 * 1000;
+let cacheVentas = null; // { desde, hasta, filas, en }
+
+async function ventasDelRango(desde, hasta, hoy, forzar) {
+  const vigencia = hasta >= hoy ? VIGENCIA_DIA_EN_CURSO_MS : VIGENCIA_DIAS_CERRADOS_MS;
+  if (!forzar && cacheVentas && cacheVentas.desde <= desde && cacheVentas.hasta >= hasta && Date.now() - cacheVentas.en < vigencia) {
+    return cacheVentas.filas.filter((v) => v.fecha >= desde && v.fecha <= hasta);
+  }
+  const desdeAmpliado = sumarDias(desde, -DIAS_DE_MARGEN_ATRAS);
+  // Hasta hoy: asi se puede avanzar y retroceder dia a dia sin volver a pedir.
+  const hastaAmpliado = hasta > hoy ? hasta : hoy;
+  const filas = (await fetchVentasRango(desdeAmpliado, hastaAmpliado)).map(mapVentaRemota);
+  cacheVentas = { desde: desdeAmpliado, hasta: hastaAmpliado, filas, en: Date.now() };
+  return filas.filter((v) => v.fecha >= desde && v.fecha <= hasta);
+}
+
 // La nube es la verdad (ventas de todos los dispositivos y stock derivado). Sin
 // conexion la tablet igual muestra lo suyo: ventas locales y stock local.
-export async function cargarPanel(fecha) {
+export async function cargarPanel(fecha, { forzar = false } = {}) {
   const desde = sumarDias(fecha, -(DIAS_TENDENCIA - 1));
+  const hoy = new Date().toISOString().slice(0, 10);
   const [productos, insumosLocales] = await Promise.all([listProducts(), getAll("insumos")]);
   let insumos = insumosLocales.filter((i) => i.activo);
   let productosConStock = productos;
@@ -32,11 +55,11 @@ export async function cargarPanel(fecha) {
 
   try {
     const [filas, stockProductos, stockInsumos] = await Promise.all([
-      fetchVentasRango(desde, fecha),
+      ventasDelRango(desde, fecha, hoy, forzar),
       fetchStockProductos(),
       fetchStockInsumos()
     ]);
-    ventas = filas.map(mapVentaRemota);
+    ventas = filas;
     const stockP = new Map(stockProductos.map((r) => [r.id, Number(r.stock_actual)]));
     const stockI = new Map(stockInsumos.map((r) => [r.id, Number(r.stock_actual)]));
     productosConStock = productos.map((p) => (stockP.has(p.id) ? { ...p, stockActual: stockP.get(p.id) } : p));

@@ -4559,3 +4559,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 /* Sin forma de pago elegida: los tres botones llaman la atencion hasta que se elige uno */
 .pago-forma.falta-elegir .pago-forma-button { border-color: var(--accent); }
 .pago-forma-button.is-apagado { opacity: 1; cursor: pointer; }
+
+/* Panel: mientras carga otro dia, un cartel visible y lo anterior atenuado (no se ven numeros viejos como si fueran nuevos) */
+.panel-estado { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--line); border-left: 4px solid var(--primary-2); border-radius: 8px; background: var(--surface); font-weight: 700; }
+.panel-estado.es-error { border-left-color: var(--out); color: var(--txt-out); }
+.panel-root.panel-cargando { opacity: 0.35; pointer-events: none; transition: opacity 120ms ease; }
