@@ -23,7 +23,7 @@ Caja (tablet)            Función cobro-terminal (Netlify)        Terminal / pro
 - **Estados finales:** `aprobado`, `rechazado`, `cancelado`, `expirado`. Solo `aprobado` confirma la venta.
 - Si algo falla (sin red, el terminal no responde), siempre queda la salida manual: *"Cobrar a mano"*.
 
-## Modos (por dispositivo, selector "Posnet" en la barra de arriba)
+## Modos (por dispositivo, NO se muestra en pantalla: se cambia abriendo la app con `?posnet=guiado|simulador|terminal|ninguno`, ver COMANDOS.md)
 
 | Modo | Qué hace | Para qué |
 |---|---|---|

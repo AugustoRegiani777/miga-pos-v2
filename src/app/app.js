@@ -3779,12 +3779,18 @@ async function handleMarcarEntregado(pedido) {
 }
 
 // ---- Cobro con tarjeta en el posnet (ver modules/cobro-tarjeta.js y docs/integracion-posnet) ----
-function setupSelectorPosnet() {
-  const sel = document.querySelector("#selector-posnet");
-  if (!sel) return;
-  sel.innerHTML = MODOS_POSNET.map((m) => `<option value="${m.id}">${m.nombre}</option>`).join("");
-  sel.value = modoPosnet();
-  sel.addEventListener("change", () => guardarModoPosnet(sel.value));
+// El modo del posnet NO se muestra en la pantalla: lo manejamos nosotros (back end). Por defecto "ninguno".
+// Para cambiarlo en un dispositivo: abrir la app con ?posnet=guiado|simulador|terminal|ninguno (queda guardado
+// en ese dispositivo y la direccion se limpia). Ver COMANDOS.md.
+function setupModoPosnetDesdeLaDireccion() {
+  try {
+    const url = new URL(window.location.href);
+    const pedido = url.searchParams.get("posnet");
+    if (!pedido) return;
+    if (MODOS_POSNET.some((m) => m.id === pedido)) guardarModoPosnet(pedido);
+    url.searchParams.delete("posnet");
+    window.history.replaceState(null, "", url.pathname + (url.search || "") + url.hash);
+  } catch { /* sin URL/history: no se cambia nada */ }
 }
 
 // Muestra la hoja del cobro y devuelve { aprobado, ... } cuando termina (aprobado, rechazado, cancelado,
@@ -5277,7 +5283,7 @@ export async function startApp() {
   }
   iniciarTema();
   setupSelectorTema();
-  setupSelectorPosnet();
+  setupModoPosnetDesdeLaDireccion();
   bindAuthEvents();
   const session = await restoreSession();
   if (session) {

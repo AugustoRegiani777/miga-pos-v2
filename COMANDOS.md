@@ -68,6 +68,17 @@ Si dice que la base "está bloqueada", cerrá las otras pestañas del mismo siti
 
 Alternativa sin consola: **F12 → Application → Storage → Clear site data**.
 
+## 3c. Cobro con posnet (solo para nosotros, no se ve en pantalla)
+
+El modo del posnet de cada dispositivo se cambia abriendo la app con un parametro en la direccion. Queda guardado en ese dispositivo y la direccion se limpia sola:
+
+- `https://unodemigapos.netlify.app/?posnet=guiado` — al cobrar con tarjeta muestra el monto grande y se confirma con "Cobrado".
+- `...?posnet=simulador` — simula un terminal (SOLO pruebas: confirma las ventas con tarjeta solo, sin cobrar nada).
+- `...?posnet=terminal` — usa el posnet integrado (cuando BBVA entregue la integracion).
+- `...?posnet=ninguno` — como siempre (es el predeterminado).
+
+Mas detalle en `docs/integracion-posnet/README.md`.
+
 ## 4. Git — lo mínimo para el día a día
 
 ```
