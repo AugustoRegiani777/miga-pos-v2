@@ -150,6 +150,17 @@ function refreshSession(session) {
 // guardada y se reintenta sola la proxima vez que haya una llamada a
 // Supabase. Solo se cierra sesion si el servidor confirma que el refresh
 // token es invalido (rechazo real, no un problema de conexion).
+// Para las funciones serverless propias (ej. cobro-terminal): exigen estar logueado. Con renovar=true se
+// pide un token nuevo (el de acceso dura una hora).
+export async function tokenDeSesion({ renovar = false } = {}) {
+  let session = loadSession();
+  if (!session) return null;
+  if (renovar) {
+    try { session = await refreshSession(session); } catch { /* se usa el que haya */ }
+  }
+  return session?.accessToken || null;
+}
+
 export async function restoreSession() {
   const session = loadSession();
   if (!session) return null;

@@ -64,6 +64,10 @@
       <button class="novedades-badge" type="button" id="novedades-badge" hidden></button>
       <button class="sync-status-badge" type="button" id="sync-status-badge" hidden></button>
       <label class="selector-tema">
+        <span class="visually-hidden">Posnet de este dispositivo</span>
+        <select id="selector-posnet" aria-label="Posnet de este dispositivo"></select>
+      </label>
+      <label class="selector-tema">
         <span class="visually-hidden">Tema de la pantalla</span>
         <select id="selector-tema" aria-label="Tema de la pantalla"></select>
       </label>
@@ -175,6 +179,26 @@
           </div>
         </aside>
       </div>
+
+      <section class="production-sheet-backdrop" id="posnet-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="posnet-sheet" aria-hidden="true">
+        <div class="production-sheet-header">
+          <div>
+            <h2>Cobro con tarjeta</h2>
+            <p id="posnet-modo-texto"></p>
+          </div>
+        </div>
+        <div class="sheet-scroll-body posnet-cuerpo">
+          <p class="posnet-importe" id="posnet-importe">0,00 €</p>
+          <p class="posnet-estado" id="posnet-estado" role="status"></p>
+          <div class="posnet-acciones">
+            <button type="button" class="primary-button" id="posnet-cobrado" hidden>Cobrado ✓</button>
+            <button type="button" class="ghost-button" id="posnet-manual" hidden>Cobrar a mano</button>
+            <button type="button" class="ghost-button" id="posnet-reintentar" hidden>Reintentar</button>
+            <button type="button" class="ghost-button" id="posnet-cancelar">Cancelar</button>
+          </div>
+        </div>
+      </section>
 
       <section class="production-sheet-backdrop" id="leche-backdrop" hidden></section>
       <section class="form-section stock-adjust-sheet" id="leche-sheet" aria-hidden="true">

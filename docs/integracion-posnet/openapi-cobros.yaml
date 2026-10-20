@@ -1,0 +1,103 @@
+# Contrato de integración caja <-> terminal de cobro (borrador).
+#
+# Es el contrato que usa NUESTRA función `cobro-terminal` hacia el terminal o el proveedor.
+# Sigue el modelo habitual de los terminales "semi-integrados" (Stripe Terminal, Adyen Terminal API,
+# Redsys TPV-PC por webservice, Linkly): la caja pide un cobro por importe y una referencia, el terminal
+# lo muestra, y la caja consulta el estado (polling) o recibe un aviso (webhook).
+#
+# Cuando BBVA/Redsys entregue su documentación real, se ajusta SOLO el adaptador en
+# netlify/functions/cobro-terminal.js (el mapeo de campos y de estados); la app no cambia.
+openapi: 3.0.3
+info:
+  title: Cobro con terminal (contrato interno)
+  version: 0.1.0
+servers:
+  - url: https://api.proveedor.example/v1   # lo da BBVA / Redsys / el integrador
+security:
+  - bearerAuth: []
+paths:
+  /cobros:
+    post:
+      summary: Crear un cobro (el terminal muestra el importe y espera la tarjeta)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string }
+          description: Igual a `referencia`. Reintentar con la misma clave NO crea otro cobro.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CrearCobro' }
+      responses:
+        '202':
+          description: Cobro aceptado; el terminal lo va a mostrar
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cobro' }
+        '409':
+          description: Ya hay un cobro en curso en ese terminal
+  /cobros/{id}:
+    get:
+      summary: Consultar el estado (polling cada ~1 s hasta un estado final)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cobro' }
+  /cobros/{id}/cancelar:
+    post:
+      summary: Cancelar un cobro que todavia no se completo
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cobro' }
+webhooks:
+  cobroActualizado:
+    post:
+      summary: Alternativa al polling. El proveedor avisa cada cambio de estado.
+      description: Firmado con HMAC-SHA256 en el header `X-Signature` (secreto compartido).
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Cobro' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  schemas:
+    CrearCobro:
+      type: object
+      required: [referencia, importe_centavos, moneda, terminal_id]
+      properties:
+        referencia: { type: string, description: UUID de la venta/intento (idempotencia) }
+        importe_centavos: { type: integer, example: 1240 }
+        moneda: { type: string, example: EUR }
+        terminal_id: { type: string, example: "A910S-000123" }
+        descripcion: { type: string, example: "Caja Uno de Miga" }
+    Cobro:
+      type: object
+      properties:
+        id: { type: string }
+        referencia: { type: string }
+        estado:
+          type: string
+          enum: [enviado, en_terminal, aprobado, rechazado, cancelado, expirado]
+          description: |
+            enviado      el proveedor lo recibio
+            en_terminal  el terminal ya muestra el importe y espera la tarjeta
+            aprobado     FINAL, cobrado
+            rechazado    FINAL, denegado por el banco/tarjeta
+            cancelado    FINAL, cancelado en el terminal o desde la caja
+            expirado     FINAL, nadie pago a tiempo
+        importe_centavos: { type: integer }
+        autorizacion: { type: string, nullable: true }
+        ultimos4: { type: string, nullable: true }
+        marca: { type: string, nullable: true, example: VISA }
+        referencia_operacion: { type: string, nullable: true }
+        motivo: { type: string, nullable: true, description: Texto para mostrar si fallo }

@@ -4564,3 +4564,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .panel-estado { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--line); border-left: 4px solid var(--primary-2); border-radius: 8px; background: var(--surface); font-weight: 700; }
 .panel-estado.es-error { border-left-color: var(--out); color: var(--txt-out); }
 .panel-root.panel-cargando { opacity: 0.35; pointer-events: none; transition: opacity 120ms ease; }
+
+/* Cobro con tarjeta */
+.posnet-cuerpo { text-align: center; }
+.posnet-importe { margin: 8px 0; font-size: 3rem; font-weight: 900; color: var(--ink); }
+.posnet-estado { margin: 8px 0 18px; min-height: 28px; font-size: 1.1rem; font-weight: 700; color: var(--txt-teal); }
+.posnet-estado.es-error { color: var(--txt-out); }
+.posnet-estado.es-aviso { color: var(--txt-low); }
+.posnet-acciones { display: grid; gap: 10px; }
+.posnet-acciones button { min-height: 56px; font-size: 1.05rem; }

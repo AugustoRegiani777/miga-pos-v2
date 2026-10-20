@@ -16,6 +16,7 @@ import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrd
 import { habilitarArrastre } from "../ui/arrastrar-filas.js";
 import { revisarCicloInsumos, pendientesDelCiclo, resumenPendientes } from "../modules/ciclo-insumos.js";
 import { renderPendientesCiclo, leerPendiente } from "../ui/render-ciclo.js";
+import { MODOS_POSNET, modoPosnet, guardarModoPosnet, cobrarPorApi, TEXTO_ESTADO } from "../modules/cobro-tarjeta.js";
 import { getMermas, pctDeMerma, guardarMerma, registrarCorte, pullMermasDesdeNube } from "../modules/mermas.js";
 import { cargarCombosConfigLocal, getCombosConfigActual, guardarCombosConfig, pullCombosConfigDesdeNube } from "../modules/combos.js";
 import { revisarNovedades, marcarNovedadesTraidas, inicializarNovedadesSiHaceFalta } from "../modules/novedades.js";
@@ -394,6 +395,15 @@ const dom = {
   pagoCon: document.querySelector("#pago-con"),
   pagoTogooNota: document.querySelector("#pago-togoo-nota"),
   pagoFormaGrupo: document.querySelector(".pago-forma"),
+  posnetSheet: document.querySelector("#posnet-sheet"),
+  posnetBackdrop: document.querySelector("#posnet-backdrop"),
+  posnetImporte: document.querySelector("#posnet-importe"),
+  posnetEstado: document.querySelector("#posnet-estado"),
+  posnetModoTexto: document.querySelector("#posnet-modo-texto"),
+  posnetCobrado: document.querySelector("#posnet-cobrado"),
+  posnetManual: document.querySelector("#posnet-manual"),
+  posnetReintentar: document.querySelector("#posnet-reintentar"),
+  posnetCancelar: document.querySelector("#posnet-cancelar"),
   vueltoResultado: document.querySelector("#vuelto-resultado"),
   vueltoValor: document.querySelector("#vuelto-valor"),
   confirmSale: document.querySelector("#confirm-sale"),
@@ -3768,6 +3778,75 @@ async function handleMarcarEntregado(pedido) {
   }
 }
 
+// ---- Cobro con tarjeta en el posnet (ver modules/cobro-tarjeta.js y docs/integracion-posnet) ----
+function setupSelectorPosnet() {
+  const sel = document.querySelector("#selector-posnet");
+  if (!sel) return;
+  sel.innerHTML = MODOS_POSNET.map((m) => `<option value="${m.id}">${m.nombre}</option>`).join("");
+  sel.value = modoPosnet();
+  sel.addEventListener("change", () => guardarModoPosnet(sel.value));
+}
+
+// Muestra la hoja del cobro y devuelve { aprobado, ... } cuando termina (aprobado, rechazado, cancelado,
+// expirado o cobrado a mano). Nunca deja la caja colgada: siempre hay Cancelar y una salida manual.
+function cobrarConTarjetaUI(importeCentavos) {
+  const modo = modoPosnet();
+  const referencia = crypto.randomUUID();
+  return new Promise((resolve) => {
+    let terminado = false;
+    const control = new AbortController();
+    const cerrar = (resultado) => {
+      if (terminado) return;
+      terminado = true;
+      setSheetOpen(dom.posnetSheet, dom.posnetBackdrop, false);
+      for (const b of [dom.posnetCobrado, dom.posnetManual, dom.posnetReintentar]) b.hidden = true;
+      resolve({ referencia, modo, ...resultado });
+    };
+    const mostrar = (texto, claseEstado = "") => {
+      dom.posnetEstado.textContent = texto;
+      dom.posnetEstado.className = `posnet-estado ${claseEstado}`.trim();
+    };
+    const botones = ({ cobrado = false, manual = false, reintentar = false } = {}) => {
+      dom.posnetCobrado.hidden = !cobrado;
+      dom.posnetManual.hidden = !manual;
+      dom.posnetReintentar.hidden = !reintentar;
+    };
+    const arrancar = async () => {
+      botones();
+      if (modo === "guiado") {
+        dom.posnetModoTexto.textContent = "Ingresá este importe en el posnet y cobrá.";
+        mostrar("Cobrá en el posnet y después tocá “Cobrado”.");
+        botones({ cobrado: true });
+        return;
+      }
+      dom.posnetModoTexto.textContent = modo === "simulador" ? "Posnet simulado (pruebas)." : "Posnet integrado.";
+      mostrar(TEXTO_ESTADO.enviado);
+      try {
+        const r = await cobrarPorApi({
+          importeCentavos, referencia, modo, signal: control.signal,
+          onEstado: (estado, datos) => mostrar(TEXTO_ESTADO[estado] || estado, estado === "reintentando" ? "es-aviso" : "")
+        });
+        if (terminado) return;
+        if (r.aprobado) { cerrar({ aprobado: true, estado: "aprobado", autorizacion: r.autorizacion, ultimos4: r.ultimos4, marca: r.marca, referenciaOperacion: r.referenciaOperacion }); return; }
+        if (r.estado === "cancelado" && control.signal.aborted) { cerrar({ aprobado: false, estado: "cancelado", motivo: "Cobro cancelado." }); return; }
+        mostrar(`${TEXTO_ESTADO[r.estado] || "Sin resultado"}${r.motivo ? `: ${r.motivo}` : ""}`, "es-error");
+        botones({ manual: true, reintentar: true });
+      } catch (error) {
+        if (terminado) return;
+        mostrar(`No se pudo hablar con el posnet: ${error.message}`, "es-error");
+        botones({ manual: true, reintentar: true });
+      }
+    };
+    dom.posnetImporte.textContent = centsToMoney(importeCentavos);
+    dom.posnetCobrado.onclick = () => cerrar({ aprobado: true, estado: "manual", manual: true });
+    dom.posnetManual.onclick = () => cerrar({ aprobado: true, estado: "manual", manual: true });
+    dom.posnetReintentar.onclick = () => arrancar();
+    dom.posnetCancelar.onclick = () => { control.abort(); setTimeout(() => cerrar({ aprobado: false, estado: "cancelado", motivo: "Cobro cancelado." }), 400); };
+    setSheetOpen(dom.posnetSheet, dom.posnetBackdrop, true);
+    arrancar();
+  });
+}
+
 async function handleConfirmSale() {
   if (saleInProgress) return;
   if (!carritoTodoToGoo() && !formaPagoActual) {
@@ -3778,6 +3857,18 @@ async function handleConfirmSale() {
   try {
     saleInProgress = true;
     dom.confirmSale.disabled = true;
+    // Con el posnet activado, el pago con tarjeta se cobra ANTES de registrar la venta: solo una
+    // operacion aprobada (o cobrada a mano) confirma la venta. Cancelar no deja nada registrado.
+    let cobro = null;
+    if (!carritoTodoToGoo() && formaPagoActual === "tarjeta" && modoPosnet() !== "ninguno") {
+      setSaleMessage("Cobrando con tarjeta...");
+      cobro = await cobrarConTarjetaUI(cartTotalCentavosActual);
+      if (!cobro.aprobado) {
+        setSaleMessage(cobro.estado === "cancelado" ? "Cobro cancelado: la venta NO se registró." : `Cobro no completado: la venta NO se registró. ${cobro.motivo || ""}`.trim());
+        renderCurrentCart();
+        return;
+      }
+    }
     setSaleMessage("Confirmando venta...");
     const items = Array.from(cart.values()).map((item) => ({
       productId: item.id,
@@ -3791,7 +3882,9 @@ async function handleConfirmSale() {
     cart.clear();
     resetVuelto();
     setSaleMessage(
-      sale.saleMode === "togoo" ? `Venta ToGoo #${sale.saleId} confirmada.` : `Venta #${sale.saleId} confirmada.`,
+      sale.saleMode === "togoo"
+        ? `Venta ToGoo #${sale.saleId} confirmada.`
+        : `Venta #${sale.saleId} confirmada.${cobro?.autorizacion ? ` Tarjeta aut. ${cobro.autorizacion}${cobro.ultimos4 ? ` (···${cobro.ultimos4})` : ""}.` : ""}`,
       true
     );
     setCartMode("normal");
@@ -5184,6 +5277,7 @@ export async function startApp() {
   }
   iniciarTema();
   setupSelectorTema();
+  setupSelectorPosnet();
   bindAuthEvents();
   const session = await restoreSession();
   if (session) {
