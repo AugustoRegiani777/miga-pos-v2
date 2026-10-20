@@ -141,7 +141,8 @@ export function renderPedidoProductPicker(container, products, cartItems, onIncr
       </div>
     `;
     row.querySelector("strong").textContent = product.nombre;
-    row.querySelector(".pedido-product-stock").textContent = `Stock: ${product.stockActual}`;
+    // Lo que se compra hecho (medialunas) no lleva stock de producto: su stock es el del insumo.
+    row.querySelector(".pedido-product-stock").textContent = product.controlaStock ? `Stock: ${product.stockActual}` : "";
     row.querySelector("span").textContent = cantidad;
     row.querySelector('[data-action="plus"]').addEventListener("click", () => onIncrement(product));
     row.querySelector('[data-action="minus"]').addEventListener("click", () => onDecrement(product.id));

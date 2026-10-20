@@ -3528,11 +3528,14 @@ async function renderPedidosView() {
 // son sabores reales — esas no controlan stock, asi que se excluyen con
 // controlaStock) mas un par de productos puntuales de bolleria que tambien
 // se piden por encargo.
-const PEDIDO_PRODUCT_IDS_EXTRA = new Set(["chipa", "medialunas"]);
+// Ademas de los sandwiches, la boleria que se encarga: medialunas, mini medialunas (y las ddl),
+// rolls de canela y chipa. Las medialunas se compran hechas (no controlan stock propio: su stock es
+// el del insumo), por eso estas NO exigen controlaStock.
+const PEDIDO_PRODUCT_IDS_EXTRA = new Set(["medialunas", "mini-croissant", "mini-croissant-ddl", "cinnamon-roll", "chipa"]);
 
 function sandwichProductsForPedido() {
   return products.filter((p) =>
-    p.activo && p.controlaStock && (p.categoriaId === "sandwiches" || PEDIDO_PRODUCT_IDS_EXTRA.has(p.id))
+    p.activo && ((p.controlaStock && p.categoriaId === "sandwiches") || PEDIDO_PRODUCT_IDS_EXTRA.has(p.id))
   );
 }
 
@@ -3724,8 +3727,9 @@ async function handleMarcarListo(pedido) {
     const result = await marcarPedidoListo(pedido);
     setFlash(`Pedido de ${pedido.clienteNombre} preparado. Stock descontado.`, "success");
     // Sync fire-and-forget — nunca bloquea el flujo de pedidos
-    const { venta, detalles, movimientosStock } = result._syncPayload;
+    const { venta, detalles, movimientosStock, movimientosInsumos } = result._syncPayload;
     trySyncVenta({ venta, detalles, movimientosStock }).catch(() => {});
+    if (movimientosInsumos?.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
   } catch (error) {
     setFlash(error.message || "No se pudo marcar el pedido como listo.", "error");
   } finally {

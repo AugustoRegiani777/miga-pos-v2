@@ -1,5 +1,6 @@
 import { requestToPromise, withStores } from "../db/idb.js";
 import { currentTime, todayISO } from "../utils/format.js";
+import { deductInsumosInTx } from "./aprovisionamiento.js";
 import {
   fetchPedidos as fetchPedidosSb,
   pushPedido,
@@ -118,7 +119,7 @@ export async function marcarPedidoListo(pedido) {
   const ok = await patchEstadoPedido(pedido.id, "listo", "pendiente", { listo_en: now });
   if (!ok) throw new Error("Este pedido ya fue marcado como listo.");
 
-  return withStores(["productos", "ventas", "detalle_venta", "movimientos_stock"], "readwrite", async (stores) => {
+  return withStores(["productos", "ventas", "detalle_venta", "movimientos_stock", "insumos", "recetas", "movimientos_insumos", "configuracion"], "readwrite", async (stores) => {
     const lines = [];
     let computedTotalCentavos = 0;
 
@@ -190,6 +191,16 @@ export async function marcarPedidoListo(pedido) {
       }
     }
 
+    // Lo que no controla stock de producto (medialunas, cafe...) descuenta su insumo al entregarse el
+    // pedido, igual que en una venta de Caja (ver confirmSale). Los sandwiches y la boleria que si lo
+    // controlan ya descontaron sus insumos al producirse.
+    const itemsParaInsumos = lines
+      .filter((l) => !l.product.controlaStock)
+      .map((l) => ({ productId: l.product.id, quantity: l.quantity, opcionNombre: null }));
+    const movimientosInsumos = itemsParaInsumos.length > 0
+      ? await deductInsumosInTx(stores, itemsParaInsumos, saleId, fecha, now, ventaUuid)
+      : [];
+
     if (ajusteCentavos !== 0) {
       const ajuste = {
         uuid: crypto.randomUUID(),
@@ -218,7 +229,8 @@ export async function marcarPedidoListo(pedido) {
           clienteNombre: pedido.clienteNombre
         },
         detalles: _detallesSync,
-        movimientosStock: _movStockSync
+        movimientosStock: _movStockSync,
+        movimientosInsumos
       }
     };
   });
