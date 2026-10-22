@@ -195,7 +195,6 @@ export function renderCierre(container, datos, opciones = {}) {
             <small class="cierre-coincide" id="cierre-tarjeta-coincide" aria-live="polite" hidden></small>
           </div>
         </div>
-        ${campoDinero("cierre-fondo-manana", "Dejás en el cajón para mañana (€)", centavosAInput(v ? (v.fondoMananaCentavos ?? null) : base.fondoCentavos), "Opcional. Mañana se propone como apertura.")}
       </div>
     </section>
 
@@ -204,6 +203,10 @@ export function renderCierre(container, datos, opciones = {}) {
       <div id="cierre-cuenta"></div>
       <div id="cierre-alertas"></div>
       <label class="cierre-field" for="cierre-nota"><span>Comentarios si hay desajuste</span><input type="text" id="cierre-nota" maxlength="200" value="${esc(v?.nota || "")}" placeholder="opcional"></label>
+      <div class="cierre-contar">
+        ${campoDinero("cierre-fondo-manana", "Dejás en el cajón para mañana (€)", centavosAInput(v ? (v.fondoMananaCentavos ?? null) : base.fondoCentavos), "Opcional. Mañana se propone como apertura.")}
+      </div>
+      <div class="cierre-row" id="cierre-retiro-fila" hidden><span>Retirás del cajón <small class="cal-muted">(lo contado − lo que dejás)</small></span><strong id="cierre-retiro-valor"></strong></div>
       ${vigenteHtml}
       <button type="button" class="primary-button" id="cierre-guardar">Cerrar caja</button>
     </section>
@@ -228,6 +231,11 @@ export function renderCierre(container, datos, opciones = {}) {
     container.querySelector("#cierre-guardar").disabled = Boolean(r.error);
     dato("cierre-contado-coincide", r.cuenta.efectivo.real, r.cuenta.efectivo.sistema);
     dato("cierre-tarjeta-coincide", r.cuenta.tarjeta.real, r.cuenta.tarjeta.sistema);
+    const { contadoCentavos: cont, fondoMananaCentavos: deja } = r.form;
+    const fila = container.querySelector("#cierre-retiro-fila");
+    const hay = Number.isFinite(cont) && Number.isFinite(deja);
+    fila.hidden = !hay;
+    if (hay) container.querySelector("#cierre-retiro-valor").textContent = centsToMoney(Math.max(0, cont - deja));
     return r;
   };
   container.oninput = recalcular;
