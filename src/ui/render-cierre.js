@@ -173,11 +173,11 @@ function htmlResumenDelDia(cuenta, hay, total, vendido) {
     <div class="cierre-otros">
       ${hay ? `
       <div class="cierre-row"><span>Ingresos totales del día <small class="cal-muted">(efectivo + posnet)</small></span><strong>${centsToMoney(total.real)}</strong></div>
-      <div class="cierre-row"><span>− Apertura <small class="cal-muted">(ya estaba en el cajón, no es venta)</small></span><strong>${centsToMoney(cuenta.apertura.real)}</strong></div>
-      ${cuenta.ingresos.real ? `<div class="cierre-row"><span>− Otros ingresos al cajón <small class="cal-muted">(entraron sin ser venta)</small></span><strong>${centsToMoney(cuenta.ingresos.real)}</strong></div>` : ""}
-      ${cuenta.pagos.real ? `<div class="cierre-row"><span>+ Pagos en efectivo <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>${centsToMoney(cuenta.pagos.real)}</strong></div>` : ""}
-      ${cuenta.retiros.real ? `<div class="cierre-row"><span>+ Retiros <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>${centsToMoney(cuenta.retiros.real)}</strong></div>` : ""}` : ""}
-      <div class="cierre-row cierre-row--total"><span>= Vendido en el local ${hay ? "" : `<small class="cal-muted">(según el sistema, falta contar)</small>`}</span><strong>${centsToMoney(vendido)}</strong></div>
+      <div class="cierre-row resta"><span>Apertura <small>(ya estaba en el cajón, no es venta)</small></span><strong>−${centsToMoney(cuenta.apertura.real)}</strong></div>
+      ${cuenta.ingresos.real ? `<div class="cierre-row resta"><span>Otros ingresos al cajón <small>(entraron sin ser venta)</small></span><strong>−${centsToMoney(cuenta.ingresos.real)}</strong></div>` : ""}
+      ${cuenta.pagos.real ? `<div class="cierre-row"><span>Pagos en efectivo <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>+${centsToMoney(cuenta.pagos.real)}</strong></div>` : ""}
+      ${cuenta.retiros.real ? `<div class="cierre-row"><span>Retiros <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>+${centsToMoney(cuenta.retiros.real)}</strong></div>` : ""}` : ""}
+      <div class="cierre-row cierre-row--total resultado"><span>Vendido en el local ${hay ? "" : `<small class="cal-muted">(según el sistema, falta contar)</small>`}</span><strong>${centsToMoney(vendido)}</strong></div>
       <div class="cierre-row"><span>Glovo y otras plataformas</span><strong>${centsToMoney(otros.glovoCentavos)}</strong></div>
       <div class="cierre-row"><span>Too Good To Go</span><strong>${centsToMoney(otros.tgtgCentavos)}</strong></div>
       <div class="cierre-row"><span>Bizum <small class="cal-muted">(pedidos)</small></span><strong>${centsToMoney(otros.bizumCentavos)}</strong></div>
@@ -295,8 +295,8 @@ export function renderCierre(container, datos, opciones = {}) {
       </div>
       <div id="cierre-retiro-fila" class="cierre-otros" hidden>
         <div class="cierre-row"><span>Efectivo en el cajón <small class="cal-muted">(lo que contaste)</small></span><strong id="cierre-retiro-efectivo"></strong></div>
-        <div class="cierre-row"><span>− Dejás para mañana</span><strong id="cierre-retiro-deja"></strong></div>
-        <div class="cierre-row cierre-row--total"><span>= Retirás del cajón <small class="cal-muted">(del posnet no se retira nada)</small></span><strong id="cierre-retiro-valor"></strong></div>
+        <div class="cierre-row resta"><span>Dejás para mañana</span><strong id="cierre-retiro-deja"></strong></div>
+        <div class="cierre-row cierre-row--total"><span>Retirás del cajón <small class="cal-muted">(del posnet no se retira nada)</small></span><strong id="cierre-retiro-valor"></strong></div>
       </div>
       ${vigenteHtml}
       <button type="button" class="primary-button" id="cierre-guardar">${v ? "Guardar cambios del cierre" : "Cerrar caja"}</button>
@@ -331,7 +331,7 @@ export function renderCierre(container, datos, opciones = {}) {
     fila.hidden = !hay;
     if (hay) {
       container.querySelector("#cierre-retiro-efectivo").textContent = centsToMoney(cont);
-      container.querySelector("#cierre-retiro-deja").textContent = centsToMoney(deja);
+      container.querySelector("#cierre-retiro-deja").textContent = "−" + centsToMoney(deja);
       container.querySelector("#cierre-retiro-valor").textContent = centsToMoney(Math.max(0, cont - deja));
     }
     return r;

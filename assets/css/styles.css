@@ -4624,3 +4624,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .cierre-trans .trans-pago { min-height: 44px; display: flex; align-items: center; }
 .cierre-pago-select { min-height: 44px; min-width: 8.5rem; }
 .trans-detalle { margin: 0 0 8px; padding-left: 20px; color: var(--muted); font-size: 0.9rem; }
+
+/* Lineas que restan en la cuenta: letra y signo en rojo */
+.cierre-row.resta, .cierre-row.resta small, .cierre-row.resta strong { color: var(--txt-out, #a32020); }
+.cierre-row.resta small { opacity: 0.85; }
+
+/* El resultado de la cuenta (lo vendido) se destaca: recuadro, letra grande y en verde */
+.cierre-row.resultado { margin-top: 10px; padding: 12px 14px; border: 2px solid var(--txt-ok, #20734d); border-radius: 10px; background: var(--page); font-size: 1.2rem; font-weight: 800; }
+.cierre-row.resultado strong, .cierre-row.resultado span { color: var(--txt-ok, #20734d); }
+.cierre-row.resultado small { font-size: 0.75rem; font-weight: 400; }
