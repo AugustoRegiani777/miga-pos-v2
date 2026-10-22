@@ -158,10 +158,17 @@ function htmlTransacciones(ventas, editable) {
   };
   return `
     <section class="panel-card">
-      <h2>Transacciones del día <small class="cal-muted">${ventas.length}</small></h2>
+      <details class="cierre-trans-lista"${transAbierto ? " open" : ""}>
+      <summary><h2>Transacciones del día <small class="cal-muted">${ventas.length}</small></h2></summary>
       <p class="caja-comentario">${editable ? "Si una venta se cargó con otra forma de pago, cambiala acá. Solo cambia la forma de pago: el total y el stock quedan igual." : "Para corregir una forma de pago, tocá Editar cierre."}</p>
       <ul class="cierre-transacciones">${ventas.map(fila).join("")}</ul>
+      </details>
     </section>`;
+}
+// La lista arranca cerrada; si se abre, sigue abierta al volver a dibujar (ej. despues de corregir un pago).
+let transAbierto = false;
+function enlazarTransacciones(container) {
+  container.querySelectorAll("details.cierre-trans-lista").forEach((d) => d.addEventListener("toggle", () => { transAbierto = d.open; }));
 }
 
 // Lo vendido en el dia: informacion global, aparte del cierre de la caja (va despues del boton de cerrar).
@@ -254,6 +261,7 @@ export function renderCierre(container, datos, opciones = {}) {
     renderCuentaEnDosColumnas(document.createElement("div"), cuentaCerrada, container.querySelector("#cierre-resumen"));
     container.oninput = null;
     container.onchange = null;
+    enlazarTransacciones(container);
     container.querySelector("#cierre-editar").onclick = () => { enEdicion.add(datos.fecha); renderCierre(container, datos, opciones); };
     return null;
   }
@@ -307,6 +315,7 @@ export function renderCierre(container, datos, opciones = {}) {
     ${opciones.historialContainer ? "" : historialHtml}`;
   if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
 
+  enlazarTransacciones(container);
   const cuentaEl = container.querySelector("#cierre-cuenta");
   const dato = (id, real, sistema) => {
     const info = container.querySelector(`#${id}`);

@@ -4636,3 +4636,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 
 .cierre-row--grande { font-size: 1.2rem; font-weight: 700; }
 .cierre-row--grande small { font-size: 0.75rem; font-weight: 400; }
+
+.cierre-trans-lista > summary { cursor: pointer; list-style: none; display: flex; align-items: center; min-height: 48px; }
+.cierre-trans-lista > summary::-webkit-details-marker { display: none; }
+.cierre-trans-lista > summary h2 { margin: 0; }
+.cierre-trans-lista > summary::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: 1.2rem; transition: transform .15s; }
+.cierre-trans-lista[open] > summary::after { transform: rotate(180deg); }
