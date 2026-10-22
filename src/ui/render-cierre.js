@@ -129,7 +129,13 @@ export function renderCuentaEnDosColumnas(el, cuenta) {
     </table>
     <h3 class="cierre-otros-titulo">Resumen del día <small class="cal-muted">lo vendido, aparte del cierre</small></h3>
     <div class="cierre-otros">
-      <div class="cierre-row"><span>Vendido en el local <small class="cal-muted">(efectivo + posnet, sin la apertura)</small></span><strong>${centsToMoney(vendido)}</strong></div>
+      ${hay ? `
+      <div class="cierre-row"><span>Total contado <small class="cal-muted">(efectivo + posnet)</small></span><strong>${centsToMoney(total.real)}</strong></div>
+      <div class="cierre-row"><span>− Apertura <small class="cal-muted">(ya estaba en el cajón, no es venta)</small></span><strong>${centsToMoney(cuenta.apertura.real)}</strong></div>
+      ${cuenta.ingresos.real ? `<div class="cierre-row"><span>− Otros ingresos al cajón <small class="cal-muted">(entraron sin ser venta)</small></span><strong>${centsToMoney(cuenta.ingresos.real)}</strong></div>` : ""}
+      ${cuenta.pagos.real ? `<div class="cierre-row"><span>+ Pagos en efectivo <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>${centsToMoney(cuenta.pagos.real)}</strong></div>` : ""}
+      ${cuenta.retiros.real ? `<div class="cierre-row"><span>+ Retiros <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>${centsToMoney(cuenta.retiros.real)}</strong></div>` : ""}` : ""}
+      <div class="cierre-row cierre-row--total"><span>= Vendido en el local ${hay ? "" : `<small class="cal-muted">(según el sistema, falta contar)</small>`}</span><strong>${centsToMoney(vendido)}</strong></div>
       <div class="cierre-row"><span>Glovo y otras plataformas</span><strong>${centsToMoney(otros.glovoCentavos)}</strong></div>
       <div class="cierre-row"><span>Too Good To Go</span><strong>${centsToMoney(otros.tgtgCentavos)}</strong></div>
       <div class="cierre-row"><span>Bizum <small class="cal-muted">(pedidos)</small></span><strong>${centsToMoney(otros.bizumCentavos)}</strong></div>
