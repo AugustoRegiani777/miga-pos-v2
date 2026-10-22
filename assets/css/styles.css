@@ -4633,3 +4633,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .cierre-row.resultado { margin-top: 10px; padding: 12px 14px; border: 2px solid var(--txt-ok, #20734d); border-radius: 10px; background: var(--page); font-size: 1.2rem; font-weight: 800; }
 .cierre-row.resultado strong, .cierre-row.resultado span { color: var(--txt-ok, #20734d); }
 .cierre-row.resultado small { font-size: 0.75rem; font-weight: 400; }
+
+.cierre-row--grande { font-size: 1.2rem; font-weight: 700; }
+.cierre-row--grande small { font-size: 0.75rem; font-weight: 400; }

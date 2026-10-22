@@ -172,7 +172,7 @@ function htmlResumenDelDia(cuenta, hay, total, vendido) {
     <h2>Lo vendido del día <small class="cal-muted">aparte del cierre</small></h2>
     <div class="cierre-otros">
       ${hay ? `
-      <div class="cierre-row"><span>Ingresos totales del día <small class="cal-muted">(efectivo + posnet)</small></span><strong>${centsToMoney(total.real)}</strong></div>
+      <div class="cierre-row cierre-row--grande"><span>Dinero total del día <small class="cal-muted">(fondo de caja + efectivo + posnet)</small></span><strong>${centsToMoney(total.real)}</strong></div>
       <div class="cierre-row resta"><span>Apertura <small>(ya estaba en el cajón, no es venta)</small></span><strong>−${centsToMoney(cuenta.apertura.real)}</strong></div>
       ${cuenta.ingresos.real ? `<div class="cierre-row resta"><span>Otros ingresos al cajón <small>(entraron sin ser venta)</small></span><strong>−${centsToMoney(cuenta.ingresos.real)}</strong></div>` : ""}
       ${cuenta.pagos.real ? `<div class="cierre-row"><span>Pagos en efectivo <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>+${centsToMoney(cuenta.pagos.real)}</strong></div>` : ""}
