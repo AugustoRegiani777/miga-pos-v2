@@ -33,6 +33,10 @@ const esLugarDePruebas = typeof location !== "undefined" && esEntornoDePrueba(lo
 // el catalogo real (pasó el 14/10/2026: reactivaron los productos que el dueño habia ocultado).
 export const ENTORNO_DE_PRUEBA = Boolean(esLugarDePruebas && STAGING_URL);
 
+// Lugar de pruebas SIN base: la app corre sin conexion y no hay a quien pedirle usuario y contraseña,
+// asi que la pantalla de login se saltea (ver startApp). Nunca es true en unodemigapos.netlify.app.
+export const PRUEBA_SIN_BASE = Boolean(esLugarDePruebas && !STAGING_URL);
+
 const SUPABASE_URL = esLugarDePruebas ? (STAGING_URL || SIN_BASE_DE_PRUEBAS) : PROD_URL;
 // Con que base habla este dispositivo. Cada dispositivo anota la suya (ver
 // utils/base-de-datos.js) para no mezclar lo guardado de una base con otra.
