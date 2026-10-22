@@ -231,7 +231,8 @@ export function diferenciaDeArqueo({ contadoCentavos = null, esperadoCentavos = 
 // anteriores son historial (un arqueo mal contado se corrige appendeando otro).
 // Misma convencion que cierresVigentesPorFecha.
 export function arqueoVigente(arqueos) {
-  const ordenados = lista(arqueos).sort(porTiempo("creadoEn"));
+  // Los controles a media jornada (tipo "control") no son un cierre: se ignoran aca.
+  const ordenados = lista(arqueos).filter((a) => a.tipo !== "control").sort(porTiempo("creadoEn"));
   return ordenados.length ? ordenados[ordenados.length - 1] : null;
 }
 

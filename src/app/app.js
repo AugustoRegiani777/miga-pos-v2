@@ -2,8 +2,9 @@ import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, bu
 import { cargarPanel } from "../modules/panel.js";
 import { cargarCierre, guardarCierre } from "../modules/cierre.js";
 import { renderCierre, calcularDesdeFormulario } from "../ui/render-cierre.js";
-import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon } from "../modules/caja-dia.js";
-import { renderPasoApertura, renderPasoPagos, renderPasoRetiros, renderCuentaCajon } from "../ui/render-caja-pasos.js";
+import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon, registrarControlDeCaja, controlesDelDia } from "../modules/caja-dia.js";
+import { getPersonalCaja, agregarPersonaCaja, pullPersonalCajaDesdeNube, ultimaPersonaCaja, recordarPersonaCaja } from "../modules/personal-caja.js";
+import { renderPasoApertura, renderPasoSalidas, renderCuentaRapida } from "../ui/render-caja-pasos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF } from "../db/supabase.js";
@@ -163,7 +164,8 @@ async function pullCatalogoCompleto() {
     pullProveedoresDesdeNube(),
     pullVariantesGruposDesdeNube(),
     pullCombosConfigDesdeNube(),
-    pullMermasDesdeNube()
+    pullMermasDesdeNube(),
+    pullPersonalCajaDesdeNube()
   ]);
   // Antes de reconciliar el stock: corrige envases mal puestos (una sola vez)
   // sobre lo que acabo de bajar la nube, porque algunos insumos no vienen del
@@ -593,10 +595,8 @@ const dom = {
   provEditDias: document.querySelector("#prov-edit-dias"),
   provEditLead: document.querySelector("#prov-edit-lead"),
   cajaPasoApertura: document.querySelector("#caja-paso-apertura"),
-  cajaPasoPagos: document.querySelector("#caja-paso-pagos"),
-  cajaPasoRetiros: document.querySelector("#caja-paso-retiros"),
+  cajaPasoSalidas: document.querySelector("#caja-paso-salidas"),
   cajaPasoCuenta: document.querySelector("#caja-paso-cuenta"),
-  cierreHistorialRoot: document.querySelector("#cierre-historial-root"),
   cajaPagoSheet: document.querySelector("#caja-pago-sheet"),
   cajaPagoBackdrop: document.querySelector("#caja-pago-backdrop"),
   cajaPagoForm: document.querySelector("#caja-pago-form"),
@@ -606,14 +606,21 @@ const dom = {
   cajaPagoProveedores: document.querySelector("#caja-pago-proveedores"),
   cajaPagoForma: document.querySelector("#caja-pago-forma"),
   closeCajaPago: document.querySelector("#close-caja-pago"),
-  cajaRetiroSheet: document.querySelector("#caja-retiro-sheet"),
-  cajaRetiroBackdrop: document.querySelector("#caja-retiro-backdrop"),
-  cajaRetiroForm: document.querySelector("#caja-retiro-form"),
-  cajaRetiroImporte: document.querySelector("#caja-retiro-importe"),
-  cajaRetiroMotivo: document.querySelector("#caja-retiro-motivo"),
+  cajaSalidaTipo: document.querySelector("#caja-salida-tipo"),
+  cajaPagoImporteLabel: document.querySelector("#caja-pago-importe-label"),
+  cajaPagoConceptoLabel: document.querySelector("#caja-pago-concepto-label"),
   cajaRetiroCuenta: document.querySelector("#caja-retiro-cuenta"),
   cajaRetiroQueda: document.querySelector("#caja-retiro-queda"),
-  closeCajaRetiro: document.querySelector("#close-caja-retiro"),
+  cajaControlSheet: document.querySelector("#caja-control-sheet"),
+  cajaControlBackdrop: document.querySelector("#caja-control-backdrop"),
+  cajaControlForm: document.querySelector("#caja-control-form"),
+  cajaControlCuenta: document.querySelector("#caja-control-cuenta"),
+  cajaControlImporte: document.querySelector("#caja-control-importe"),
+  cajaControlDif: document.querySelector("#caja-control-dif"),
+  cajaControlQuien: document.querySelector("#caja-control-quien"),
+  cajaControlOtra: document.querySelector("#caja-control-otra"),
+  cajaControlOtraAgregar: document.querySelector("#caja-control-otra-agregar"),
+  closeCajaControl: document.querySelector("#close-caja-control"),
   provEditEntrega: document.querySelector("#prov-edit-entrega"),
   provProdSheet: document.querySelector("#prov-prod-sheet"),
   provProdBackdrop: document.querySelector("#prov-prod-backdrop"),
@@ -710,6 +717,7 @@ const dom = {
   pedidoPrecioTotal: document.querySelector("#pedido-precio-total"),
   pedidoComboHint: document.querySelector("#pedido-combo-hint"),
   pedidoPagado: document.querySelector("#pedido-pagado"),
+  pedidoFormaPago: document.querySelector("#pedido-forma-pago"),
   pedidoCortadoMitad: document.querySelector("#pedido-cortado-mitad"),
   pedidoAclaraciones: document.querySelector("#pedido-aclaraciones"),
   confirmPedido: document.querySelector("#confirm-pedido")
@@ -3412,7 +3420,24 @@ async function manejarAnular(event) {
 
 // El mini cierre del retiro: cuanto deberia haber, cuanto se saca, cuanto
 // queda. Se repinta mientras se tipea, que es cuando sirve para decidir.
+function tipoDeSalida() {
+  return dom.cajaSalidaTipo.querySelector(".tipo-btn.active")?.dataset.tipo || "pago";
+}
+
+// La hoja de salida es una sola: segun sea Pago o Retiro cambian los campos y los textos.
+function aplicarTipoDeSalida() {
+  const retiro = tipoDeSalida() === "retiro";
+  document.querySelectorAll("#caja-pago-form [data-solo]").forEach((el) => {
+    el.hidden = el.dataset.solo !== (retiro ? "retiro" : "pago");
+  });
+  dom.cajaPagoImporteLabel.textContent = retiro ? "\u00bfCu\u00e1nto sac\u00e1s? (\u20ac)" : "\u00bfCu\u00e1nto pagaste? (\u20ac)";
+  dom.cajaPagoConceptoLabel.textContent = retiro ? "\u00bfPara qu\u00e9?" : "\u00bfQu\u00e9 compraste?";
+  dom.cajaPagoConcepto.placeholder = retiro ? "Al banco, a la caja fuerte..." : "Verdura, pan, caf\u00e9...";
+  if (retiro) pintarCuentaRetiro();
+}
+
 function pintarCuentaRetiro() {
+  if (tipoDeSalida() !== "retiro") return;
   if (!cajaFotoActual) { dom.cajaRetiroCuenta.innerHTML = ""; dom.cajaRetiroQueda.textContent = ""; return; }
   const f = cajaFotoActual;
   const fila = (texto, valor) => `<div class="cierre-row"><span>${texto}</span><strong>${valor}</strong></div>`;
@@ -3422,7 +3447,7 @@ function pintarCuentaRetiro() {
     fila("Pagos y retiros de hoy", centsToMoney(f.movimientosCentavos)) +
     `<div class="cierre-row cierre-row--total"><span>Deber\u00eda haber ahora</span><strong>${centsToMoney(f.esperadoCentavos)}</strong></div>`;
 
-  const euros = parseDecimal(dom.cajaRetiroImporte.value);
+  const euros = parseDecimal(dom.cajaPagoImporte.value);
   if (!Number.isFinite(euros) || euros <= 0) { dom.cajaRetiroQueda.textContent = ""; return; }
   const saca = Math.round(euros * 100);
   const queda = f.esperadoCentavos - saca;
@@ -3430,25 +3455,58 @@ function pintarCuentaRetiro() {
   dom.cajaRetiroQueda.classList.toggle("es-negativo", queda < 0);
 }
 
+// Contar la caja en cualquier momento (ver registrarControlDeCaja): muestra lo que el sistema dice que
+// deberia haber AHORA, se escribe lo que hay, se marca quien cuenta y queda guardado con la hora.
+async function pintarPersonasDelControl(seleccionada = "") {
+  const personas = await getPersonalCaja();
+  const elegida = seleccionada || ultimaPersonaCaja();
+  dom.cajaControlQuien.innerHTML = personas
+    .map((p) => `<button type="button" class="tipo-btn${p === elegida ? " active" : ""}" data-persona="${p.replace(/"/g, "&quot;")}">${p}</button>`)
+    .join("");
+}
+
+function pintarDiferenciaDelControl() {
+  const f = cajaFotoActual;
+  if (!f) { dom.cajaControlDif.textContent = ""; return; }
+  const euros = parseDecimal(dom.cajaControlImporte.value);
+  if (!Number.isFinite(euros) || euros < 0) { dom.cajaControlDif.textContent = ""; dom.cajaControlDif.className = "caja-retiro-queda"; return; }
+  const dif = Math.round(euros * 100) - f.esperadoCentavos;
+  dom.cajaControlDif.textContent = dif === 0
+    ? `Cuadra: es lo que dice el sistema (${centsToMoney(f.esperadoCentavos)}).`
+    : `El sistema decía ${centsToMoney(f.esperadoCentavos)}: ${dif > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(dif))}.`;
+  dom.cajaControlDif.className = `caja-retiro-queda${dif === 0 ? "" : " es-negativo"}`;
+}
+
+async function abrirControlDeCaja() {
+  await refrescarPasosCaja().catch(() => {});
+  const f = cajaFotoActual;
+  const fila = (texto, valor, clase = "") => `<div class="cierre-row ${clase}"><span>${texto}</span><strong>${valor}</strong></div>`;
+  dom.cajaControlCuenta.innerHTML = f
+    ? fila("Debería haber ahora (según el sistema)", centsToMoney(f.esperadoCentavos), "cierre-row--total")
+    : "";
+  dom.cajaControlForm.reset();
+  dom.cajaControlDif.textContent = "";
+  await pintarPersonasDelControl();
+  setSheetOpen(dom.cajaControlSheet, dom.cajaControlBackdrop, true);
+  enfocar(dom.cajaControlImporte);
+}
+
 async function refrescarPasosCaja() {
-  const [apertura, movimientos, totales] = await Promise.all([
+  const [apertura, movimientos, controles] = await Promise.all([
     aperturaDelDia(cierreFecha),
     movimientosDelDia(cierreFecha),
-    totalesDelDia(cierreFecha)
+    controlesDelDia(cierreFecha).catch(() => [])
   ]);
-  const vivos = movimientos.filter((m) => m.tipo !== "ajuste" || m.categoria === "apertura" ? m.tipo !== "ajuste" : true);
+  // Los ajustes (ej. la correccion del fondo de apertura) no son pagos ni retiros: no van en la lista.
+  const salidas = movimientos.filter((m) => m.tipo === "gasto" || m.tipo === "retiro");
+  const vivas = salidas.filter((m) => !m.anulado && m.afectaCajon !== false);
+  const suma = (tipo) => vivas.filter((m) => m.tipo === tipo).reduce((t, m) => t + Math.abs(Number(m.importeCentavos) || 0), 0);
   renderPasoApertura(dom.cajaPasoApertura, { apertura });
-  renderPasoPagos(dom.cajaPasoPagos, {
-    pagos: vivos.filter((m) => m.tipo === "gasto"),
-    totalCentavos: totales.gastosCentavos
-  });
+  renderPasoSalidas(dom.cajaPasoSalidas, { salidas, pagosCentavos: suma("gasto"), retirosCentavos: suma("retiro") });
 
   const ventas = cierreDatos?.ventas || [];
   cajaFotoActual = await fotoDelCajon({ fecha: cierreFecha, ventas }).catch(() => null);
-  renderPasoRetiros(dom.cajaPasoRetiros, {
-    retiros: vivos.filter((m) => m.tipo === "retiro")
-  });
-  renderCuentaCajon(dom.cajaPasoCuenta, { foto: cajaFotoActual });
+  renderCuentaRapida(dom.cajaPasoCuenta, { foto: cajaFotoActual, controles });
 }
 
 async function renderCierreView() {
@@ -3489,36 +3547,44 @@ function setCierreFecha(fecha) {
 
 async function handleGuardarCierre() {
   if (cierreGuardando || !cierreDatos) return;
-  const r = calcularDesdeFormulario(dom.cierreRoot, cierreDatos.ventas);
+  const r = calcularDesdeFormulario(dom.cierreRoot, cierreDatos);
   if (r.error) { setFlash(r.error, "error"); return; }
-  const { calculo: c, form: f } = r;
-  const resumen = c.diferenciaCentavos === 0 ? "La caja cuadra." : c.diferenciaCentavos > 0 ? `Sobran ${centsToMoney(c.diferenciaCentavos)}.` : `Faltan ${centsToMoney(-c.diferenciaCentavos)}.`;
+  const { cuenta: c, form: f, base } = r;
+  const dif = c.efectivo.diferencia;
+  const difP = c.tarjeta.diferencia;
+  const texto = (d, nombre) => (d === 0 ? `${nombre} cuadra` : `${nombre}: ${d > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(d))}`);
+  const resumen = `${texto(dif, "Efectivo")}. ${texto(difP, "Posnet")}.`;
   const confirmado = await confirmDialog({
     title: "Cerrar caja",
-    message: `Cierre del ${cierreDatos.fecha}: ventas ${centsToMoney(c.ventasTotalCentavos)}, esperado en cajón ${centsToMoney(c.esperadoEfectivoCentavos)}, contado ${centsToMoney(f.contadoCentavos)}. ${resumen}${cierreDatos.vigente ? " Ya había un cierre de este día: este queda como versión nueva y el anterior se conserva." : ""}`,
+    message: `Cierre del ${cierreDatos.fecha}. Cierre del día real ${centsToMoney(c.cierre.real)} (el sistema decía ${centsToMoney(c.cierre.sistema)}). Efectivo contado ${centsToMoney(f.contadoCentavos)} (sistema ${centsToMoney(c.efectivo.sistema)}); posnet ${centsToMoney(f.tarjetaCentavos)} (sistema ${centsToMoney(c.tarjeta.sistema)}). ${resumen}${cierreDatos.vigente ? " Ya había un cierre de este día: este queda como versión nueva y el anterior se conserva." : ""}`,
     acceptText: "Cerrar caja"
   });
   if (!confirmado) return;
   cierreGuardando = true;
   try {
+    const salidasNetas = Math.max(0, base.pagosCentavos + base.retirosCentavos - base.ingresosCentavos);
     await guardarCierre({
       fecha: cierreDatos.fecha,
-      ventasTotalCentavos: c.ventasTotalCentavos,
-      tickets: c.tickets,
-      tgtgCentavos: c.tgtgCentavos,
-      tgtgEnCajon: f.tgtgEnCajon,
-      fondoInicialCentavos: f.fondoCentavos ?? 0,
+      ventasTotalCentavos: cierreDatos.ventas.reduce((t, v) => t + (v.totalCentavos || 0), 0),
+      tickets: cierreDatos.ventas.length,
+      tgtgCentavos: c.otrosIngresos.tgtgCentavos,
+      tgtgEnCajon: false,
+      fondoInicialCentavos: base.fondoCentavos,
       tarjetaCentavos: f.tarjetaCentavos,
-      plataformasCentavos: f.plataformasCentavos ?? 0,
-      retirosCentavos: f.retirosCentavos ?? 0,
-      retirosNota: f.retirosNota,
+      tarjetaSistemaCentavos: c.tarjeta.sistema,
+      plataformasCentavos: c.otrosIngresos.glovoCentavos,
+      bizumCentavos: c.otrosIngresos.bizumCentavos,
+      retirosCentavos: salidasNetas,
+      retirosNota: base.auto.retirosNota,
       contadoCentavos: f.contadoCentavos,
       fondoMananaCentavos: f.fondoMananaCentavos,
-      esperadoEfectivoCentavos: c.esperadoEfectivoCentavos,
-      diferenciaCentavos: c.diferenciaCentavos,
+      // El esperado del efectivo es el del SISTEMA (apertura + cobrado - salidas): la diferencia es contado - sistema.
+      esperadoEfectivoCentavos: c.efectivo.sistema,
+      diferenciaCentavos: dif,
       nota: f.nota
     });
-    setFlash(`Caja cerrada. ${resumen}`, c.nivel === "grande" ? "warning" : "success");
+    const grande = c.efectivo.nivel === "grande" || c.tarjeta.nivel === "grande";
+    setFlash(`Caja cerrada. ${resumen}`, grande ? "warning" : "success");
     await renderCierreView();
   } catch (error) {
     setFlash(error.message || "No se pudo guardar el cierre.", "error");
@@ -3637,6 +3703,7 @@ function openNuevoPedidoSheet() {
   dom.pedidoHoraRetiro.value = "";
   dom.pedidoPrecioTotal.value = "";
   dom.pedidoPagado.checked = false;
+  setFormaPagoPedido("efectivo");
   dom.pedidoCortadoMitad.checked = false;
   dom.pedidoAclaraciones.value = "";
   dom.pedidoSheetTitle.textContent = "Nuevo pedido";
@@ -3666,12 +3733,21 @@ function openEditarPedidoSheet(pedido) {
   dom.pedidoHoraRetiro.value = `${String(retiro.getHours()).padStart(2, "0")}:${String(retiro.getMinutes()).padStart(2, "0")}`;
   dom.pedidoPrecioTotal.value = (pedido.totalCentavos / 100).toFixed(2);
   dom.pedidoPagado.checked = pedido.pagado;
+  setFormaPagoPedido(pedido.formaPago || "efectivo");
   dom.pedidoCortadoMitad.checked = pedido.cortadoMitad;
   dom.pedidoAclaraciones.value = pedido.aclaraciones || "";
   dom.pedidoSheetTitle.textContent = "Editar pedido";
   dom.confirmPedido.textContent = "Guardar cambios";
   renderPedidoSheetContents();
   setPedidoSheetOpen(true);
+}
+
+// Medio de pago del pedido (efectivo | tarjeta | bizum), en la hoja de pedido.
+function formaPagoDelPedido() {
+  return dom.pedidoFormaPago.querySelector(".tipo-btn.active")?.dataset.forma || "efectivo";
+}
+function setFormaPagoPedido(forma) {
+  dom.pedidoFormaPago.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b.dataset.forma === forma));
 }
 
 function closePedidoSheet() {
@@ -3695,6 +3771,7 @@ async function handleCrearPedido(event) {
       clienteNombre: dom.pedidoClienteNombre.value,
       fechaHoraRetiro: new Date(`${dom.pedidoFechaRetiro.value}T${horaRetiro}:00`).toISOString(),
       pagado: dom.pedidoPagado.checked,
+      formaPago: formaPagoDelPedido(),
       cortadoMitad: dom.pedidoCortadoMitad.checked,
       aclaraciones: dom.pedidoAclaraciones.value,
       totalCentavos,
@@ -4003,6 +4080,10 @@ function bindEvents() {
   dom.closePedidoSheet.addEventListener("click", closePedidoSheet);
   dom.pedidoSheetBackdrop.addEventListener("click", closePedidoSheet);
   dom.pedidoForm.addEventListener("submit", handleCrearPedido);
+  dom.pedidoFormaPago.addEventListener("click", (e) => {
+    const b = e.target.closest(".tipo-btn");
+    if (b) setFormaPagoPedido(b.dataset.forma);
+  });
   dom.pedidoPrecioTotal.addEventListener("input", () => {
     pedidoPrecioEditadoManualmente = true;
   });
@@ -4991,13 +5072,14 @@ function bindEvents() {
     } finally { cajaMovEnCurso = false; }
   });
 
-  // Paso 2: pagos.
-  dom.cajaPasoPagos.addEventListener("click", async (event) => {
-    if (event.target.closest("#caja-nuevo-pago")) {
+  // Paso 2: pagos y retiros (una sola seccion y una sola hoja).
+  dom.cajaPasoSalidas.addEventListener("click", async (event) => {
+    if (event.target.closest("#caja-nueva-salida")) {
       dom.cajaPagoForm.reset();
+      dom.cajaSalidaTipo.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b.dataset.tipo === "pago"));
       dom.cajaPagoForma.querySelectorAll(".tipo-btn").forEach((b, i) => b.classList.toggle("active", i === 0));
-      // Los proveedores que ya existen, como sugerencia: no hace falta
-      // escribir "Delicias Vegetales" entero cada vez.
+      aplicarTipoDeSalida();
+      // Los proveedores que ya existen, como sugerencia: no hace falta escribir "Delicias Vegetales" entero.
       const proveedores = await getAll("proveedores").catch(() => []);
       dom.cajaPagoProveedores.innerHTML = proveedores
         .filter((x) => x.activo !== false)
@@ -5014,26 +5096,39 @@ function bindEvents() {
     const btn = e.target.closest(".tipo-btn");
     if (btn) dom.cajaPagoForma.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b === btn));
   });
+  dom.cajaSalidaTipo.addEventListener("click", (e) => {
+    const btn = e.target.closest(".tipo-btn");
+    if (!btn) return;
+    dom.cajaSalidaTipo.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    aplicarTipoDeSalida();
+  });
+  // En un retiro, "se saca tanto, queda tanto" se actualiza mientras se tipea.
+  dom.cajaPagoImporte.addEventListener("input", pintarCuentaRetiro);
 
   dom.cajaPagoForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (cajaMovEnCurso) return;
     try {
       cajaMovEnCurso = true;
-      // En centavos enteros: con flotantes, 0.1 + 0.2 no da 0.3 y eso termina
-      // siendo un descuadre de caja que nadie sabe explicar.
+      const retiro = tipoDeSalida() === "retiro";
+      // En centavos enteros: con flotantes, 0.1 + 0.2 no da 0.3 y eso termina siendo un descuadre de
+      // caja que nadie sabe explicar.
       const euros = parseDecimal(dom.cajaPagoImporte.value);
-      if (!Number.isFinite(euros) || euros <= 0) throw new Error("Poné cuánto pagaste.");
+      if (!Number.isFinite(euros) || euros <= 0) throw new Error(retiro ? "Poné cuánto sacás." : "Poné cuánto pagaste.");
       const concepto = dom.cajaPagoConcepto.value.trim();
-      if (!concepto) throw new Error("Escribí qué compraste, aunque sea corto.");
-      await anotarPago({
-        importeCentavos: Math.round(euros * 100),
-        concepto,
-        aQuien: dom.cajaPagoQuien.value,
-        enEfectivo: formaPagoElegida() === "efectivo",
-        fecha: cierreFecha
-      });
-      setFlash("Pago anotado.", "success");
+      if (!concepto) throw new Error(retiro ? "Escribí para qué lo sacás." : "Escribí qué compraste, aunque sea corto.");
+      if (retiro) {
+        await anotarRetiro({ importeCentavos: Math.round(euros * 100), motivo: concepto, fecha: cierreFecha });
+      } else {
+        await anotarPago({
+          importeCentavos: Math.round(euros * 100),
+          concepto,
+          aQuien: dom.cajaPagoQuien.value,
+          enEfectivo: formaPagoElegida() === "efectivo",
+          fecha: cierreFecha
+        });
+      }
+      setFlash(retiro ? "Retiro anotado." : "Pago anotado.", "success");
       setSheetOpen(dom.cajaPagoSheet, dom.cajaPagoBackdrop, false);
       await refrescarPasosCaja();
       await renderCierreView();
@@ -5042,39 +5137,47 @@ function bindEvents() {
     } finally { cajaMovEnCurso = false; }
   });
 
-  // Paso 3: retiros, con el mini cierre.
-  dom.cajaPasoRetiros.addEventListener("click", async (event) => {
-    if (event.target.closest("#caja-nuevo-retiro")) {
-      dom.cajaRetiroForm.reset();
-      pintarCuentaRetiro();
-      setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, true);
-      enfocar(dom.cajaRetiroImporte);
-      return;
-    }
-    await manejarAnular(event);
+  // Paso 3: cuenta rapida de efectivo — contar la caja en cualquier momento y dejarlo marcado.
+  dom.cajaPasoCuenta.addEventListener("click", (event) => {
+    if (event.target.closest("#caja-contar-ahora")) abrirControlDeCaja();
   });
-  dom.closeCajaRetiro.addEventListener("click", () => setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, false));
-  dom.cajaRetiroBackdrop.addEventListener("click", () => setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, false));
-  // "Se retiró tanto, queda tanto": el numero se actualiza mientras se tipea,
-  // que es cuando sirve para decidir cuanto sacar.
-  dom.cajaRetiroImporte.addEventListener("input", pintarCuentaRetiro);
-
-  dom.cajaRetiroForm.addEventListener("submit", async (event) => {
+  dom.closeCajaControl.addEventListener("click", () => setSheetOpen(dom.cajaControlSheet, dom.cajaControlBackdrop, false));
+  dom.cajaControlBackdrop.addEventListener("click", () => setSheetOpen(dom.cajaControlSheet, dom.cajaControlBackdrop, false));
+  dom.cajaControlImporte.addEventListener("input", pintarDiferenciaDelControl);
+  dom.cajaControlQuien.addEventListener("click", (e) => {
+    const btn = e.target.closest(".tipo-btn");
+    if (btn) dom.cajaControlQuien.querySelectorAll(".tipo-btn").forEach((b) => b.classList.toggle("active", b === btn));
+  });
+  dom.cajaControlOtraAgregar.addEventListener("click", async () => {
+    try {
+      const nombre = dom.cajaControlOtra.value.trim();
+      await agregarPersonaCaja(nombre);
+      dom.cajaControlOtra.value = "";
+      await pintarPersonasDelControl(nombre);
+    } catch (error) { setFlash(error.message || "No se pudo agregar.", "error"); }
+  });
+  dom.cajaControlForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (cajaMovEnCurso) return;
     try {
       cajaMovEnCurso = true;
-      const euros = parseDecimal(dom.cajaRetiroImporte.value);
-      if (!Number.isFinite(euros) || euros <= 0) throw new Error("Poné cuánto sacás.");
-      const motivo = dom.cajaRetiroMotivo.value.trim();
-      if (!motivo) throw new Error("Escribí para qué lo sacás.");
-      await anotarRetiro({ importeCentavos: Math.round(euros * 100), motivo, fecha: cierreFecha });
-      setFlash("Retiro anotado.", "success");
-      setSheetOpen(dom.cajaRetiroSheet, dom.cajaRetiroBackdrop, false);
+      const euros = parseDecimal(dom.cajaControlImporte.value);
+      if (!Number.isFinite(euros) || euros < 0) throw new Error("Poné cuánta plata hay en la caja.");
+      const quien = dom.cajaControlQuien.querySelector(".tipo-btn.active")?.dataset.persona || "";
+      if (!quien) throw new Error("Marcá quién cuenta la caja.");
+      const control = await registrarControlDeCaja({
+        contadoCentavos: Math.round(euros * 100),
+        contadoPor: quien,
+        fecha: cierreFecha,
+        ventas: cierreDatos?.ventas || []
+      });
+      recordarPersonaCaja(quien);
+      const dif = Number(control.diferenciaCentavos) || 0;
+      setFlash(`Chequeado por ${quien}: ${dif === 0 ? "la caja cuadra" : `${dif > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(dif))}`}.`, dif === 0 ? "success" : "warning");
+      setSheetOpen(dom.cajaControlSheet, dom.cajaControlBackdrop, false);
       await refrescarPasosCaja();
-      await renderCierreView();
     } catch (error) {
-      setFlash(error.message || "No se pudo anotar el retiro.", "error");
+      setFlash(error.message || "No se pudo marcar.", "error");
     } finally { cajaMovEnCurso = false; }
   });
 

@@ -72,8 +72,9 @@ const deFecha = (filas, fecha) => filas.filter((f) => f.fecha === fecha);
 // nunca necesita un UPDATE.
 function conEstado(sesiones, arqueos) {
   return sesiones.map((s) => {
+    // Un control a media jornada no cierra el turno: solo cuentan los arqueos de relevo o final.
     const suyos = arqueos
-      .filter((a) => a.sesionUuid === s.uuid)
+      .filter((a) => a.sesionUuid === s.uuid && a.tipo !== "control")
       .sort((a, b) => String(a.creadoEn).localeCompare(String(b.creadoEn)));
     // El arqueo vigente es el mas reciente; los anteriores son historial (asi
     // se corrige un recuento mal contado, appendeando otro).
@@ -342,7 +343,9 @@ export async function registrarArqueoCaja({
   diferenciaCentavos,
   nota = ""
 }) {
-  if (!["relevo", "final"].includes(tipo)) throw new Error(`Tipo de arqueo invalido: ${tipo}.`);
+  // "control": se cuenta el efectivo a media jornada ("a las 12 conte y habia tanto"). NO cierra el turno ni
+  // el dia: no deja nada "para el que sigue" y no genera ningun retiro.
+  if (!["relevo", "final", "control"].includes(tipo)) throw new Error(`Tipo de arqueo invalido: ${tipo}.`);
   const contado = centavosEnteros(contadoCentavos, "El efectivo contado");
   if (contado < 0) throw new Error("El efectivo contado no puede ser negativo.");
   const deja = dejaCentavos == null ? null : centavosEnteros(dejaCentavos, "Lo que queda en el cajon");

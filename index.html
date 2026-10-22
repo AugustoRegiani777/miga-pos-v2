@@ -256,6 +256,15 @@
               <input id="pedido-precio-total" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
             </label>
             <p class="pedido-combo-hint" id="pedido-combo-hint" hidden></p>
+            <div class="quantity-field">
+              <span>Medio de pago</span>
+              <div class="caja-tipo-btns" id="pedido-forma-pago" role="group" aria-label="Medio de pago del pedido">
+                <button type="button" class="tipo-btn active" data-forma="efectivo">Efectivo</button>
+                <button type="button" class="tipo-btn" data-forma="tarjeta">Tarjeta</button>
+                <button type="button" class="tipo-btn" data-forma="bizum">Bizum</button>
+              </div>
+              <p class="campo-ayuda">Efectivo y tarjeta se cobran en el local y entran a la caja. Bizum no: va como ingreso aparte.</p>
+            </div>
             <div class="pedido-checks-row">
               <label class="pedido-check-field">
                 <input id="pedido-pagado" type="checkbox">
@@ -440,29 +449,38 @@
       </section>
 
 
-      <!-- Sheet: anotar un PAGO (paso 2) -->
+      <!-- Sheet: anotar una SALIDA de efectivo (pago o retiro) y contar la caja -->
       <section class="production-sheet-backdrop" id="caja-pago-backdrop" hidden></section>
       <section class="form-section stock-adjust-sheet" id="caja-pago-sheet" aria-hidden="true">
         <form id="caja-pago-form" class="stock-form" novalidate>
           <div class="production-sheet-header">
-            <div><h2>Anotar un pago</h2></div>
+            <div><h2>Salida de efectivo</h2></div>
             <button type="button" class="ghost-button compact" id="close-caja-pago">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
+            <div class="quantity-field">
+              <span>&iquest;Qu&eacute; es?</span>
+              <div class="caja-tipo-btns" id="caja-salida-tipo" role="group">
+                <button type="button" class="tipo-btn active" data-tipo="pago">Pago (compra)</button>
+                <button type="button" class="tipo-btn" data-tipo="retiro">Retiro</button>
+              </div>
+            </div>
             <label class="quantity-field">
-              <span>&iquest;Cu&aacute;nto pagaste? (&euro;)</span>
+              <span id="caja-pago-importe-label">&iquest;Cu&aacute;nto pagaste? (&euro;)</span>
               <input id="caja-pago-importe" type="text" inputmode="decimal" placeholder="0,00" required>
             </label>
+            <div data-solo="retiro" id="caja-retiro-cuenta" class="caja-cuenta" hidden></div>
+            <p data-solo="retiro" id="caja-retiro-queda" class="caja-retiro-queda" hidden></p>
             <label class="quantity-field">
-              <span>&iquest;Qu&eacute; compraste?</span>
+              <span id="caja-pago-concepto-label">&iquest;Qu&eacute; compraste?</span>
               <input id="caja-pago-concepto" type="text" placeholder="Verdura, pan, caf&eacute;..." required>
             </label>
-            <label class="quantity-field">
+            <label class="quantity-field" data-solo="pago">
               <span>&iquest;A qui&eacute;n? <small>(opcional)</small></span>
               <input id="caja-pago-quien" type="text" list="caja-pago-proveedores" placeholder="Delicias Vegetales, el del taxi...">
               <datalist id="caja-pago-proveedores"></datalist>
             </label>
-            <div class="quantity-field">
+            <div class="quantity-field" data-solo="pago">
               <span>&iquest;C&oacute;mo lo pagaste?</span>
               <div class="caja-tipo-btns" id="caja-pago-forma">
                 <button type="button" class="tipo-btn active" data-forma="efectivo">En efectivo</button>
@@ -477,28 +495,31 @@
         </form>
       </section>
 
-      <!-- Sheet: retirar plata, con el mini cierre (paso 3) -->
-      <section class="production-sheet-backdrop" id="caja-retiro-backdrop" hidden></section>
-      <section class="form-section stock-adjust-sheet" id="caja-retiro-sheet" aria-hidden="true">
-        <form id="caja-retiro-form" class="stock-form" novalidate>
+      <section class="production-sheet-backdrop" id="caja-control-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="caja-control-sheet" aria-hidden="true">
+        <form id="caja-control-form" class="stock-form" novalidate>
           <div class="production-sheet-header">
-            <div><h2>Retirar plata del caj&oacute;n</h2></div>
-            <button type="button" class="ghost-button compact" id="close-caja-retiro">Cerrar</button>
+            <div><h2>Contar la caja ahora</h2><p>Queda marcado con la hora y qui&eacute;n cont&oacute;. No cierra nada.</p></div>
+            <button type="button" class="ghost-button compact" id="close-caja-control">Cerrar</button>
           </div>
           <div class="sheet-scroll-body">
-            <div id="caja-retiro-cuenta" class="caja-cuenta"></div>
+            <div id="caja-control-cuenta" class="caja-cuenta"></div>
             <label class="quantity-field">
-              <span>&iquest;Cu&aacute;nto sac&aacute;s? (&euro;)</span>
-              <input id="caja-retiro-importe" type="text" inputmode="decimal" placeholder="0,00" required>
+              <span>&iquest;Cu&aacute;nta plata hay en la caja? (&euro;)</span>
+              <input id="caja-control-importe" type="text" inputmode="decimal" placeholder="0,00" required>
             </label>
-            <p id="caja-retiro-queda" class="caja-retiro-queda"></p>
-            <label class="quantity-field">
-              <span>&iquest;Para qu&eacute;?</span>
-              <input id="caja-retiro-motivo" type="text" placeholder="Al banco, a la caja fuerte..." required>
-            </label>
+            <p id="caja-control-dif" class="caja-retiro-queda" aria-live="polite"></p>
+            <div class="quantity-field">
+              <span>&iquest;Qui&eacute;n cuenta?</span>
+              <div class="caja-tipo-btns" id="caja-control-quien" role="group"></div>
+              <div class="caja-control-otra">
+                <input id="caja-control-otra" type="text" placeholder="Otra persona..." maxlength="30">
+                <button type="button" class="ghost-button compact" id="caja-control-otra-agregar">+ Agregar</button>
+              </div>
+            </div>
           </div>
           <div class="sheet-footer">
-            <button class="primary-button" type="submit">Guardar</button>
+            <button class="primary-button" type="submit">Marcar como chequeado</button>
           </div>
         </form>
       </section>
@@ -511,8 +532,7 @@
       </div>
 
       <div id="caja-paso-apertura"></div>
-      <div id="caja-paso-pagos"></div>
-      <div id="caja-paso-retiros"></div>
+      <div id="caja-paso-salidas"></div>
       <div id="caja-paso-cuenta"></div>
 
       <div id="cierre-root" class="panel-root" aria-live="polite"></div>

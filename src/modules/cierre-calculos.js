@@ -105,7 +105,7 @@ export function desgloseFormaPago(ventas) {
   const suma = (forma) => ventas
     .filter((v) => v.saleMode !== "togoo" && (v.formaPago || "efectivo") === forma)
     .reduce((total, v) => total + (v.totalCentavos || 0), 0);
-  return { efectivoCentavos: suma("efectivo"), tarjetaCentavos: suma("tarjeta"), glovoCentavos: suma("glovo") };
+  return { efectivoCentavos: suma("efectivo"), tarjetaCentavos: suma("tarjeta"), glovoCentavos: suma("glovo"), bizumCentavos: suma("bizum") };
 }
 
 // Lo que el sistema YA SABE del dia y puede poner solo en el cierre. La persona
@@ -155,6 +155,7 @@ export function armarCierreAutomatico({ ventas = [], apertura = null, movimiento
     fondoCentavos,
     tarjetaCentavos: sistema.tarjetaCentavos,
     plataformasCentavos: sistema.glovoCentavos,
+    bizumCentavos: sistema.bizumCentavos,
     efectivoSistemaCentavos: sistema.efectivoCentavos,
     salidas,
     salidasTotalCentavos,
@@ -163,5 +164,74 @@ export function armarCierreAutomatico({ ventas = [], apertura = null, movimiento
     retirosNota,
     // Mañana se arranca con lo mismo que hoy, salvo que quien cierra decida otra cosa.
     fondoMananaCentavos: fondoCentavos
+  };
+}
+
+// ---------------------------------------------------------------------------
+// La cuenta del cierre en DOS COLUMNAS: lo REAL (lo que se conto y lo que dice el Postnet) contra lo que
+// dice el SISTEMA (lo que registro la Caja). La gracia es el contraste: asi se ve si dio de mas o de
+// menos y se pueden pulir errores (del sistema o de como se usa), sin mezclar las dos cuentas.
+//
+//   Sistema:  efectivo esperado = apertura + ventas en efectivo + ingresos - pagos - retiros
+//             tarjeta          = ventas con tarjeta registradas por la Caja
+//   Real:     efectivo         = lo contado en el cajon
+//             tarjeta          = el cierre del Postnet
+//
+//   Cierre del dia (lo vendido en el local, en efectivo y tarjeta):
+//     real    = (contado - apertura - ingresos + pagos + retiros) + postnet real
+//     sistema = ventas en efectivo + ventas con tarjeta
+//   (las salidas se suman de vuelta: el efectivo que salio del cajon tambien se habia cobrado hoy)
+//
+// Otros ingresos (no entran al local ni a la caja): Glovo, Too Good To Go y Bizum. Se muestran aparte y
+// no cambian la cuenta de arriba.
+//
+// Siempre en centavos enteros. Un campo vacio (null) en el lado real = todavia sin contar.
+export function cuentaRealVsSistema({
+  ventas = [],
+  fondoCentavos = 0,
+  pagosCentavos = 0,
+  retirosCentavos = 0,
+  ingresosCentavos = 0,
+  contadoCentavos = null,
+  postnetRealCentavos = null
+} = {}) {
+  const sis = desgloseFormaPago(ventas);
+  const tgtgCentavos = suma(ventas.filter((v) => v.saleMode === "togoo"), (v) => v.totalCentavos || 0);
+  const salidas = pagosCentavos + retirosCentavos;
+
+  const efectivoSistema = fondoCentavos + sis.efectivoCentavos + ingresosCentavos - salidas;
+  const tarjetaSistema = sis.tarjetaCentavos;
+  const cierreSistema = sis.efectivoCentavos + sis.tarjetaCentavos;
+
+  const hayEfectivo = contadoCentavos !== null && contadoCentavos !== undefined;
+  const hayPostnet = postnetRealCentavos !== null && postnetRealCentavos !== undefined;
+  const efectivoReal = hayEfectivo ? contadoCentavos : null;
+  const tarjetaReal = hayPostnet ? postnetRealCentavos : null;
+  const cierreReal = hayEfectivo && hayPostnet
+    ? (contadoCentavos - fondoCentavos - ingresosCentavos + salidas) + postnetRealCentavos
+    : null;
+
+  const dif = (real, sistema) => (real === null ? null : real - sistema);
+  const nivel = (d) => (d === null ? null : d === 0 ? "ok" : Math.abs(d) <= 100 ? "chico" : "grande");
+  const difEfectivo = dif(efectivoReal, efectivoSistema);
+  const difTarjeta = dif(tarjetaReal, tarjetaSistema);
+  const difCierre = dif(cierreReal, cierreSistema);
+
+  return {
+    efectivo: { real: efectivoReal, sistema: efectivoSistema, diferencia: difEfectivo, nivel: nivel(difEfectivo) },
+    tarjeta: { real: tarjetaReal, sistema: tarjetaSistema, diferencia: difTarjeta, nivel: nivel(difTarjeta) },
+    pagos: { real: pagosCentavos, sistema: pagosCentavos },
+    retiros: { real: retirosCentavos, sistema: retirosCentavos },
+    apertura: { real: fondoCentavos, sistema: fondoCentavos },
+    ingresos: { real: ingresosCentavos, sistema: ingresosCentavos },
+    cierre: { real: cierreReal, sistema: cierreSistema, diferencia: difCierre, nivel: nivel(difCierre) },
+    otrosIngresos: {
+      glovoCentavos: sis.glovoCentavos,
+      tgtgCentavos,
+      bizumCentavos: sis.bizumCentavos,
+      totalCentavos: sis.glovoCentavos + tgtgCentavos + sis.bizumCentavos
+    },
+    // Todo lo que facturo el dia: el cierre real (o el del sistema si todavia no se conto) + otros ingresos.
+    facturacionTotalCentavos: (cierreReal ?? cierreSistema) + sis.glovoCentavos + tgtgCentavos + sis.bizumCentavos
   };
 }

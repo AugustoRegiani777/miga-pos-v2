@@ -17,6 +17,8 @@ function fmtRetiro(isoString) {
   return `${diaNombre} ${dia}/${mes} ${hora}`;
 }
 
+const NOMBRE_FORMA_PAGO = { efectivo: "Efectivo", tarjeta: "Tarjeta", bizum: "Bizum" };
+
 function estadoPill(estado) {
   if (estado === "entregado") return { className: "ok", label: "Entregado" };
   if (estado === "listo") return { className: "low", label: "Listo para retirar" };
@@ -32,7 +34,7 @@ export function formatPedidoTicket(pedido) {
     ...pedido.items.map((item) => `${item.cantidad}x ${item.nombre}`),
     "",
     `Total: ${centsToMoney(pedido.totalCentavos)}`,
-    pedido.pagado ? "Pagado" : "No pagado"
+    `${pedido.pagado ? "Pagado" : "No pagado"} · ${NOMBRE_FORMA_PAGO[pedido.formaPago] || "Efectivo"}`
   ];
   if (pedido.cortadoMitad) lineas.push("Cortado a la mitad");
   if (pedido.aclaraciones) lineas.push(`Aclaraciones: ${pedido.aclaraciones}`);
@@ -78,7 +80,7 @@ export function renderPedidosGrid(container, pedidos, { onMarcarListo, onMarcarE
     pillNode.textContent = pill.label;
     card.querySelector(".pedido-retiro").textContent = `Retira: ${fmtRetiro(pedido.fechaHoraRetiro)}`;
     card.querySelector(".pedido-precio").textContent = centsToMoney(pedido.totalCentavos);
-    card.querySelector(".pedido-pago").textContent = pedido.pagado ? "Pagado" : "No pagado";
+    card.querySelector(".pedido-pago").textContent = `${pedido.pagado ? "Pagado" : "No pagado"} · ${NOMBRE_FORMA_PAGO[pedido.formaPago] || "Efectivo"}`;
     if (pedido.cortadoMitad) card.querySelector(".pedido-cortado").hidden = false;
 
     const aclaracionesNode = card.querySelector(".pedido-aclaraciones");

@@ -812,6 +812,9 @@ export async function pushCierreCaja(c) {
     fondo_inicial_centavos: c.fondoInicialCentavos,
     tarjeta_centavos: c.tarjetaCentavos,
     tarjeta_origen: c.tarjetaOrigen || "manual",
+    // Las dos columnas nuevas (migracion 024): el lado "sistema" de la tarjeta y lo cobrado por Bizum.
+    tarjeta_sistema_centavos: c.tarjetaSistemaCentavos ?? null,
+    bizum_centavos: c.bizumCentavos || 0,
     plataformas_centavos: c.plataformasCentavos,
     retiros_centavos: c.retirosCentavos,
     retiros_nota: c.retirosNota || null,
@@ -954,7 +957,8 @@ export async function pushPedido({ pedido, detalles }) {
     pagado: pedido.pagado,
     cortado_mitad: pedido.cortadoMitad,
     aclaraciones: pedido.aclaraciones || null,
-    total_centavos: pedido.totalCentavos
+    total_centavos: pedido.totalCentavos,
+    forma_pago: pedido.formaPago || "efectivo"
   });
   const pedidoId = pedidoRow.id;
 
@@ -978,7 +982,8 @@ export async function updatePedido(pedidoId, pedido) {
     pagado: pedido.pagado,
     cortado_mitad: pedido.cortadoMitad,
     aclaraciones: pedido.aclaraciones || null,
-    total_centavos: pedido.totalCentavos
+    total_centavos: pedido.totalCentavos,
+    forma_pago: pedido.formaPago || "efectivo"
   });
 }
 

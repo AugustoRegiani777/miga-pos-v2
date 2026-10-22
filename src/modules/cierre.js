@@ -22,6 +22,8 @@ function mapCierreRemoto(r) {
     plataformasCentavos: r.plataformas_centavos,
     retirosCentavos: r.retiros_centavos,
     retirosNota: r.retiros_nota || "",
+    tarjetaSistemaCentavos: r.tarjeta_sistema_centavos ?? null,
+    bizumCentavos: r.bizum_centavos || 0,
     contadoCentavos: r.contado_centavos,
     fondoMananaCentavos: r.fondo_manana_centavos,
     esperadoEfectivoCentavos: r.esperado_efectivo_centavos,

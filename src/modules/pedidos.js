@@ -19,6 +19,8 @@ function mapPedidoRow(row) {
     cortadoMitad: row.cortado_mitad,
     aclaraciones: row.aclaraciones,
     totalCentavos: row.total_centavos,
+    // Con que se paga: efectivo y tarjeta se cobran en el local (entran a la caja); bizum no (ingreso aparte).
+    formaPago: row.forma_pago || "efectivo",
     estado: row.estado,
     creadoEn: row.creado_en,
     listoEn: row.listo_en,
@@ -40,7 +42,13 @@ export async function fetchPedidosDelDia() {
     .filter((p) => p.estado !== "entregado" || String(p.fechaHoraRetiro).slice(0, 10) === hoy);
 }
 
-function buildPedidoPayload({ clienteNombre, fechaHoraRetiro, pagado, cortadoMitad, aclaraciones, totalCentavos, items }) {
+export const FORMAS_DE_PAGO_PEDIDO = [
+  { id: "efectivo", nombre: "Efectivo" },
+  { id: "tarjeta", nombre: "Tarjeta" },
+  { id: "bizum", nombre: "Bizum" }
+];
+
+function buildPedidoPayload({ clienteNombre, fechaHoraRetiro, pagado, cortadoMitad, aclaraciones, totalCentavos, formaPago, items }) {
   const nombre = String(clienteNombre || "").trim();
   if (!nombre) throw new Error("Falta el nombre del cliente.");
   if (!fechaHoraRetiro) throw new Error("Falta la fecha y hora de retiro.");
@@ -61,7 +69,8 @@ function buildPedidoPayload({ clienteNombre, fechaHoraRetiro, pagado, cortadoMit
       pagado: !!pagado,
       cortadoMitad: !!cortadoMitad,
       aclaraciones: String(aclaraciones || "").trim(),
-      totalCentavos
+      totalCentavos,
+      formaPago: FORMAS_DE_PAGO_PEDIDO.some((f) => f.id === formaPago) ? formaPago : "efectivo"
     },
     detalles
   };
@@ -143,7 +152,7 @@ export async function marcarPedidoListo(pedido) {
     const saleId = await requestToPromise(
       stores.ventas.add({
         uuid: ventaUuid,
-        fecha, hora, totalCentavos, saleMode: "normal", formaPago: "efectivo", creadoEn: now,
+        fecha, hora, totalCentavos, saleMode: "normal", formaPago: pedido.formaPago || "efectivo", creadoEn: now,
         origen: "pedido",
         pedidoId: pedido.id,
         clienteNombre: pedido.clienteNombre
@@ -223,7 +232,7 @@ export async function marcarPedidoListo(pedido) {
       _syncPayload: {
         venta: {
           uuid: ventaUuid,
-          fecha, hora, totalCentavos, saleMode: "normal", formaPago: "efectivo", creadoEn: now,
+          fecha, hora, totalCentavos, saleMode: "normal", formaPago: pedido.formaPago || "efectivo", creadoEn: now,
           origen: "pedido",
           pedidoId: pedido.id,
           clienteNombre: pedido.clienteNombre

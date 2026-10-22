@@ -23,7 +23,8 @@ import {
   abrirSesionCaja,
   registrarMovimientoCaja,
   anularMovimientoCaja,
-  cargarCajaDelDia
+  cargarCajaDelDia,
+  registrarArqueoCaja
 } from "./caja-sesion.js";
 
 // El nombre con el que se abre la sesión implícita. La base exige un texto no
@@ -169,6 +170,14 @@ export async function fotoDelCajon({ fecha = todayISO(), ventas = [], retiroCent
   return {
     fondoCentavos: sesion?.fondoInicialCentavos || 0,
     ventasEfectivoCentavos: esperado.ventasEfectivoCentavos,
+    ventasTotalCentavos: esperado.ventasTotalCentavos,
+    ventasTarjetaCentavos: esperado.ventasTarjetaCentavos,
+    tickets: esperado.tickets,
+    // El desglose de lo que paso con el efectivo (magnitudes positivas), para la cuenta rapida.
+    pagosCentavos: esperado.neto?.gastosCentavos || 0,
+    retirosCentavos: esperado.neto?.retirosCentavos || 0,
+    ingresosCentavos: esperado.neto?.ingresosCentavos || 0,
+    ajustesCentavos: esperado.neto?.ajustesCentavos || 0,
     movimientosCentavos: esperado.movimientosCentavos,
     esperadoCentavos: esperado.esperadoCentavos,
     retiroCentavos: retiro,
@@ -209,4 +218,39 @@ export async function totalesDelDia(fecha = todayISO()) {
     if (m.afectaCajon !== false) netoCajonCentavos += importe;
   }
   return { gastosCentavos, retirosCentavos, ingresosCentavos, netoCajonCentavos, cantidad: vivos.length };
+}
+
+// Contar la caja en cualquier momento del dia y dejarlo marcado: a que hora, cuanto habia, cuanto deberia
+// haber segun el sistema EN ESE MOMENTO, y quien lo conto. Es un arqueo de tipo "control": no cierra nada.
+// Append-only: un control mal contado se corrige haciendo otro (los dos quedan en la lista).
+export async function registrarControlDeCaja({ contadoCentavos, contadoPor, nota = "", fecha = todayISO(), ventas = [] }) {
+  const quien = String(contadoPor || "").trim();
+  if (!quien) throw new Error("Marcá quién cuenta la caja.");
+  const sesion = await sesionDelDia(fecha);
+  const foto = await fotoDelCajon({ fecha, ventas });
+  const dif = diferenciaDeArqueo({ contadoCentavos, esperadoCentavos: foto.esperadoCentavos });
+  return await registrarArqueoCaja({
+    sesionUuid: sesion.uuid,
+    fecha,
+    tipo: "control",
+    contadoPor: quien,
+    contadoCentavos,
+    fondoInicialCentavos: foto.fondoCentavos,
+    ventasTotalCentavos: foto.ventasTotalCentavos,
+    ventasEfectivoCentavos: foto.ventasEfectivoCentavos,
+    ventasTarjetaCentavos: foto.ventasTarjetaCentavos,
+    tickets: foto.tickets,
+    movimientosCentavos: foto.movimientosCentavos,
+    esperadoCentavos: foto.esperadoCentavos,
+    diferenciaCentavos: dif.diferenciaCentavos ?? 0,
+    nota
+  });
+}
+
+// Los controles del dia, en el orden en que se hicieron.
+export async function controlesDelDia(fecha = todayISO()) {
+  const { arqueos } = await cargarCajaDelDia(fecha);
+  return arqueos
+    .filter((a) => a.tipo === "control")
+    .sort((a, b) => String(a.creadoEn).localeCompare(String(b.creadoEn)));
 }

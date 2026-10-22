@@ -46,71 +46,78 @@ export function renderPasoApertura(container, { apertura }) {
   );
 }
 
-// ----------------------------------------------------------------- 2. pagos
-export function renderPasoPagos(container, { pagos, totalCentavos }) {
-  const lista = pagos.length === 0
-    ? `<p class="empty-state">Todavía no anotaste ningún pago.</p>`
-    : pagos.map((m) => `
+// ------------------------------------------------------- 2. pagos y retiros (una sola seccion)
+// Pagar algo y retirar plata son la misma accion: sacar efectivo del cajon. Una lista, un boton.
+// Cada renglon dice si fue un pago (compra) o un retiro, y los pagos con tarjeta se marcan aparte
+// porque no salen del cajon.
+export function renderPasoSalidas(container, { salidas, pagosCentavos, retirosCentavos }) {
+  const lista = salidas.length === 0
+    ? `<p class="empty-state">Todavía no anotaste ninguna salida de efectivo.</p>`
+    : salidas.map((m) => {
+        const esRetiro = m.tipo === "retiro";
+        const etiqueta = esRetiro ? "Retiro" : (m.afectaCajon === false ? "Pago con tarjeta" : "Pago");
+        return `
         <div class="caja-mov-fila${m.anulado ? " anulado" : ""}">
           <div class="mov-motivo">
             <strong>${esc(m.motivo)}</strong>
-            <div class="cal-muted">${hora(m.ocurridoEn)}${m.afectaCajon === false ? " · con tarjeta" : " · en efectivo"}</div>
+            <div class="cal-muted">${hora(m.ocurridoEn)} · ${etiqueta}${m.afectaCajon === false ? " (no sale del cajón)" : ""}</div>
           </div>
           <span class="mov-importe sale">−${centsToMoney(Math.abs(Number(m.importeCentavos) || 0))}</span>
           ${m.anulado ? "" : `<button type="button" class="ghost-button compact" data-anular="${esc(m.uuid)}">Anular</button>`}
-        </div>`).join("");
-
+        </div>`;
+      }).join("");
+  const total = pagosCentavos + retirosCentavos;
   container.innerHTML = paso(
     2,
-    "Pagos",
-    pagos.length > 0 ? "hecho" : "pendiente",
-    `<p class="form-instruccion">Anotá lo que pagues <strong>cuando lo pagás</strong>: a quién, qué compraste y si fue en efectivo o con tarjeta.</p>
+    "Pagos y retiros",
+    salidas.length > 0 ? "hecho" : "pendiente",
+    `<p class="form-instruccion">Todo lo que sale de la caja en efectivo, cuando pasa: lo que pagás (compras, proveedores) y lo que retirás (al banco, a la caja fuerte).</p>
      ${lista}
-     ${pagos.length > 0 ? `<div class="caja-mov-total"><span>Pagaste hoy</span><span class="mov-importe sale">${centsToMoney(totalCentavos)}</span></div>` : ""}`,
-    `<button class="primary-button compact" type="button" id="caja-nuevo-pago">+ Anoté un pago</button>`
+     ${total > 0 ? `<div class="caja-mov-total"><span>Salió de la caja hoy <small class="cal-muted">(pagos ${centsToMoney(pagosCentavos)} · retiros ${centsToMoney(retirosCentavos)})</small></span><span class="mov-importe sale">${centsToMoney(total)}</span></div>` : ""}`,
+    `<button class="primary-button compact" type="button" id="caja-nueva-salida">+ Anotar salida de efectivo</button>`
   );
 }
 
-// --------------------------------------------------------------- 3. retiros
-export function renderPasoRetiros(container, { retiros, foto }) {
-  const lista = retiros.length === 0
-    ? `<p class="empty-state">No sacaste plata del cajón hoy.</p>`
-    : retiros.map((m) => `
-        <div class="caja-mov-fila${m.anulado ? " anulado" : ""}">
-          <div class="mov-motivo">
-            <strong>${esc(m.motivo)}</strong>
-            <div class="cal-muted">${hora(m.ocurridoEn)}</div>
-          </div>
-          <span class="mov-importe sale">−${centsToMoney(Math.abs(Number(m.importeCentavos) || 0))}</span>
-          ${m.anulado ? "" : `<button type="button" class="ghost-button compact" data-anular="${esc(m.uuid)}">Anular</button>`}
-        </div>`).join("");
-
-  container.innerHTML = paso(
-    3,
-    "Retiros",
-    retiros.length > 0 ? "hecho" : "pendiente",
-    `<p class="form-instruccion">Si sacás plata durante el día, anotalo acá y mirá cómo queda el cajón.</p>
-     ${lista}`,
-    `<button class="ghost-button compact" type="button" id="caja-nuevo-retiro">Retiré plata</button>`
-  );
-}
-
-// --------------------------------------------------- la cuenta del cajon (aparte)
-// El mini cierre: de dónde sale lo que debería haber. Sin este desglose el número es una
-// afirmación que no se puede discutir. Va en su PROPIA tarjeta, no adentro de Retiros: son
-// cosas distintas (anotar un retiro / mirar cómo está el cajón) y mezcladas confundían.
-export function renderCuentaCajon(container, { foto }) {
+// ------------------------------------------------------- 3. cuenta rapida de efectivo
+// La cuenta de la caja: de donde sale lo que deberia haber, mas los chequeos del dia. En cualquier momento
+// se puede contar la plata y dejarlo marcado (a que hora, cuanto habia y quien lo conto): "12 del mediodia,
+// cuento y marco que habia tanto". Es trazabilidad; no cierra nada.
+export function renderCuentaRapida(container, { foto, controles = [] }) {
   if (!foto) { container.innerHTML = ""; return; }
+  const fila = (texto, valor, clase = "") => `<div class="cierre-row ${clase}"><span>${texto}</span><strong>${valor}</strong></div>`;
+  const lineaControl = (c) => {
+    const dif = Number(c.diferenciaCentavos) || 0;
+    const clase = dif === 0 ? "ok" : Math.abs(dif) <= 100 ? "chico" : "grande";
+    const texto = dif === 0 ? "cuadra" : `${dif > 0 ? "sobran" : "faltan"} ${centsToMoney(Math.abs(dif))}`;
+    return `
+      <li class="caja-control">
+        <span class="caja-control-hora">${hora(c.contadoEn || c.creadoEn)}</span>
+        <span class="caja-control-quien">${esc(c.contadoPor)}</span>
+        <span>contó <strong>${centsToMoney(c.contadoCentavos)}</strong> <small class="cal-muted">(el sistema decía ${centsToMoney(c.esperadoCentavos)})</small></span>
+        <span class="cierre-diff-mini is-${clase}">${texto}</span>
+      </li>`;
+  };
   container.innerHTML = `
     <section class="caja-paso caja-paso--cuenta">
-      <div class="caja-paso-head"><h2>Cuenta del cajón</h2></div>
+      <div class="caja-paso-head">
+        <span class="caja-paso-num">3</span>
+        <h2>Cuenta rápida de efectivo</h2>
+        <button class="ghost-button compact" type="button" id="caja-contar-ahora">Contar la caja ahora</button>
+      </div>
       <div class="caja-paso-body">
         <div class="caja-cuenta">
-          <div class="cierre-row"><span>Abriste con</span><strong>${centsToMoney(foto.fondoCentavos)}</strong></div>
-          <div class="cierre-row"><span>Cobraste en efectivo</span><strong>+${centsToMoney(foto.ventasEfectivoCentavos)}</strong></div>
-          <div class="cierre-row"><span>Pagos y retiros</span><strong>${centsToMoney(foto.movimientosCentavos)}</strong></div>
-          <div class="cierre-row cierre-row--total"><span>Debería haber en el cajón</span><strong>${centsToMoney(foto.esperadoCentavos)}</strong></div>
+          ${fila("Abriste con", centsToMoney(foto.fondoCentavos))}
+          ${fila("Cobrado en efectivo", "+" + centsToMoney(foto.ventasEfectivoCentavos))}
+          ${foto.ingresosCentavos ? fila("Otros ingresos al cajón", "+" + centsToMoney(foto.ingresosCentavos)) : ""}
+          ${foto.pagosCentavos ? fila("Pagos", "−" + centsToMoney(foto.pagosCentavos)) : ""}
+          ${foto.retirosCentavos ? fila("Retiros", "−" + centsToMoney(foto.retirosCentavos)) : ""}
+          ${foto.ajustesCentavos ? fila("Ajustes", centsToMoney(foto.ajustesCentavos)) : ""}
+          ${fila("Debería haber en la caja", centsToMoney(foto.esperadoCentavos), "cierre-row--total")}
         </div>
+        <h3 class="caja-controles-titulo">Chequeos de hoy</h3>
+        ${controles.length
+          ? `<ul class="caja-controles">${controles.map(lineaControl).join("")}</ul>`
+          : `<p class="cal-muted">Todavía no contaste la caja hoy. Podés hacerlo en cualquier momento y queda marcado.</p>`}
       </div>
     </section>`;
 }

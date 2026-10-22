@@ -4573,3 +4573,33 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .posnet-estado.es-aviso { color: var(--txt-low); }
 .posnet-acciones { display: grid; gap: 10px; }
 .posnet-acciones button { min-height: 56px; font-size: 1.05rem; }
+
+/* ---- Cierre: contar con "lo que dice el sistema" al lado, y la cuenta en dos columnas ---- */
+.cierre-contar { display: grid; gap: 16px; }
+.cierre-contar-fila { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.cierre-sistema { display: grid; gap: 2px; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 10px; background: var(--page); }
+.cierre-sistema > span { font-size: 0.85rem; color: var(--muted); }
+.cierre-sistema > strong { font-size: 1.5rem; }
+.cierre-sistema small { color: var(--muted); }
+.cierre-tabla { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
+.cierre-tabla th, .cierre-tabla td { padding: 8px 6px; text-align: right; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.cierre-tabla thead th { font-size: 0.8rem; color: var(--muted); font-weight: 700; }
+.cierre-tabla thead th small { display: block; font-weight: 400; }
+.cierre-tabla tbody th { text-align: left; font-weight: 600; }
+.cierre-tabla .signo { display: inline-block; width: 1.1em; color: var(--muted); font-weight: 800; }
+.cierre-tabla tr.es-detalle th, .cierre-tabla tr.es-detalle td { color: var(--muted); font-weight: 400; }
+.cierre-tabla tr.es-total th, .cierre-tabla tr.es-total td { border-top: 2px solid var(--ink); border-bottom: 0; font-size: 1.15rem; font-weight: 800; }
+.cierre-tabla .dif { text-align: center; }
+.cierre-otros-titulo { margin: 14px 0 6px; font-size: 1rem; }
+.cierre-otros { margin-bottom: 8px; }
+.caja-controles-titulo { margin: 14px 0 6px; font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.caja-controles { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.caja-control { display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--page); }
+.caja-control-hora { font-weight: 800; font-variant-numeric: tabular-nums; }
+.caja-control-quien { font-weight: 700; color: var(--txt-teal); }
+.caja-control-otra { display: flex; gap: 8px; margin-top: 8px; }
+.caja-control-otra input { flex: 1; min-height: 44px; }
+@media (max-width: 700px) {
+  .cierre-contar-fila { grid-template-columns: 1fr; }
+  .caja-control { grid-template-columns: auto 1fr; }
+}
