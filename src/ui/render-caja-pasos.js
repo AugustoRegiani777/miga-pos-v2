@@ -34,7 +34,7 @@ export function renderPasoApertura(container, { apertura }) {
     abierta ? "hecho" : "ahora",
     abierta
       ? `<p class="caja-paso-resuelto">Abriste con <strong>${centsToMoney(apertura.fondoInicialCentavos)}</strong>${apertura.abiertaEn ? ` a las ${hora(apertura.abiertaEn)}` : ""}.</p>`
-      : `<p class="form-instruccion">Contá la plata que hay en el cajón antes de empezar. Es el punto de partida de todo lo demás.</p>
+      : `<p class="caja-comentario">Contá la plata que hay en el cajón antes de empezar. Es el punto de partida de todo lo demás.</p>
          <div class="caja-paso-form">
            <label class="quantity-field">
              <span>¿Con cuánta plata abrís? (€)</span>
@@ -71,7 +71,7 @@ export function renderPasoSalidas(container, { salidas, pagosCentavos, retirosCe
     2,
     "Pagos y retiros",
     salidas.length > 0 ? "hecho" : "pendiente",
-    `<p class="form-instruccion">Todo lo que sale de la caja en efectivo, cuando pasa: lo que pagás (compras, proveedores) y lo que retirás (al banco, a la caja fuerte).</p>
+    `<p class="caja-comentario">Todo lo que sale de la caja en efectivo, cuando pasa: lo que pagás (compras, proveedores) y lo que retirás (al banco, a la caja fuerte).</p>
      ${lista}
      ${total > 0 ? `<div class="caja-mov-total"><span>Salió de la caja hoy <small class="cal-muted">(pagos ${centsToMoney(pagosCentavos)} · retiros ${centsToMoney(retirosCentavos)})</small></span><span class="mov-importe sale">${centsToMoney(total)}</span></div>` : ""}`,
     `<button class="primary-button compact" type="button" id="caja-nueva-salida">+ Anotar salida de efectivo</button>`

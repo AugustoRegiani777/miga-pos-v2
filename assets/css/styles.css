@@ -4603,3 +4603,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   .cierre-contar-fila { grid-template-columns: 1fr; }
   .caja-control { grid-template-columns: auto 1fr; }
 }
+
+/* Comentario de ayuda en los pasos de caja/cierre: texto suelto, sin caja ni borde (la caja parecia un campo). */
+.caja-comentario {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+  line-height: 1.4;
+}

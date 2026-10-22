@@ -175,7 +175,7 @@ export function renderCierre(container, datos, opciones = {}) {
     ${aviso}
     <section class="panel-card">
       <h2><span class="caja-paso-num">4</span> Cerrar el día</h2>
-      <p class="form-instruccion">Contá la plata y anotá el cierre del posnet. Al lado de cada uno ves lo que dice el sistema.</p>
+      <p class="caja-comentario">Contá la plata y anotá el cierre del posnet. Al lado de cada uno ves lo que dice el sistema.</p>
       <div class="cierre-contar">
         <div class="cierre-contar-fila">
           ${campoDinero("cierre-contado", "Efectivo en caja: ¿cuánto hay? (€)", centavosAInput(v?.contadoCentavos ?? null))}
