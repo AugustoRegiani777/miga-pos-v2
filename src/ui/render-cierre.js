@@ -139,6 +139,12 @@ export function renderCuentaEnDosColumnas(el, cuenta) {
     <div class="cierre-row cierre-row--total"><span>Facturación total del día</span><strong>${centsToMoney(cuenta.facturacionTotalCentavos)}</strong></div>`;
 }
 
+// Un dia ya cerrado no se vuelve a cerrar (tampoco desde otro dispositivo): solo se puede "Editar cierre",
+// que al guardar queda como version nueva. Aca se anotan las fechas que se estan editando ahora.
+const enEdicion = new Set();
+export function terminarEdicionCierre(fecha) { enEdicion.delete(fecha); }
+export function iniciarEdicionCierre(fecha) { enEdicion.add(fecha); }
+
 // Renderiza la pantalla de cierre. `opciones.historialContainer` (opcional): donde van los
 // "Últimos cierres", para que el resumen del dia pueda quedar entre el boton de cerrar y el historial.
 export function renderCierre(container, datos, opciones = {}) {
@@ -164,6 +170,7 @@ export function renderCierre(container, datos, opciones = {}) {
         <span>${esc(c.fecha.slice(8))}/${esc(c.fecha.slice(5, 7))}</span>
         <span>${centsToMoney(c.ventasTotalCentavos)}</span>
         <span class="cierre-diff-mini is-${claseHist(c.diferenciaCentavos)}">${c.diferenciaCentavos === 0 ? "cuadra" : (c.diferenciaCentavos > 0 ? "+" : "") + centsToMoney(c.diferenciaCentavos)}</span>
+        <button type="button" class="ghost-button compact" data-editar-cierre="${esc(c.fecha)}">Editar cierre</button>
       </li>`).join("")}</ul>`;
   const historialHtml = `
     <section class="panel-card">
@@ -171,10 +178,34 @@ export function renderCierre(container, datos, opciones = {}) {
       ${historial}
     </section>`;
 
+  if (v && !enEdicion.has(datos.fecha)) {
+    const dif = Number(v.diferenciaCentavos) || 0;
+    container.innerHTML = `
+      ${aviso}
+      <section class="panel-card">
+        <h2><span class="caja-paso-num">4</span> Caja cerrada</h2>
+        <p class="cierre-vigente">Este día ya se cerró a las ${hora(v.creadoEn)}${datos.versiones.length > 1 ? ` (versión ${datos.versiones.length})` : ""}. No se puede volver a cerrar: si hay algo mal, usá Editar cierre.</p>
+        <div class="cierre-otros">
+          <div class="cierre-row"><span>Efectivo contado</span><strong>${centsToMoney(v.contadoCentavos)}</strong></div>
+          <div class="cierre-row"><span>Posnet</span><strong>${centsToMoney(v.tarjetaCentavos)}</strong></div>
+          <div class="cierre-row"><span>Diferencia del efectivo</span><strong>${dif === 0 ? "cuadra" : `${dif > 0 ? "+" : "−"}${centsToMoney(Math.abs(dif))}`}</strong></div>
+          ${v.fondoMananaCentavos !== null && v.fondoMananaCentavos !== undefined ? `<div class="cierre-row"><span>Quedó en el cajón para mañana</span><strong>${centsToMoney(v.fondoMananaCentavos)}</strong></div>` : ""}
+          ${v.nota ? `<div class="cierre-row"><span>Comentario</span><strong>${esc(v.nota)}</strong></div>` : ""}
+        </div>
+        <button type="button" class="ghost-button" id="cierre-editar">Editar cierre</button>
+      </section>
+      ${opciones.historialContainer ? "" : historialHtml}`;
+    if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
+    container.oninput = null;
+    container.onchange = null;
+    container.querySelector("#cierre-editar").onclick = () => { enEdicion.add(datos.fecha); renderCierre(container, datos, opciones); };
+    return null;
+  }
+
   container.innerHTML = `
     ${aviso}
     <section class="panel-card">
-      <h2><span class="caja-paso-num">4</span> Cerrar el día</h2>
+      <h2><span class="caja-paso-num">4</span> ${v ? "Editar el cierre" : "Cerrar el día"}</h2>
       <p class="caja-comentario">Contá la plata y anotá el cierre del posnet. Al lado de cada uno ves lo que dice el sistema.</p>
       <div class="cierre-contar">
         <div class="cierre-contar-fila">
@@ -208,7 +239,8 @@ export function renderCierre(container, datos, opciones = {}) {
       </div>
       <div class="cierre-row" id="cierre-retiro-fila" hidden><span>Retirás del cajón <small class="cal-muted">(lo contado − lo que dejás)</small></span><strong id="cierre-retiro-valor"></strong></div>
       ${vigenteHtml}
-      <button type="button" class="primary-button" id="cierre-guardar">Cerrar caja</button>
+      <button type="button" class="primary-button" id="cierre-guardar">${v ? "Guardar cambios del cierre" : "Cerrar caja"}</button>
+      ${v ? `<button type="button" class="ghost-button" id="cierre-cancelar-edicion">Cancelar</button>` : ""}
     </section>
     ${opciones.historialContainer ? "" : historialHtml}`;
   if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
@@ -238,6 +270,8 @@ export function renderCierre(container, datos, opciones = {}) {
     if (hay) container.querySelector("#cierre-retiro-valor").textContent = centsToMoney(Math.max(0, cont - deja));
     return r;
   };
+  const cancelar = container.querySelector("#cierre-cancelar-edicion");
+  if (cancelar) cancelar.onclick = () => { enEdicion.delete(datos.fecha); renderCierre(container, datos, opciones); };
   container.oninput = recalcular;
   container.onchange = recalcular;
   return recalcular();

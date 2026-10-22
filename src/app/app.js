@@ -1,7 +1,7 @@
 import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, buildSalesSummaryText, exportFullBackup } from "../modules/backup.js";
 import { cargarPanel } from "../modules/panel.js";
 import { cargarCierre, guardarCierre } from "../modules/cierre.js";
-import { renderCierre, calcularDesdeFormulario } from "../ui/render-cierre.js";
+import { renderCierre, calcularDesdeFormulario, terminarEdicionCierre, iniciarEdicionCierre } from "../ui/render-cierre.js";
 import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon, registrarControlDeCaja, controlesDelDia } from "../modules/caja-dia.js";
 import { getPersonalCaja, agregarPersonaCaja, pullPersonalCajaDesdeNube, ultimaPersonaCaja, recordarPersonaCaja } from "../modules/personal-caja.js";
 import { renderPasoApertura, renderPasoSalidas, renderCuentaRapida } from "../ui/render-caja-pasos.js";
@@ -466,6 +466,7 @@ const dom = {
   historyFilter: document.querySelector("#history-filter"),
   historyDate: document.querySelector("#history-date"),
   cierreRoot: document.querySelector("#cierre-root"),
+  cierreHistorialRoot: document.querySelector("#cierre-historial-root"),
   cierreDate: document.querySelector("#cierre-date"),
   cierrePrev: document.querySelector("#cierre-prev"),
   cierreNext: document.querySelector("#cierre-next"),
@@ -3585,6 +3586,7 @@ async function handleGuardarCierre() {
     });
     const grande = c.efectivo.nivel === "grande" || c.tarjeta.nivel === "grande";
     setFlash(`Caja cerrada. ${resumen}`, grande ? "warning" : "success");
+    terminarEdicionCierre(cierreDatos.fecha);
     await renderCierreView();
   } catch (error) {
     setFlash(error.message || "No se pudo guardar el cierre.", "error");
@@ -5185,6 +5187,15 @@ function bindEvents() {
   dom.cierreNext.addEventListener("click", () => setCierreFecha(sumarDias(cierreFecha || todayISO(), 1)));
   dom.cierreHoy.addEventListener("click", () => setCierreFecha(todayISO()));
   dom.cierreRoot.addEventListener("click", (e) => { if (e.target.closest("#cierre-guardar")) handleGuardarCierre(); });
+  // "Editar cierre" desde Ultimos cierres: va a ese dia y lo abre en edicion (queda como version nueva).
+  dom.cierreHistorialRoot.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-editar-cierre]");
+    if (!btn) return;
+    cierreFecha = btn.dataset.editarCierre;
+    iniciarEdicionCierre(cierreFecha);
+    renderCierreView();
+    dom.cierreRoot.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 
   dom.panelDate.addEventListener("change", () => setPanelFecha(dom.panelDate.value));
   dom.panelPrev.addEventListener("click", () => setPanelFecha(sumarDias(panelFecha || todayISO(), -1)));

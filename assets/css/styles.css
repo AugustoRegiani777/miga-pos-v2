@@ -3047,7 +3047,7 @@ details[open] > .prov-summary::before {
 
 .cierre-historial li {
   display: grid;
-  grid-template-columns: 4rem 1fr auto;
+  grid-template-columns: 4rem 1fr auto auto;
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
