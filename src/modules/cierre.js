@@ -74,7 +74,7 @@ export async function cargarCierre(fecha) {
     versiones,
     vigente: versiones[versiones.length - 1] || null,
     fondoSugeridoCentavos: previoConFondo ? previoConFondo.fondoMananaCentavos : null,
-    historial: cierresVigentesPorFecha(todos).slice(0, 10)
+    historial: cierresVigentesPorFecha(todos).slice(0, 60)
   };
 }
 
