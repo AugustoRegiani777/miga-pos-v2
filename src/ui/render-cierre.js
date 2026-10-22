@@ -130,6 +130,40 @@ export function renderCuentaEnDosColumnas(el, cuenta, resumenEl = null) {
   if (resumenEl) resumenEl.innerHTML = htmlResumenDelDia(cuenta, hay, total, vendido);
 }
 
+// Lista corta de las transacciones del dia: hora, total y forma de pago (se puede corregir). El detalle de lo
+// que se vendio se despliega aparte. Con el dia ya cerrado la lista es de solo lectura: se corrige con "Editar cierre".
+const NOMBRE_PAGO = { efectivo: "Efectivo", tarjeta: "Tarjeta", glovo: "Glovo", bizum: "Bizum" };
+function opcionesDePago(v) {
+  const base = v.pedidoId || v.origen === "pedido" ? ["efectivo", "tarjeta", "bizum"] : ["efectivo", "tarjeta", "glovo"];
+  return base.includes(v.formaPago) ? base : [...base, v.formaPago];
+}
+function htmlTransacciones(ventas, editable) {
+  if (!ventas.length) return "";
+  const fila = (v) => {
+    const togoo = v.saleMode === "togoo";
+    const detalle = (v.detalles || []).map((d) => `<li>${esc(String(d.cantidad))}× ${esc(d.productoNombre || "")}${d.opcionNombre ? ` <small class="cal-muted">${esc(d.opcionNombre)}</small>` : ""}</li>`).join("");
+    const pago = togoo
+      ? `<span class="cal-muted">Too Good To Go</span>`
+      : editable
+        ? `<select class="cierre-pago-select" data-cambiar-pago="${esc(v.uuid || "")}" data-fecha="${esc(v.fecha || "")}" data-anterior="${esc(v.formaPago)}" aria-label="Forma de pago">${opcionesDePago(v).map((f) => `<option value="${f}"${f === v.formaPago ? " selected" : ""}>${NOMBRE_PAGO[f] || f}</option>`).join("")}</select>`
+        : `<span>${NOMBRE_PAGO[v.formaPago] || esc(v.formaPago)}</span>`;
+    return `
+      <li class="cierre-trans">
+        <details>
+          <summary><span class="trans-hora">${esc(v.hora || "")}</span><strong class="trans-total">${centsToMoney(v.totalCentavos)}</strong></summary>
+          <ul class="trans-detalle">${detalle || `<li class="cal-muted">Sin detalle</li>`}</ul>
+        </details>
+        <div class="trans-pago">${pago}</div>
+      </li>`;
+  };
+  return `
+    <section class="panel-card">
+      <h2>Transacciones del día <small class="cal-muted">${ventas.length}</small></h2>
+      <p class="caja-comentario">${editable ? "Si una venta se cargó con otra forma de pago, cambiala acá. Solo cambia la forma de pago: el total y el stock quedan igual." : "Para corregir una forma de pago, tocá Editar cierre."}</p>
+      <ul class="cierre-transacciones">${ventas.map(fila).join("")}</ul>
+    </section>`;
+}
+
 // Lo vendido en el dia: informacion global, aparte del cierre de la caja (va despues del boton de cerrar).
 function htmlResumenDelDia(cuenta, hay, total, vendido) {
   const otros = cuenta.otrosIngresos;
@@ -209,6 +243,7 @@ export function renderCierre(container, datos, opciones = {}) {
         <button type="button" class="ghost-button" id="cierre-editar">Editar cierre</button>
       </section>
       <div id="cierre-resumen"></div>
+      ${htmlTransacciones(datos.ventas || [], false)}
       ${opciones.historialContainer ? "" : historialHtml}`;
     if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
     const cuentaCerrada = cuentaRealVsSistema({
@@ -268,6 +303,7 @@ export function renderCierre(container, datos, opciones = {}) {
       ${v ? `<button type="button" class="ghost-button" id="cierre-cancelar-edicion">Cancelar</button>` : ""}
     </section>
     <div id="cierre-resumen"></div>
+    ${htmlTransacciones(datos.ventas || [], true)}
     ${opciones.historialContainer ? "" : historialHtml}`;
   if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
 

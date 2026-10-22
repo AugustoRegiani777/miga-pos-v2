@@ -758,6 +758,23 @@ export async function updateVentaAnulada({ uuid, fecha, creadoEn }) {
   return filas;
 }
 
+// Corrige la forma de pago de una venta (solo ese dato) y anota el cambio. La venta se busca por uuid.
+// PATCH sobre cero filas responde 200 igual: si la venta todavia no esta en la nube hay que reintentar.
+export async function updateVentaFormaPago({ uuid, formaPago, formaAnterior, cambioUuid, fecha, creadoEn }) {
+  const filas = await sbFetch(`/ventas?uuid=eq.${encodeURIComponent(uuid)}`, "PATCH", { forma_pago: formaPago }, { "Prefer": "return=representation" });
+  if (!Array.isArray(filas) || filas.length === 0) {
+    throw new Error("La venta a corregir todavia no esta en la nube");
+  }
+  return sbFetch("/cambios_forma_pago?on_conflict=uuid", "POST", [{
+    uuid: cambioUuid,
+    venta_uuid: uuid,
+    fecha_venta: fecha,
+    forma_anterior: formaAnterior,
+    forma_nueva: formaPago,
+    creado_en: creadoEn
+  }], IGNORAR_DUPLICADOS);
+}
+
 export async function fetchStockProductos() {
   return sbFetch("/stock_productos?select=id,stock_actual,actualizado_en");
 }

@@ -37,6 +37,7 @@ import {
   trySyncProveedoresSnapshot,
   trySyncProveedorInsumosSnapshot,
   trySyncVentaAnulada,
+  trySyncVentaFormaPago,
   setupAutoSync,
   getPendingSyncCount,
   getPendingVentaUuids,
@@ -63,7 +64,8 @@ import {
   undoSale,
   reconciliarStockProductosConNube,
   TOGOO_FLAT_TOTAL_CENTAVOS,
-  datosRemotosDelDia
+  datosRemotosDelDia,
+  cambiarFormaPagoVenta
 } from "../modules/business.js";
 import { seedDatabase, getAll, getOne } from "../db/idb.js";
 import { TEMAS, temaGuardado, guardarTema, iniciarTema } from "../utils/tema.js";
@@ -5187,6 +5189,32 @@ function bindEvents() {
   dom.cierreNext.addEventListener("click", () => setCierreFecha(sumarDias(cierreFecha || todayISO(), 1)));
   dom.cierreHoy.addEventListener("click", () => setCierreFecha(todayISO()));
   dom.cierreRoot.addEventListener("click", (e) => { if (e.target.closest("#cierre-guardar")) handleGuardarCierre(); });
+  // Corregir la forma de pago de una venta desde la lista de transacciones del Cierre.
+  dom.cierreRoot.addEventListener("change", async (e) => {
+    const sel = e.target.closest("[data-cambiar-pago]");
+    if (!sel || !cierreDatos) return;
+    const venta = cierreDatos.ventas.find((v) => v.uuid === sel.dataset.cambiarPago);
+    const anterior = sel.dataset.anterior;
+    const nueva = sel.value;
+    const nombre = { efectivo: "Efectivo", tarjeta: "Tarjeta", glovo: "Glovo", bizum: "Bizum" };
+    if (!venta || nueva === anterior) return;
+    const ok = await confirmDialog({
+      title: "Cambiar forma de pago",
+      message: `La venta de ${centsToMoney(venta.totalCentavos)} (${venta.hora || ""}) pasa de ${nombre[anterior] || anterior} a ${nombre[nueva] || nueva}. Solo cambia la forma de pago: el total y el stock quedan igual, y el cambio queda anotado.`,
+      acceptText: "Cambiar"
+    });
+    if (!ok) { sel.value = anterior; return; }
+    try {
+      const cambio = await cambiarFormaPagoVenta({ uuid: venta.uuid, fecha: venta.fecha, formaAnterior: anterior, formaNueva: nueva });
+      venta.formaPago = nueva;
+      trySyncVentaFormaPago(cambio).catch(() => {});
+      setFlash(`Forma de pago cambiada a ${nombre[nueva] || nueva}.`, "success");
+      renderCierre(dom.cierreRoot, cierreDatos, { historialContainer: dom.cierreHistorialRoot });
+    } catch (error) {
+      sel.value = anterior;
+      setFlash(error.message || "No se pudo cambiar la forma de pago.", "error");
+    }
+  });
   // "Editar cierre" desde Ultimos cierres: va a ese dia y lo abre en edicion (queda como version nueva).
   dom.cierreHistorialRoot.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-editar-cierre]");

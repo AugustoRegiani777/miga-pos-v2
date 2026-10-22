@@ -13,6 +13,7 @@ import {
   pushProduccionDiaria,
   pushMovimientoStock,
   updateVentaAnulada,
+  updateVentaFormaPago,
   pushVariantesGrupos,
   pushHistorialReceta,
   pushConfiguracionCompartida,
@@ -303,6 +304,8 @@ async function executeOp(op) {
       return pushMovimientoStock(op.payload);
     case "venta_anulada":
       return updateVentaAnulada(op.payload);
+    case "venta_forma_pago":
+      return updateVentaFormaPago(op.payload);
     case "variantes_grupos":
       return pushVariantesGrupos(op.payload);
     case "historial_receta":
@@ -474,6 +477,11 @@ export function trySyncMovimientoStock(movimiento) {
 
 export function trySyncVentaAnulada({ uuid, fecha, creadoEn }) {
   return tryNow({ type: "venta_anulada", payload: { uuid, fecha, creadoEn } });
+}
+
+// Una correccion de forma de pago es un hecho puntual con su propio uuid (cambioUuid): reintentar es seguro.
+export function trySyncVentaFormaPago(payload) {
+  return tryNow({ type: "venta_forma_pago", payload });
 }
 
 export function trySyncVariantesGrupos(grupos) {

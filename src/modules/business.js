@@ -808,3 +808,21 @@ export async function undoSale(ventaId) {
     return { uuid: venta.uuid || null, fecha: venta.fecha, creadoEn: venta.creadoEn, movimientosStock, movimientosInsumos };
   });
 }
+
+// Corrige la forma de pago de UNA venta (solo ese dato: ni el total ni el stock se tocan). Devuelve lo
+// que hay que sincronizar. La venta puede no estar en este dispositivo (se cargo en otro): en ese caso
+// solo se sincroniza el cambio a la nube.
+export const FORMAS_DE_PAGO_VENTA = ["efectivo", "tarjeta", "glovo", "bizum"];
+export async function cambiarFormaPagoVenta({ uuid, fecha, formaAnterior, formaNueva }) {
+  if (!uuid) throw new Error("Esta venta no tiene identificador: no se puede corregir.");
+  if (!FORMAS_DE_PAGO_VENTA.includes(formaNueva)) throw new Error("Forma de pago invalida.");
+  if (formaNueva === formaAnterior) throw new Error("Ya tiene esa forma de pago.");
+  const locales = await getAll("ventas");
+  const local = locales.find((v) => v.uuid === uuid);
+  if (local) {
+    await withStores(["ventas"], "readwrite", (stores) => {
+      stores.ventas.put({ ...local, formaPago: formaNueva });
+    });
+  }
+  return { uuid, fecha, formaAnterior, formaPago: formaNueva, cambioUuid: crypto.randomUUID(), creadoEn: new Date().toISOString() };
+}
