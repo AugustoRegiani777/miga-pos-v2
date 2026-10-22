@@ -110,22 +110,27 @@ function filaCuenta(texto, c, { signo = "", dif = true, clase = "" } = {}) {
 
 export function renderCuentaEnDosColumnas(el, cuenta) {
   const otros = cuenta.otrosIngresos;
+  const hay = cuenta.efectivo.real !== null && cuenta.tarjeta.real !== null;
+  const total = {
+    real: hay ? cuenta.efectivo.real + cuenta.tarjeta.real : null,
+    sistema: cuenta.efectivo.sistema + cuenta.tarjeta.sistema
+  };
+  total.diferencia = hay ? total.real - total.sistema : null;
+  const vendido = cuenta.cierre.real ?? cuenta.cierre.sistema;
+  // El cierre es solo contraste de totales: lo que hay contra lo que el sistema dice que deberia haber.
+  // La apertura ya esta dentro del efectivo. El resumen de lo vendido va aparte.
   el.innerHTML = `
     <table class="cierre-tabla">
       <thead><tr><th></th><th>Real <small>(lo que contaste)</small></th><th>Sistema <small>(lo registrado)</small></th><th>Dif.</th></tr></thead>
       <tbody>
-        ${filaCuenta("Efectivo en caja", cuenta.efectivo, { signo: "+" })}
-        ${filaCuenta("Posnet (tarjeta)", cuenta.tarjeta, { signo: "+" })}
-        ${cuenta.pagos.real ? filaCuenta("Pagos en efectivo", cuenta.pagos, { signo: "+", dif: false, clase: "es-detalle" }) : ""}
-        ${cuenta.retiros.real ? filaCuenta("Retiros", cuenta.retiros, { signo: "+", dif: false, clase: "es-detalle" }) : ""}
-        ${filaCuenta("Apertura", cuenta.apertura, { signo: "−", dif: false, clase: "es-detalle" })}
-        ${cuenta.ingresos.real ? filaCuenta("Otros ingresos al cajón", cuenta.ingresos, { signo: "−", dif: false, clase: "es-detalle" }) : ""}
-        ${filaCuenta("Cierre del día", cuenta.cierre, { signo: "=", clase: "es-total" })}
+        ${filaCuenta("Efectivo en caja", cuenta.efectivo)}
+        ${filaCuenta("Posnet (tarjeta)", cuenta.tarjeta)}
+        ${filaCuenta("Total", total, { clase: "es-total" })}
       </tbody>
     </table>
-    <p class="cierre-nota">Los pagos y retiros se suman de vuelta: ese efectivo también se había cobrado hoy. El cierre es lo vendido en el local (efectivo + posnet).</p>
-    <h3 class="cierre-otros-titulo">Otros ingresos <small class="cal-muted">no pasan por la caja</small></h3>
+    <h3 class="cierre-otros-titulo">Resumen del día <small class="cal-muted">lo vendido, aparte del cierre</small></h3>
     <div class="cierre-otros">
+      <div class="cierre-row"><span>Vendido en el local <small class="cal-muted">(efectivo + posnet, sin la apertura)</small></span><strong>${centsToMoney(vendido)}</strong></div>
       <div class="cierre-row"><span>Glovo y otras plataformas</span><strong>${centsToMoney(otros.glovoCentavos)}</strong></div>
       <div class="cierre-row"><span>Too Good To Go</span><strong>${centsToMoney(otros.tgtgCentavos)}</strong></div>
       <div class="cierre-row"><span>Bizum <small class="cal-muted">(pedidos)</small></span><strong>${centsToMoney(otros.bizumCentavos)}</strong></div>
