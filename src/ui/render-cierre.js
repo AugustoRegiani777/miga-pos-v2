@@ -108,7 +108,7 @@ function filaCuenta(texto, c, { signo = "", dif = true, clase = "" } = {}) {
     </tr>`;
 }
 
-export function renderCuentaEnDosColumnas(el, cuenta) {
+export function renderCuentaEnDosColumnas(el, cuenta, resumenEl = null) {
   const otros = cuenta.otrosIngresos;
   const hay = cuenta.efectivo.real !== null && cuenta.tarjeta.real !== null;
   const total = {
@@ -126,11 +126,19 @@ export function renderCuentaEnDosColumnas(el, cuenta) {
         ${filaCuenta("Posnet (tarjeta)", cuenta.tarjeta)}
         ${filaCuenta("Total <small class=\"cal-muted\">(efectivo + posnet)</small>", total, { clase: "es-total" })}
       </tbody>
-    </table>
-    <h3 class="cierre-otros-titulo">Resumen del día <small class="cal-muted">lo vendido, aparte del cierre</small></h3>
+    </table>`;
+  if (resumenEl) resumenEl.innerHTML = htmlResumenDelDia(cuenta, hay, total, vendido);
+}
+
+// Lo vendido en el dia: informacion global, aparte del cierre de la caja (va despues del boton de cerrar).
+function htmlResumenDelDia(cuenta, hay, total, vendido) {
+  const otros = cuenta.otrosIngresos;
+  return `
+    <section class="panel-card">
+    <h2>Lo vendido del día <small class="cal-muted">aparte del cierre</small></h2>
     <div class="cierre-otros">
       ${hay ? `
-      <div class="cierre-row"><span>Total contado <small class="cal-muted">(efectivo + posnet)</small></span><strong>${centsToMoney(total.real)}</strong></div>
+      <div class="cierre-row"><span>Ingresos totales del día <small class="cal-muted">(efectivo + posnet)</small></span><strong>${centsToMoney(total.real)}</strong></div>
       <div class="cierre-row"><span>− Apertura <small class="cal-muted">(ya estaba en el cajón, no es venta)</small></span><strong>${centsToMoney(cuenta.apertura.real)}</strong></div>
       ${cuenta.ingresos.real ? `<div class="cierre-row"><span>− Otros ingresos al cajón <small class="cal-muted">(entraron sin ser venta)</small></span><strong>${centsToMoney(cuenta.ingresos.real)}</strong></div>` : ""}
       ${cuenta.pagos.real ? `<div class="cierre-row"><span>+ Pagos en efectivo <small class="cal-muted">(salieron del cajón, pero se habían cobrado)</small></span><strong>${centsToMoney(cuenta.pagos.real)}</strong></div>` : ""}
@@ -141,7 +149,8 @@ export function renderCuentaEnDosColumnas(el, cuenta) {
       <div class="cierre-row"><span>Bizum <small class="cal-muted">(pedidos)</small></span><strong>${centsToMoney(otros.bizumCentavos)}</strong></div>
       <div class="cierre-row"><span>Total de otros ingresos</span><strong>${centsToMoney(otros.totalCentavos)}</strong></div>
     </div>
-    <div class="cierre-row cierre-row--total"><span>Facturación total del día</span><strong>${centsToMoney(cuenta.facturacionTotalCentavos)}</strong></div>`;
+    <div class="cierre-row cierre-row--total"><span>Facturación total del día</span><strong>${centsToMoney(cuenta.facturacionTotalCentavos)}</strong></div>
+    </section>`;
 }
 
 // Un dia ya cerrado no se vuelve a cerrar (tampoco desde otro dispositivo): solo se puede "Editar cierre",
@@ -199,8 +208,15 @@ export function renderCierre(container, datos, opciones = {}) {
         </div>
         <button type="button" class="ghost-button" id="cierre-editar">Editar cierre</button>
       </section>
+      <div id="cierre-resumen"></div>
       ${opciones.historialContainer ? "" : historialHtml}`;
     if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
+    const cuentaCerrada = cuentaRealVsSistema({
+      ventas: datos.ventas, fondoCentavos: base.fondoCentavos, pagosCentavos: base.pagosCentavos,
+      retirosCentavos: base.retirosCentavos, ingresosCentavos: base.ingresosCentavos,
+      contadoCentavos: v.contadoCentavos, postnetRealCentavos: v.tarjetaCentavos
+    });
+    renderCuentaEnDosColumnas(document.createElement("div"), cuentaCerrada, container.querySelector("#cierre-resumen"));
     container.oninput = null;
     container.onchange = null;
     container.querySelector("#cierre-editar").onclick = () => { enEdicion.add(datos.fecha); renderCierre(container, datos, opciones); };
@@ -242,11 +258,16 @@ export function renderCierre(container, datos, opciones = {}) {
       <div class="cierre-contar">
         ${campoDinero("cierre-fondo-manana", "Dejás en el cajón para mañana (€)", centavosAInput(v ? (v.fondoMananaCentavos ?? null) : base.fondoCentavos), "Opcional. Mañana se propone como apertura.")}
       </div>
-      <div class="cierre-row" id="cierre-retiro-fila" hidden><span>Retirás del cajón <small class="cal-muted">(lo contado − lo que dejás)</small></span><strong id="cierre-retiro-valor"></strong></div>
+      <div id="cierre-retiro-fila" class="cierre-otros" hidden>
+        <div class="cierre-row"><span>Efectivo en el cajón <small class="cal-muted">(lo que contaste)</small></span><strong id="cierre-retiro-efectivo"></strong></div>
+        <div class="cierre-row"><span>− Dejás para mañana</span><strong id="cierre-retiro-deja"></strong></div>
+        <div class="cierre-row cierre-row--total"><span>= Retirás del cajón <small class="cal-muted">(del posnet no se retira nada)</small></span><strong id="cierre-retiro-valor"></strong></div>
+      </div>
       ${vigenteHtml}
       <button type="button" class="primary-button" id="cierre-guardar">${v ? "Guardar cambios del cierre" : "Cerrar caja"}</button>
       ${v ? `<button type="button" class="ghost-button" id="cierre-cancelar-edicion">Cancelar</button>` : ""}
     </section>
+    <div id="cierre-resumen"></div>
     ${opciones.historialContainer ? "" : historialHtml}`;
   if (opciones.historialContainer) opciones.historialContainer.innerHTML = historialHtml;
 
@@ -262,7 +283,7 @@ export function renderCierre(container, datos, opciones = {}) {
   };
   const recalcular = () => {
     const r = calcularDesdeFormulario(container, datos);
-    renderCuentaEnDosColumnas(cuentaEl, r.cuenta);
+    renderCuentaEnDosColumnas(cuentaEl, r.cuenta, container.querySelector("#cierre-resumen"));
     container.querySelector("#cierre-alertas").innerHTML = [...r.alertas, r.error].filter(Boolean).map((a) => `<p class="cierre-alerta">⚠ ${esc(a)}</p>`).join("");
     container.querySelectorAll("input[data-money]").forEach((i) => i.setAttribute("aria-invalid", Number.isNaN(parseEuros(i.value)) ? "true" : "false"));
     container.querySelector("#cierre-guardar").disabled = Boolean(r.error);
@@ -272,7 +293,11 @@ export function renderCierre(container, datos, opciones = {}) {
     const fila = container.querySelector("#cierre-retiro-fila");
     const hay = Number.isFinite(cont) && Number.isFinite(deja);
     fila.hidden = !hay;
-    if (hay) container.querySelector("#cierre-retiro-valor").textContent = centsToMoney(Math.max(0, cont - deja));
+    if (hay) {
+      container.querySelector("#cierre-retiro-efectivo").textContent = centsToMoney(cont);
+      container.querySelector("#cierre-retiro-deja").textContent = centsToMoney(deja);
+      container.querySelector("#cierre-retiro-valor").textContent = centsToMoney(Math.max(0, cont - deja));
+    }
     return r;
   };
   const cancelar = container.querySelector("#cierre-cancelar-edicion");
