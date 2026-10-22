@@ -94,7 +94,7 @@ const claseDif = (n) => (n === null ? "" : n === 0 ? "ok" : Math.abs(n) <= 100 ?
 const celdaDif = (d) => {
   if (d === null || d === undefined) return `<td class="dif">—</td>`;
   const texto = d === 0 ? "cuadra" : `${d > 0 ? "+" : "−"}${centsToMoney(Math.abs(d))}`;
-  return `<td class="dif"><span class="cierre-diff-mini is-${claseDif(d)}">${texto}</span></td>`;
+  return `<td class="dif"><small class="celda-et">Diferencia</small><span class="cierre-diff-mini is-${claseDif(d)}">${texto}</span></td>`;
 };
 const euro = (n) => (n === null || n === undefined ? "—" : centsToMoney(n));
 
@@ -102,8 +102,8 @@ function filaCuenta(texto, c, { signo = "", dif = true, clase = "" } = {}) {
   return `
     <tr class="${clase}">
       <th scope="row">${signo ? `<span class="signo">${signo}</span> ` : ""}${texto}</th>
-      <td>${euro(c.real)}</td>
-      <td>${euro(c.sistema)}</td>
+      <td><small class="celda-et">Lo que contaste</small>${euro(c.real)}</td>
+      <td><small class="celda-et">Dice el sistema</small>${euro(c.sistema)}</td>
       ${dif ? celdaDif(c.diferencia) : `<td class="dif"></td>`}
     </tr>`;
 }
@@ -121,11 +121,10 @@ export function renderCuentaEnDosColumnas(el, cuenta) {
   // La apertura ya esta dentro del efectivo. El resumen de lo vendido va aparte.
   el.innerHTML = `
     <table class="cierre-tabla">
-      <thead><tr><th></th><th>Real <small>(lo que contaste)</small></th><th>Sistema <small>(lo registrado)</small></th><th>Dif.</th></tr></thead>
       <tbody>
         ${filaCuenta("Efectivo en caja", cuenta.efectivo)}
         ${filaCuenta("Posnet (tarjeta)", cuenta.tarjeta)}
-        ${filaCuenta("Total", total, { clase: "es-total" })}
+        ${filaCuenta("Total <small class=\"cal-muted\">(efectivo + posnet)</small>", total, { clase: "es-total" })}
       </tbody>
     </table>
     <h3 class="cierre-otros-titulo">Resumen del día <small class="cal-muted">lo vendido, aparte del cierre</small></h3>

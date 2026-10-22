@@ -4612,3 +4612,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   font-style: italic;
   line-height: 1.4;
 }
+
+.celda-et { display: block; font-size: 0.7rem; font-weight: 400; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 2px; }
+.cierre-tabla td { text-align: right; vertical-align: bottom; }
