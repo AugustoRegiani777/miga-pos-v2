@@ -2,9 +2,9 @@ import { exportSalesSummary, exportDailySummaryJSON, exportSalesSummaryRange, bu
 import { cargarPanel } from "../modules/panel.js";
 import { cargarCierre, guardarCierre } from "../modules/cierre.js";
 import { renderCierre, calcularDesdeFormulario, terminarEdicionCierre, iniciarEdicionCierre } from "../ui/render-cierre.js";
-import { abrirCaja, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon, registrarControlDeCaja, controlesDelDia } from "../modules/caja-dia.js";
+import { abrirCaja, corregirApertura, aperturaDelDia, anotarPago, anotarRetiro, anularMovimiento, movimientosDelDia, totalesDelDia, fotoDelCajon, registrarControlDeCaja, controlesDelDia } from "../modules/caja-dia.js";
 import { getPersonalCaja, agregarPersonaCaja, pullPersonalCajaDesdeNube, ultimaPersonaCaja, recordarPersonaCaja } from "../modules/personal-caja.js";
-import { renderPasoApertura, renderPasoSalidas, renderCuentaRapida } from "../ui/render-caja-pasos.js";
+import { renderPasoApertura, renderPasoSalidas, renderCuentaRapida, setEdicionApertura } from "../ui/render-caja-pasos.js";
 import { renderPanel } from "../ui/render-panel.js";
 import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF, PRUEBA_SIN_BASE } from "../db/supabase.js";
@@ -5047,21 +5047,24 @@ function bindEvents() {
 
   // Paso 1: abrir caja.
   dom.cajaPasoApertura.addEventListener("click", async (event) => {
-    const abrir = event.target.closest("#caja-abrir");
-    const corregir = event.target.closest("#caja-corregir-apertura");
-    if (corregir) {
-      const actual = await aperturaDelDia(cierreFecha);
-      const texto = window.prompt("¿Con cuánta plata abriste? (€)", centavosAInput(actual?.fondoInicialCentavos ?? 0));
-      if (texto === null) return;
-      const euros = parseDecimal(texto);
+    if (event.target.closest("#caja-corregir-apertura")) { setEdicionApertura(true); await refrescarPasosCaja(); enfocar(document.querySelector("#caja-apertura-monto")); return; }
+    if (event.target.closest("#caja-apertura-cancelar")) { setEdicionApertura(false); await refrescarPasosCaja(); return; }
+    if (event.target.closest("#caja-apertura-guardar")) {
+      if (cajaMovEnCurso) return;
+      const euros = parseDecimal(document.querySelector("#caja-apertura-monto")?.value);
       if (!Number.isFinite(euros) || euros < 0) { setFlash("Poné un importe válido.", "error"); return; }
       try {
-        await abrirCaja({ fondoInicialCentavos: Math.round(euros * 100), fecha: cierreFecha });
-        setFlash("Fondo de apertura corregido.", "success");
+        cajaMovEnCurso = true;
+        await corregirApertura({ fondoInicialCentavos: Math.round(euros * 100), fecha: cierreFecha });
+        setEdicionApertura(false);
+        setFlash("Apertura corregida.", "success");
         await refrescarPasosCaja();
+        await renderCierreView();
       } catch (e) { setFlash(e.message || "No se pudo corregir.", "error"); }
+      finally { cajaMovEnCurso = false; }
       return;
     }
+    const abrir = event.target.closest("#caja-abrir");
     if (!abrir || cajaMovEnCurso) return;
     const euros = parseDecimal(document.querySelector("#caja-apertura-monto")?.value);
     if (!Number.isFinite(euros) || euros < 0) { setFlash("Poné con cuánta plata abrís, aunque sea 0.", "error"); return; }

@@ -9,6 +9,7 @@
 // ahora, abierto. Así la pantalla dice sola en qué punto del día estás.
 
 import { centsToMoney } from "../utils/format.js";
+import { centavosAInput } from "../modules/cierre-calculos.js";
 
 const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hora = (iso) => String(iso || "").slice(11, 16);
@@ -26,8 +27,33 @@ function paso(n, titulo, estado, cuerpo, accion = "") {
 }
 
 // ---------------------------------------------------------------- 1. abrir
+// Una vez abierta, el importe queda bloqueado y a la vista (con "Editar" por si hay que cambiarlo). Editar
+// no pisa nada: agrega un ajuste de apertura (ver corregirApertura).
+let editandoApertura = false;
+export function setEdicionApertura(valor) { editandoApertura = Boolean(valor); }
 export function renderPasoApertura(container, { apertura }) {
   const abierta = apertura && !apertura.implicita;
+  if (abierta) {
+    const editando = editandoApertura;
+    container.innerHTML = paso(
+      1,
+      "Apertura",
+      "hecho",
+      `<div class="caja-paso-form">
+         <label class="quantity-field">
+           <span>Abriste con (€)${apertura.abiertaEn ? ` <small class="cal-muted">a las ${hora(apertura.abiertaEn)}</small>` : ""}</span>
+           <input id="caja-apertura-monto" type="text" inputmode="decimal" autocomplete="off" value="${centavosAInput(apertura.fondoInicialCentavos)}"${editando ? "" : " disabled"}>
+         </label>
+         ${editando
+           ? `<button class="primary-button" type="button" id="caja-apertura-guardar">Guardar</button>
+              <button class="ghost-button" type="button" id="caja-apertura-cancelar">Cancelar</button>`
+           : `<button class="ghost-button" type="button" id="caja-corregir-apertura">Editar</button>`}
+       </div>
+       ${editando ? `<p class="caja-comentario">Queda anotado que se corrigió la apertura; lo anterior no se borra.</p>` : ""}`,
+      ""
+    );
+    return;
+  }
   container.innerHTML = paso(
     1,
     "Apertura",

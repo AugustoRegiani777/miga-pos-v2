@@ -39,20 +39,37 @@ const SIN_PERSONA = "Caja";
 //  - El fondo inicial arranca en 0 porque no se le pregunta. Si más adelante
 //    se quiere pedir "con cuánto arrancás", va acá y no cambia nada más.
 // ¿Ya se abrio la caja hoy? El primer paso de la pantalla depende de esto.
+// Los ajustes de apertura vivos del dia: la forma append-only de fijar o corregir el fondo cuando ya hay
+// una sesion (ver abrirCaja y corregirApertura). Un ajuste anulado, o la anulacion misma, no cuenta.
+const CATEGORIA_APERTURA = "apertura";
+async function ajustesDeAperturaVivos(fecha) {
+  const todos = await getAll("movimientos_caja");
+  const anulados = new Set(todos.filter((m) => m.corrigeUuid).map((m) => m.corrigeUuid));
+  return todos.filter((m) =>
+    String(m.fecha).slice(0, 10) === fecha && m.tipo === "ajuste" && m.categoria === CATEGORIA_APERTURA &&
+    !m.corrigeUuid && !anulados.has(m.uuid));
+}
+
 export async function aperturaDelDia(fecha = todayISO()) {
   const sesiones = await getAll("sesiones_caja");
   const delDia = sesiones.filter((x) => String(x.fecha).slice(0, 10) === fecha);
   if (delDia.length === 0) return null;
   const s = delDia.sort((a, b) => (a.turno || 0) - (b.turno || 0))[delDia.length - 1];
+  const base = Number(s.fondoInicialCentavos) || 0;
+  const ajustes = await ajustesDeAperturaVivos(fecha);
+  const ajusteCentavos = ajustes.reduce((t, m) => t + (Number(m.importeCentavos) || 0), 0);
   return {
     uuid: s.uuid,
-    fondoInicialCentavos: Number(s.fondoInicialCentavos) || 0,
+    // Con cuanto se abrio de verdad: el fondo de la sesion mas los ajustes de apertura (la sesion no se puede editar).
+    fondoInicialCentavos: base + ajusteCentavos,
+    fondoBaseCentavos: base,
+    ajusteAperturaCentavos: ajusteCentavos,
     abiertaPor: s.abiertaPor,
     abiertaEn: s.abiertaEn,
     // Una apertura "implicita" (fondo 0, sin nombre) es la que crea el sistema
     // solo cuando alguien anota un pago sin haber abierto. La pantalla la
-    // trata distinto: sigue pidiendo con cuanto se abrio.
-    implicita: s.abiertaPor === SIN_PERSONA && (Number(s.fondoInicialCentavos) || 0) === 0
+    // trata distinto: sigue pidiendo con cuanto se abrio. Apenas hay un ajuste de apertura, ya se abrio.
+    implicita: s.abiertaPor === SIN_PERSONA && base === 0 && ajustes.length === 0
   };
 }
 
@@ -71,11 +88,15 @@ export async function abrirCaja({ fondoInicialCentavos, fecha = todayISO(), quie
       await registrarMovimientoCaja({
         sesionUuid: yaAbierta.uuid, fecha, tipo: "ajuste",
         importeCentavos: diferencia,
-        motivo: "Fondo con el que se abrió la caja",
-        categoria: "apertura"
+        motivo: "Apertura de caja",
+        categoria: CATEGORIA_APERTURA
       });
+      return { ...yaAbierta, fondoInicialCentavos: Number(fondoInicialCentavos) || 0, implicita: false };
     }
-    return { ...yaAbierta, fondoInicialCentavos: Number(fondoInicialCentavos) || 0 };
+    // Se abre con 0 y no hay nada que ajustar: se abre una sesion explicita (no "implicita") para que quede
+    // marcada como abierta y la pantalla no vuelva a pedir la apertura.
+    const sesion0 = await abrirSesionCaja({ fecha, abiertaPor: "Apertura", fondoInicialCentavos: 0 });
+    return { uuid: sesion0.uuid, fondoInicialCentavos: 0, implicita: false };
   }
   const sesion = await abrirSesionCaja({
     fecha,
@@ -83,6 +104,23 @@ export async function abrirCaja({ fondoInicialCentavos, fecha = todayISO(), quie
     fondoInicialCentavos: Number(fondoInicialCentavos) || 0
   });
   return { uuid: sesion.uuid, fondoInicialCentavos: sesion.fondoInicialCentavos, implicita: false };
+}
+
+// Corregir con cuanto se abrio (por el motivo que sea). No edita nada: agrega un ajuste de apertura por la
+// diferencia, asi el historial muestra "se abrio con X, despues se corrigio a Y".
+export async function corregirApertura({ fondoInicialCentavos, fecha = todayISO() }) {
+  const actual = await aperturaDelDia(fecha);
+  const nuevo = Number(fondoInicialCentavos) || 0;
+  if (!actual || actual.implicita) return await abrirCaja({ fondoInicialCentavos: nuevo, fecha });
+  const diferencia = nuevo - actual.fondoInicialCentavos;
+  if (diferencia === 0) return actual;
+  await registrarMovimientoCaja({
+    sesionUuid: actual.uuid, fecha, tipo: "ajuste",
+    importeCentavos: diferencia,
+    motivo: "Corrección de la apertura de caja",
+    categoria: CATEGORIA_APERTURA
+  });
+  return { ...actual, fondoInicialCentavos: nuevo };
 }
 
 async function sesionDelDia(fecha) {
@@ -162,7 +200,8 @@ export async function fotoDelCajon({ fecha = todayISO(), ventas = [], retiroCent
     cargarCajaDelDia(fecha)
   ]);
   const esperado = esperadoEnCajon({
-    sesion: sesion ? { fondoInicialCentavos: sesion.fondoInicialCentavos } : { fondoInicialCentavos: 0 },
+    // Los ajustes de apertura ya van en los movimientos: aca va solo el fondo base, para no contarlos dos veces.
+    sesion: sesion ? { fondoInicialCentavos: sesion.fondoBaseCentavos ?? sesion.fondoInicialCentavos } : { fondoInicialCentavos: 0 },
     movimientos,
     ventas
   });
@@ -177,7 +216,8 @@ export async function fotoDelCajon({ fecha = todayISO(), ventas = [], retiroCent
     pagosCentavos: esperado.neto?.gastosCentavos || 0,
     retirosCentavos: esperado.neto?.retirosCentavos || 0,
     ingresosCentavos: esperado.neto?.ingresosCentavos || 0,
-    ajustesCentavos: esperado.neto?.ajustesCentavos || 0,
+    // Sin los de apertura: esos ya estan dentro de "Abriste con".
+    ajustesCentavos: (esperado.neto?.ajustesCentavos || 0) - (sesion?.ajusteAperturaCentavos || 0),
     movimientosCentavos: esperado.movimientosCentavos,
     esperadoCentavos: esperado.esperadoCentavos,
     retiroCentavos: retiro,

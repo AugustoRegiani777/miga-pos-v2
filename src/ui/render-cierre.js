@@ -40,7 +40,7 @@ export function baseDelCierre(datos) {
   // de la apertura: se suma al fondo, igual que en la cuenta rapida de la caja.
   const anulados = new Set(movimientos.filter((m) => m.anulado).map((m) => m.uuid));
   const ajustes = movimientos
-    .filter((m) => m.tipo === "ajuste" && !m.anulado && !anulados.has(m.uuid) && m.afectaCajon !== false)
+    .filter((m) => m.tipo === "ajuste" && m.categoria !== "apertura" && !m.anulado && !anulados.has(m.uuid) && m.afectaCajon !== false)
     .reduce((t, m) => t + (Number(m.importeCentavos) || 0), 0);
   const suma = (tipo) => auto.salidas.filter((x) => x.tipo === tipo).reduce((t, x) => t + x.centavos, 0);
   return {
