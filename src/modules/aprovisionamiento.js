@@ -2602,3 +2602,55 @@ export async function editarInsumo(insumoId, { nombre, unidad, factorUnidad = 1,
   if (piNuevos.length) trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
   return { insumo: actualizado, cambioUnidad: cambiaUnidad, recetasReexpresadas: recetasNuevas.length, lineasProveedorReexpresadas: piNuevos.length };
 }
+
+// Umbrales de stock de octubre (los definio el dueño), aplicados UNA vez por dispositivo:
+//   bebidas (insumos que se compran y se venden): critico 5, minimo 15
+//   bolleria (productos con stock y los insumos de venta directa): critico 5, minimo 7
+//   sandwiches: Jamon y queso, Huevo y jamon, Jamon serrano, Mortadela: critico 6, minimo 12; el resto critico 3, minimo 6
+// Despues cada uno se cambia a mano (Menu para productos, Editar insumo para insumos): la marca evita pisarlo.
+// Es idempotente (poner el mismo numero dos veces no cambia nada) asi que dos dispositivos coinciden.
+const UMBRALES_V1_KEY = "umbrales_octubre_v1";
+const BEBIDAS_UMBRAL = ["coca-cola", "coca-cola-cero", "agua", "agua-con-gas", "jugo", "cerveza", "sprite", "fanta", "nestea", "aquiaros"];
+const BOLLERIA_INSUMOS_UMBRAL = ["medialunas", "alfajor-havana", "mantecol", "bon-o-bon"];
+const SANDWICHES_ALTOS = ["jamon-queso", "huevo-jamon", "jamon-serrano-rucula", "mortadela-pesto-queso"];
+
+export async function aplicarUmbralesV1() {
+  const [productos, insumos, config] = await Promise.all([getAll("productos"), getAll("insumos"), getAll("configuracion")]);
+  if (config.find((c) => c.id === UMBRALES_V1_KEY)?.valor) return { cambios: 0 };
+  // Hace falta el catalogo ya bajado: si no hay productos (primer arranque sin conexion) se espera al proximo.
+  if (productos.length === 0 || insumos.length === 0) return { cambios: 0 };
+
+  const now = new Date().toISOString();
+  const productosNuevos = [];
+  const insumosNuevos = [];
+  const fijarProducto = (p, minimo, critico) => {
+    if (p.umbralBajo === minimo && p.umbralCritico === critico) return;
+    productosNuevos.push({ ...p, umbralBajo: minimo, umbralCritico: critico, actualizadoEn: now });
+  };
+  const fijarInsumo = (i, minimo, critico) => {
+    if (i.stockMinimo === minimo && i.stockCritico === critico) return;
+    insumosNuevos.push({ ...i, stockMinimo: minimo, stockCritico: critico, actualizadoEn: now });
+  };
+
+  for (const p of productos) {
+    if (!p.controlaStock) continue;
+    if (p.categoriaId === "sandwiches") {
+      if (SANDWICHES_ALTOS.includes(p.id)) fijarProducto(p, 12, 6); else fijarProducto(p, 6, 3);
+    } else if (p.categoriaId === "bolleria") {
+      fijarProducto(p, 7, 5);
+    }
+  }
+  for (const i of insumos) {
+    if (BEBIDAS_UMBRAL.includes(i.id)) fijarInsumo(i, 15, 5);
+    else if (BOLLERIA_INSUMOS_UMBRAL.includes(i.id)) fijarInsumo(i, 7, 5);
+  }
+
+  await withStores(["productos", "insumos", "configuracion"], "readwrite", (stores) => {
+    for (const p of productosNuevos) stores.productos.put(p);
+    for (const i of insumosNuevos) stores.insumos.put(i);
+    stores.configuracion.put({ id: UMBRALES_V1_KEY, valor: true, actualizadoEn: now });
+  });
+  if (productosNuevos.length) trySyncCatalogoSnapshot(await getAll("categorias"), await getAll("productos")).catch(() => {});
+  if (insumosNuevos.length) trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
+  return { cambios: productosNuevos.length + insumosNuevos.length };
+}

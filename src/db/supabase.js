@@ -445,6 +445,7 @@ export async function pushCatalogoSnapshot(categorias, productos) {
     precio_centavos: p.precioCentavos,
     sandwich_tipo: p.sandwichTipo || null,
     umbral_bajo: p.umbralBajo,
+    umbral_critico: Number(p.umbralCritico) || 0,
     controla_stock: p.controlaStock !== false,
     orden: p.orden,
     activo: p.activo !== false

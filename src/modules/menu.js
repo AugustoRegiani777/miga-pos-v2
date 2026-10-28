@@ -109,7 +109,7 @@ export async function definirProductoComoReventa({ productoId, datos }) {
 //   "pendiente" -> "lo estoy probando": sin receta y sin insumos. Se puede
 //                  producir y vender normal; solo no descuenta nada hasta que
 //                  se lo defina. No es un error, y no rompe nada.
-export async function saveProducto({ id, categoriaId, nombre, precioCentavos, controlaStock, umbralBajo, sandwichTipo, activo, lineasReceta, modo, reventa }) {
+export async function saveProducto({ id, categoriaId, nombre, precioCentavos, controlaStock, umbralBajo, umbralCritico, sandwichTipo, activo, lineasReceta, modo, reventa }) {
   const now = new Date().toISOString();
   const [productosActuales, insumosActuales, recetasActuales, proveedoresActuales] = await Promise.all([
     getAll("productos"),
@@ -149,6 +149,7 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
     // aparece en Produccion. Su stock vive en el insumo (1 por venta).
     controlaStock: modoEfectivo === "reventa" ? false : controlaStock,
     umbralBajo: umbralBajo || 0,
+    umbralCritico: umbralCritico || 0,
     stockActual: existente?.stockActual ?? 0,
     orden: existente && existente.categoriaId === categoriaId ? existente.orden : proximoOrden(productosActuales, categoriaId),
     activo,
@@ -338,6 +339,7 @@ export async function pullCatalogoDesdeNube() {
         precioCentavos: p.precio_centavos,
         sandwichTipo: p.sandwich_tipo || undefined,
         umbralBajo: p.umbral_bajo,
+        umbralCritico: p.umbral_critico ?? 0,
         controlaStock: p.controla_stock,
         orden: p.orden,
         activo: p.activo,

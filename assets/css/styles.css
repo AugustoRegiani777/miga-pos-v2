@@ -4674,3 +4674,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .ghost-button.danger { color: var(--txt-out, #a32020); border-color: var(--txt-out, #a32020); }
 .insumo-en-pausa-acciones { display: flex; gap: 6px; }
 #editar-insumo-eliminar { margin-top: 18px; width: 100%; }
+
+/* Sandwiches especiales (premium): un tono calido y ameno, distinto del clasico (que queda con el fondo normal). */
+.product-button.especial { background: color-mix(in srgb, #e0a82e 24%, var(--surface)); border-color: color-mix(in srgb, #e0a82e 65%, var(--line)); }
+.product-button.especial:hover:not(.disabled) { background: color-mix(in srgb, #e0a82e 34%, var(--surface)); }

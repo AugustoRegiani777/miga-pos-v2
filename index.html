@@ -1135,8 +1135,12 @@
                 <span id="menu-edit-controla-stock-texto">Se produce <small class="cal-muted">(aparece en Producción y lleva su stock)</small></span>
               </label>
               <label class="quantity-field">
-                <span>Umbral de stock bajo (unidades)</span>
+                <span>Stock mínimo <small class="cal-muted">(por debajo se ve amarillo)</small></span>
                 <input id="menu-edit-umbral" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
+              </label>
+              <label class="quantity-field">
+                <span>Stock crítico <small class="cal-muted">(por debajo se ve rojo; 0 = solo cuando se acaba)</small></span>
+                <input id="menu-edit-critico" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
               </label>
               <label class="pedido-check-field">
                 <input id="menu-edit-activo" type="checkbox" checked>

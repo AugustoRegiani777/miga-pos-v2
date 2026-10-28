@@ -103,7 +103,10 @@ export function renderProductGrid(container, categories, products, onProductClic
         const displayStock = product.stockDisponible ?? product.stockActual;
         const status = stockStatus({ ...product, stockActual: displayStock });
         const disabled = product.controlaStock && displayStock <= 0;
-        const button = el("button", `product-button${disabled ? " disabled" : ""}`);
+        // Los sandwiches especiales (salame, mortadela, atun, huevo y jamon, especial de la semana: los "premium")
+        // llevan otro color para distinguirlos de los clasicos al mostrarle la caja al cliente.
+        const esEspecial = category.id === "sandwiches" && product.sandwichTipo === "premium";
+        const button = el("button", `product-button${disabled ? " disabled" : ""}${esEspecial ? " especial" : ""}`);
         button.type = "button";
         button.disabled = disabled;
         button.dataset.productId = product.id;
@@ -133,7 +136,7 @@ export function renderProductGrid(container, categories, products, onProductClic
           // La plantilla ya le puso el estado del stock PROPIO del producto (0 en una venta directa = rojo): se saca
           // antes de poner el del insumo, si no quedan los dos y el rojo gana.
           pill.classList.remove("out", "low", "ok");
-          pill.classList.add(stockStatus({ stockActual: product.stockReventa, umbralBajo: 0 }).className);
+          pill.classList.add(stockStatus({ stockActual: product.stockReventa, umbralBajo: product.umbralBajo, umbralCritico: product.umbralCritico }).className);
         }
         button.addEventListener("click", () => onProductClick(product));
         grid.appendChild(button);

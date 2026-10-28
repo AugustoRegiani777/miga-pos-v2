@@ -10,7 +10,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF, PRUEBA_SIN_BASE } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1, aplicarUmbralesV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -195,6 +195,7 @@ async function pullCatalogoCompleto() {
   await actualizarPreciosOctubre().catch(() => ({ cambios: 0 }));
   await borrarInsumosConUnidadRara().catch(() => ({ cambios: 0 }));
   await quitarDelCatalogoDePruebaV1().catch(() => ({ cambios: 0 }));
+  await aplicarUmbralesV1().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };
@@ -697,6 +698,7 @@ const dom = {
   menuModoWrap: document.querySelector("#menu-modo-wrap"),
   menuRecetaBloque: document.querySelector("#menu-receta-bloque"),
   menuReventaBloque: document.querySelector("#menu-reventa-bloque"),
+  menuEditCritico: document.querySelector("#menu-edit-critico"),
   menuReventaInsumo: document.querySelector("#menu-reventa-insumo"),
   menuReventaInsumoAyuda: document.querySelector("#menu-reventa-insumo-ayuda"),
   menuReventaNuevoBloque: document.querySelector("#menu-reventa-nuevo-bloque"),
@@ -1520,8 +1522,11 @@ function productsWithReservedStock() {
     stockDisponible: availableStockForProduct(product),
     // Solo para mostrar: lo que queda de lo comprado, descontando lo que ya esta en el carrito. No bloquea la venta.
     stockReventa: stockReventaPorProducto.has(product.id)
-      ? Math.max(0, Math.floor(stockReventaPorProducto.get(product.id) - quantityInCartForProduct(product.id)))
-      : null
+      ? Math.max(0, Math.floor(stockReventaPorProducto.get(product.id).stock - quantityInCartForProduct(product.id)))
+      : null,
+    // Los umbrales de lo que se compra hecho son los de su insumo.
+    umbralBajo: stockReventaPorProducto.has(product.id) ? stockReventaPorProducto.get(product.id).minimo : product.umbralBajo,
+    umbralCritico: stockReventaPorProducto.has(product.id) ? stockReventaPorProducto.get(product.id).critico : product.umbralCritico
   }));
 }
 
@@ -1787,11 +1792,13 @@ let stockReventaPorProducto = new Map();
 
 async function loadProducts() {
   [categories, products] = await Promise.all([listCategories(), listProducts()]);
-  const [recetas, insumos] = await Promise.all([getAll("recetas"), getAll("insumos")]);
+  const [recetas, insumos, grupos] = await Promise.all([getAll("recetas"), getAll("insumos"), getGruposVariantes().catch(() => [])]);
   const stockInsumo = new Map(insumos.map((i) => [i.id, Number(i.stockActual) || 0]));
+  // Un producto con variante (la Promo bebida: "¿cual?") no es UN insumo: su stock no es el de ninguna bebida en particular.
+  const conVariante = new Set(grupos.flatMap((g) => g.productoIds || []));
   stockReventaPorProducto = new Map();
   for (const p of products) {
-    if (p.controlaStock) continue;
+    if (p.controlaStock || conVariante.has(p.id)) continue;
     // Venta directa = una sola linea de receta, de 1 unidad de un insumo que se cuenta por unidad (o el insumo
     // espejo del mismo nombre). Su stock es el del insumo.
     const lineas = recetas.filter((r) => r.productoId === p.id);
@@ -1799,7 +1806,7 @@ async function loadProducts() {
     const [linea] = lineas;
     const insumo = insumos.find((i) => i.id === linea.insumoId);
     const directa = insumo && insumo.unidad === "unidad" && (Number(linea.cantidadPorUnidad) === 1 || linea.insumoId === p.id);
-    if (directa) stockReventaPorProducto.set(p.id, stockInsumo.get(linea.insumoId) ?? 0);
+    if (directa) stockReventaPorProducto.set(p.id, { stock: stockInsumo.get(linea.insumoId) ?? 0, minimo: Number(insumo.stockMinimo) || 0, critico: Number(insumo.stockCritico) || 0 });
   }
 }
 
@@ -3171,6 +3178,7 @@ async function openMenuProductoAdd(categoriaId) {
   dom.menuEditPrecio.value = "";
   dom.menuEditControlaStock.checked = true;
   dom.menuEditUmbral.value = "10";
+  dom.menuEditCritico.value = "0";
   dom.menuEditSandwichTipo.value = "basico";
   dom.menuEditActivo.checked = true;
   menuRecetaLineas = [];
@@ -3208,6 +3216,7 @@ async function openMenuProductoEdit(producto, { modoInicial } = {}) {
   dom.menuEditPrecio.value = (producto.precioCentavos / 100).toFixed(2);
   dom.menuEditControlaStock.checked = !!producto.controlaStock;
   dom.menuEditUmbral.value = String(producto.umbralBajo ?? 0);
+  dom.menuEditCritico.value = String(producto.umbralCritico ?? 0);
   dom.menuEditSandwichTipo.value = producto.sandwichTipo === "premium" ? "premium" : "basico";
   dom.menuEditActivo.checked = !!producto.activo;
   menuInsumosDisponibles = await listInsumos();
@@ -5264,6 +5273,7 @@ function bindEvents() {
         precioCentavos: Math.round(precio * 100),
         controlaStock: dom.menuEditControlaStock.checked,
         umbralBajo: parseDecimal(dom.menuEditUmbral.value) || 0,
+        umbralCritico: parseDecimal(dom.menuEditCritico.value) || 0,
         sandwichTipo: categoriaId === "sandwiches" ? dom.menuEditSandwichTipo.value : undefined,
         activo: dom.menuEditActivo.checked,
         lineasReceta

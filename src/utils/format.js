@@ -41,6 +41,9 @@ export function slugify(texto) {
 export function stockStatus(product) {
   const stock = Number(product.stockActual) || 0;
   if (stock <= 0) return { label: "Sin stock", className: "out" };
+  // Critico: rojo antes de llegar a cero. 0 o vacio = sin critico (solo el cero).
+  const critico = Number(product.umbralCritico) || 0;
+  if (critico > 0 && stock <= critico) return { label: "Stock crítico", className: "out" };
   if (stock <= product.umbralBajo) return { label: "Stock bajo", className: "low" };
   return { label: "Disponible", className: "ok" };
 }
