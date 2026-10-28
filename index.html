@@ -784,6 +784,8 @@
               <p class="campo-ayuda">Acá cambiás cuánto trae, la unidad y el precio de cada proveedor.</p>
               <div id="editar-insumo-proveedores"></div>
             </div>
+            <button type="button" class="ghost-button" id="editar-insumo-al-menu">Venderlo tal cual (agregar al Menú)</button>
+            <p class="campo-ayuda">Para algo que se compra y se vende hecho (bebidas, alfajores…): lo agrega al Menú sin pasar por Producción.</p>
             <button type="button" class="ghost-button danger" id="editar-insumo-eliminar">Eliminar este insumo</button>
             <p class="campo-ayuda">Solo se puede eliminar si nunca tuvo compras ni consumo ni lo usa ninguna receta. Si no, ocultalo con Pausar.</p>
           </div>
@@ -1059,6 +1061,12 @@
               </div>
 
               <div id="menu-reventa-bloque" hidden>
+                <label class="quantity-field">
+                  <span>¿Qué insumo es? <small class="cal-muted">(el que ya comprás y del que llevás stock)</small></span>
+                  <select id="menu-reventa-insumo"></select>
+                </label>
+                <p class="cal-muted" id="menu-reventa-insumo-ayuda" hidden>Se vende tal cual: cada venta descuenta 1 unidad de ese insumo. No pasa por Producción; el stock se carga como compra en Insumos o con la factura.</p>
+                <div id="menu-reventa-nuevo-bloque">
                 <p class="cal-muted">Cada venta descuenta 1 unidad. Entra en la lista de compras con su proveedor y su precio.</p>
                 <label class="quantity-field">
                   <span>¿A quién se lo comprás?</span>
@@ -1091,6 +1099,7 @@
                     <span>Precio de esa caja o bolsa (€)</span>
                     <input id="menu-reventa-precio" type="text" inputmode="decimal" placeholder="0,00">
                   </label>
+                </div>
                 </div>
               </div>
 

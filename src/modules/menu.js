@@ -254,12 +254,21 @@ export async function saveProducto({ id, categoriaId, nombre, precioCentavos, co
   // Se compra hecho: la receta es la de su insumo espejo.
   if (modoEfectivo === "reventa") {
     const datosReventa = { ...(reventa || {}) };
-    datosReventa.proveedorId = resolverProveedor(
-      { proveedorId: datosReventa.proveedorId, nombre: datosReventa.proveedorNombre, diasCiclo: datosReventa.proveedorDias },
-      proveedoresActuales, proveedoresNuevos, now
-    );
+    // Venta directa de un insumo que YA existe (por ejemplo el que se creo desde un proveedor): se usa ese, con su
+    // stock y sus proveedores, y no se crea nada nuevo. Sin esto solo se podia crear un insumo espejo desde cero.
+    const elegido = datosReventa.insumoId ? insumosActuales.find((i) => i.id === datosReventa.insumoId) : null;
+    if (datosReventa.insumoId && !elegido) throw new Error("Ese insumo ya no existe.");
+    if (!elegido) {
+      datosReventa.proveedorId = resolverProveedor(
+        { proveedorId: datosReventa.proveedorId, nombre: datosReventa.proveedorNombre, diasCiclo: datosReventa.proveedorDias },
+        proveedoresActuales, proveedoresNuevos, now
+      );
+    }
     const espejo = construirEspejoReventa({
-      producto, datos: datosReventa, insumoExistente: insumosActuales.find((i) => i.id === productoId), now
+      producto,
+      datos: elegido ? {} : datosReventa,
+      insumoExistente: elegido || insumosActuales.find((i) => i.id === productoId),
+      now
     });
     insumosAGuardar.push(espejo.insumo);
     recetasAEscribir.push(espejo.receta);

@@ -697,6 +697,10 @@ const dom = {
   menuModoWrap: document.querySelector("#menu-modo-wrap"),
   menuRecetaBloque: document.querySelector("#menu-receta-bloque"),
   menuReventaBloque: document.querySelector("#menu-reventa-bloque"),
+  menuReventaInsumo: document.querySelector("#menu-reventa-insumo"),
+  menuReventaInsumoAyuda: document.querySelector("#menu-reventa-insumo-ayuda"),
+  menuReventaNuevoBloque: document.querySelector("#menu-reventa-nuevo-bloque"),
+  editarInsumoAlMenu: document.querySelector("#editar-insumo-al-menu"),
   menuPruebaBloque: document.querySelector("#menu-prueba-bloque"),
   menuSinRecetaAviso: document.querySelector("#menu-sin-receta-aviso"),
   menuReventaProveedor: document.querySelector("#menu-reventa-proveedor"),
@@ -1788,8 +1792,14 @@ async function loadProducts() {
   stockReventaPorProducto = new Map();
   for (const p of products) {
     if (p.controlaStock) continue;
-    const directa = recetas.some((r) => r.productoId === p.id && r.insumoId === p.id);
-    if (directa && stockInsumo.has(p.id)) stockReventaPorProducto.set(p.id, stockInsumo.get(p.id));
+    // Venta directa = una sola linea de receta, de 1 unidad de un insumo que se cuenta por unidad (o el insumo
+    // espejo del mismo nombre). Su stock es el del insumo.
+    const lineas = recetas.filter((r) => r.productoId === p.id);
+    if (lineas.length !== 1) continue;
+    const [linea] = lineas;
+    const insumo = insumos.find((i) => i.id === linea.insumoId);
+    const directa = insumo && insumo.unidad === "unidad" && (Number(linea.cantidadPorUnidad) === 1 || linea.insumoId === p.id);
+    if (directa) stockReventaPorProducto.set(p.id, stockInsumo.get(linea.insumoId) ?? 0);
   }
 }
 
@@ -3103,6 +3113,38 @@ function actualizarAvisoSinReceta() {
   dom.menuSinRecetaAviso.hidden = !(menuModo === "receta" && !hayLineas && menuProductoMode === "add");
 }
 
+// Insumos que se pueden vender tal cual: los que se cuentan por unidad (una venta = una unidad).
+function llenarInsumosReventa(seleccionado = "") {
+  const candidatos = (menuInsumosDisponibles || [])
+    .filter((i) => i.activo !== false && i.unidad === "unidad")
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  dom.menuReventaInsumo.innerHTML =
+    `<option value="">— Crear uno nuevo con el nombre del producto —</option>` +
+    candidatos.map((i) => `<option value="${i.id}"${i.id === seleccionado ? " selected" : ""}>${i.nombre}</option>`).join("");
+  aplicarInsumoReventa();
+}
+
+function aplicarInsumoReventa() {
+  const elegido = Boolean(dom.menuReventaInsumo.value);
+  dom.menuReventaNuevoBloque.hidden = elegido;
+  dom.menuReventaInsumoAyuda.hidden = !elegido;
+  if (elegido && !dom.menuEditNombre.value.trim()) {
+    const o = dom.menuReventaInsumo.options[dom.menuReventaInsumo.selectedIndex];
+    dom.menuEditNombre.value = o?.textContent || "";
+  }
+}
+
+// Desde un insumo: "se vende tal cual" -> abre el Menu con el producto nuevo ya enlazado a ese insumo.
+async function abrirMenuReventaDesdeInsumo(insumo) {
+  closeEditarInsumoSheet();
+  showGestionSubView("menu");
+  await openMenuProductoAdd("bolleria");
+  dom.menuEditNombre.value = insumo.nombre;
+  aplicarMenuModo("reventa", { selectorVisible: true });
+  llenarInsumosReventa(insumo.id);
+  enfocar(dom.menuEditPrecio);
+}
+
 function llenarProveedoresReventa() {
   dom.menuReventaProveedor.innerHTML =
     `<option value="">— Lo cargo después —</option>` +
@@ -3110,6 +3152,7 @@ function llenarProveedoresReventa() {
     `<option value="__nuevo__">+ Proveedor nuevo…</option>`;
   dom.menuReventaDetalle.hidden = true;
   dom.menuReventaProveedorNuevo.hidden = true;
+  llenarInsumosReventa("");
   for (const campo of [dom.menuReventaNombre, dom.menuReventaUnidad, dom.menuReventaTrae, dom.menuReventaPrecio, dom.menuReventaProveedorNombre, dom.menuReventaProveedorDias]) campo.value = "";
 }
 
@@ -4989,6 +5032,10 @@ function bindEvents() {
   });
   // Elegir proveedor muestra los datos de la compra; el nombre de factura
   // arranca igual al del producto, que es lo mas probable.
+  dom.menuReventaInsumo.addEventListener("change", aplicarInsumoReventa);
+  dom.editarInsumoAlMenu.addEventListener("click", () => {
+    if (editarInsumoOriginal) abrirMenuReventaDesdeInsumo(editarInsumoOriginal).catch((e) => setFlash(e.message || "No se pudo abrir el Menú.", "error"));
+  });
   dom.menuReventaProveedor.addEventListener("change", () => {
     const conProveedor = Boolean(dom.menuReventaProveedor.value);
     dom.menuReventaDetalle.hidden = !conProveedor;
@@ -5183,7 +5230,8 @@ function bindEvents() {
       let reventa = null;
       if (menuModo === "reventa") {
         reventa = {
-          proveedorId: dom.menuReventaProveedor.value,
+          insumoId: dom.menuReventaInsumo.value,
+          proveedorId: dom.menuReventaInsumo.value ? "" : dom.menuReventaProveedor.value,
           proveedorNombre: dom.menuReventaProveedorNombre.value.trim(),
           proveedorDias: dom.menuReventaProveedorDias.value,
           nombreProducto: dom.menuReventaNombre.value.trim() || nombre,
@@ -5191,7 +5239,7 @@ function bindEvents() {
           cantidadPorUnidad: parseDecimal(dom.menuReventaTrae.value),
           precio: parseDecimal(dom.menuReventaPrecio.value)
         };
-        if (reventa.proveedorId) {
+        if (reventa.proveedorId && !reventa.insumoId) {
           if (reventa.proveedorId === "__nuevo__" && !reventa.proveedorNombre) throw new Error("Poné el nombre del proveedor nuevo.");
           if (!reventa.unidadCompra) throw new Error("Poné cómo te lo factura (caja, bolsa, unidad...).");
           if (!(reventa.cantidadPorUnidad > 0)) throw new Error("Falta cuántas unidades trae.");

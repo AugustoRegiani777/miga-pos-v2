@@ -170,10 +170,13 @@ export function construirEspejoReventa({ producto, datos = {}, insumoExistente =
     ? { ...insumoExistente, activo: true, actualizadoEn: now }
     : { ...construirInsumoNuevo(producto.nombre, new Set(), { unidad: "unidad" }), id: producto.id };
   const receta = {
-    id: `${producto.id}:${producto.id}`,
+    id: `${producto.id}:${insumo.id}`,
     productoId: producto.id,
     insumoId: insumo.id,
     cantidadPorUnidad: 1,
+    // Una unidad vendida es una unidad que sale del stock: exacto, no se aprende (si no, la calibracion lo
+    // "corrige" a 1,33 y las cuentas dejan de dar).
+    recetaFija: true,
     esEstimado: false,
     creadoEn: now,
     actualizadoEn: now
