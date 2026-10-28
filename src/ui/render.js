@@ -130,6 +130,9 @@ export function renderProductGrid(container, categories, products, onProductClic
         } else if (muestraReventa) {
           const pill = button.querySelector(".stock-pill");
           pill.textContent = `${product.stockReventa} disp.`;
+          // La plantilla ya le puso el estado del stock PROPIO del producto (0 en una venta directa = rojo): se saca
+          // antes de poner el del insumo, si no quedan los dos y el rojo gana.
+          pill.classList.remove("out", "low", "ok");
           pill.classList.add(stockStatus({ stockActual: product.stockReventa, umbralBajo: 0 }).className);
         }
         button.addEventListener("click", () => onProductClick(product));
