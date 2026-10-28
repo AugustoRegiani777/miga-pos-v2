@@ -241,10 +241,20 @@ button {
 }
 
 .flash-stack {
+  /* Flotante: el aviso se ve en cualquier parte de la pagina (antes quedaba arriba de todo y, con la lista
+     scrolleada, la persona tocaba y "no pasaba nada"). Por encima de las hojas y del dialogo de confirmacion. */
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(94vw, 640px);
+  z-index: 200;
   display: grid;
   gap: 8px;
-  margin-bottom: 14px;
+  margin: 0;
+  pointer-events: none;
 }
+.flash-stack .flash-message { box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35); pointer-events: auto; }
 
 .flash-message {
   margin: 0;
