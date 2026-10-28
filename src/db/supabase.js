@@ -554,6 +554,14 @@ export async function deleteInsumoRemoto(insumoId) {
   }
 }
 
+// Para decidir si un insumo se puede BORRAR de verdad: si en la nube tiene movimientos (compras, consumo, ajustes),
+// borrarlo se llevaria su historia (ON DELETE CASCADE), asi que solo se puede ocultar.
+export async function insumoTieneMovimientosRemotos(insumoId) {
+  const q = encodeURIComponent(insumoId);
+  const filas = await sbFetch(`/movimientos_insumos?insumo_id=eq.${q}&select=id&limit=1`);
+  return Array.isArray(filas) && filas.length > 0;
+}
+
 export async function deleteProveedorInsumoRemoto(lineaId) {
   const q = encodeURIComponent(lineaId);
   await sbFetch(`/proveedor_insumos?id=eq.${q}`, "DELETE");

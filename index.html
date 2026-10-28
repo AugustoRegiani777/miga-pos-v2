@@ -734,6 +734,65 @@
         </form>
       </section>
 
+      <!-- Sheet: editar un insumo existente (nombre, unidad, envase, minimos) -->
+      <section class="production-sheet-backdrop" id="editar-insumo-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="editar-insumo-sheet" aria-hidden="true">
+        <form id="editar-insumo-form" class="stock-form" novalidate>
+          <div class="production-sheet-header">
+            <div><h2>Editar insumo</h2></div>
+            <button type="button" class="ghost-button compact" id="close-editar-insumo">Cerrar</button>
+          </div>
+          <div class="sheet-scroll-body">
+            <label class="quantity-field">
+              <span>Nombre</span>
+              <input id="editar-insumo-nombre" type="text" required>
+            </label>
+            <label class="quantity-field">
+              <span>Unidad en la que lo gastás</span>
+              <select id="editar-insumo-unidad">
+                <option value="g">g · gramos</option>
+                <option value="ml">ml · mililitros</option>
+                <option value="unidad">unidad</option>
+                <option value="rebanada">rebanada</option>
+              </select>
+            </label>
+            <div id="editar-insumo-factor-wrap" hidden>
+              <p class="form-instruccion" id="editar-insumo-factor-texto"></p>
+              <label class="quantity-field">
+                <span id="editar-insumo-factor-label">¿Cuánto es 1 de la unidad vieja?</span>
+                <input id="editar-insumo-factor" type="text" inputmode="decimal" placeholder="1000">
+              </label>
+            </div>
+            <label class="quantity-field">
+              <span>¿Cómo lo contás? <small>(botella, bolsa, kg... vacío si lo contás suelto)</small></span>
+              <input id="editar-insumo-envase" type="text" placeholder="botella">
+            </label>
+            <label class="quantity-field">
+              <span>¿Cuánto trae cada uno? <small>(en la unidad base)</small></span>
+              <input id="editar-insumo-envase-trae" type="text" inputmode="decimal" placeholder="1000">
+            </label>
+            <label class="quantity-field">
+              <span>Stock mínimo</span>
+              <input id="editar-insumo-min" type="text" inputmode="decimal">
+            </label>
+            <label class="quantity-field">
+              <span>Stock crítico</span>
+              <input id="editar-insumo-crit" type="text" inputmode="decimal">
+            </label>
+            <div class="editar-insumo-proveedores">
+              <h3>Lo que te venden los proveedores</h3>
+              <p class="campo-ayuda">Acá cambiás cuánto trae, la unidad y el precio de cada proveedor.</p>
+              <div id="editar-insumo-proveedores"></div>
+            </div>
+            <button type="button" class="ghost-button danger" id="editar-insumo-eliminar">Eliminar este insumo</button>
+            <p class="campo-ayuda">Solo se puede eliminar si nunca tuvo compras ni consumo ni lo usa ninguna receta. Si no, ocultalo con Pausar.</p>
+          </div>
+          <div class="sheet-footer">
+            <button class="primary-button" type="submit">Guardar cambios</button>
+          </div>
+        </form>
+      </section>
+
       <!-- Panel con borde, para que se vea que es una lista que se despliega de
            "Qué pedir" y no una pantalla nueva. Se cierra desde su propio encabezado. -->
       <section id="lista-compras-section" class="panel-lista-compras" hidden>
@@ -867,6 +926,7 @@
               <span>¿Qué insumo es? <span class="cal-muted">(el que usás y del que llevás stock)</span></span>
               <select id="prov-prod-insumo"></select>
             </label>
+            <button type="button" class="ghost-button compact" id="prov-prod-editar-insumo" hidden>Editar este insumo (unidad, cuánto trae, mínimos…)</button>
             <div id="prov-prod-nuevo-insumo-fields" hidden>
               <label class="quantity-field">
                 <span>Nombre del insumo nuevo</span>
@@ -1231,7 +1291,10 @@
           <h2>Registrar</h2>
           <p>Compra recibida o ajuste manual de stock.</p>
         </div>
-        <button type="button" class="ghost-button compact" id="close-insumos-ajuste" aria-label="Cerrar">Cerrar</button>
+        <div class="sheet-header-acciones">
+          <button type="button" class="ghost-button compact" id="insumos-editar-abrir">Editar insumo</button>
+          <button type="button" class="ghost-button compact" id="close-insumos-ajuste" aria-label="Cerrar">Cerrar</button>
+        </div>
       </div>
       <div class="sheet-scroll-body">
         <div class="production-selected-box" id="insumos-ajuste-selected">

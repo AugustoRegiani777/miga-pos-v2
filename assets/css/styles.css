@@ -4656,3 +4656,11 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .cierre-contar-fila { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .cierre-contar-fila .cierre-field { min-width: 0; }
 .cierre-contar-fila .cierre-field input { width: 100%; box-sizing: border-box; min-width: 0; }
+
+.sheet-header-acciones { display: flex; gap: 8px; align-items: center; }
+
+.editar-insumo-proveedores { margin-top: 14px; }
+.editar-insumo-proveedores h3 { margin: 0 0 4px; font-size: 1rem; }
+.ghost-button.danger { color: var(--txt-out, #a32020); border-color: var(--txt-out, #a32020); }
+.insumo-en-pausa-acciones { display: flex; gap: 6px; }
+#editar-insumo-eliminar { margin-top: 18px; width: 100%; }

@@ -10,7 +10,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF, PRUEBA_SIN_BASE } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -553,6 +553,24 @@ const dom = {
   exportListaCompras: document.querySelector("#export-lista-compras"),
   abrirFactura: document.querySelector("#abrir-factura"),
   abrirCrearInsumo: document.querySelector("#abrir-crear-insumo"),
+  insumosEditarAbrir: document.querySelector("#insumos-editar-abrir"),
+  editarInsumoBackdrop: document.querySelector("#editar-insumo-backdrop"),
+  editarInsumoSheet: document.querySelector("#editar-insumo-sheet"),
+  closeEditarInsumo: document.querySelector("#close-editar-insumo"),
+  editarInsumoForm: document.querySelector("#editar-insumo-form"),
+  editarInsumoNombre: document.querySelector("#editar-insumo-nombre"),
+  editarInsumoUnidad: document.querySelector("#editar-insumo-unidad"),
+  editarInsumoFactorWrap: document.querySelector("#editar-insumo-factor-wrap"),
+  editarInsumoFactorTexto: document.querySelector("#editar-insumo-factor-texto"),
+  editarInsumoFactorLabel: document.querySelector("#editar-insumo-factor-label"),
+  editarInsumoFactor: document.querySelector("#editar-insumo-factor"),
+  editarInsumoEnvase: document.querySelector("#editar-insumo-envase"),
+  editarInsumoEnvaseTrae: document.querySelector("#editar-insumo-envase-trae"),
+  editarInsumoMin: document.querySelector("#editar-insumo-min"),
+  editarInsumoCrit: document.querySelector("#editar-insumo-crit"),
+  editarInsumoProveedores: document.querySelector("#editar-insumo-proveedores"),
+  editarInsumoEliminar: document.querySelector("#editar-insumo-eliminar"),
+  provProdEditarInsumo: document.querySelector("#prov-prod-editar-insumo"),
   crearInsumoBackdrop: document.querySelector("#crear-insumo-backdrop"),
   crearInsumoSheet: document.querySelector("#crear-insumo-sheet"),
   closeCrearInsumo: document.querySelector("#close-crear-insumo"),
@@ -1176,6 +1194,67 @@ function openCrearInsumoSheet() {
   enfocar(dom.crearInsumoNombre);
 }
 
+// ---- Editar un insumo existente
+let editarInsumoOriginal = null;
+let editarInsumoInProgress = false;
+
+function pintarFactorDeUnidad() {
+  const o = editarInsumoOriginal;
+  if (!o) return;
+  const cambia = dom.editarInsumoUnidad.value !== o.unidad;
+  dom.editarInsumoFactorWrap.hidden = !cambia;
+  if (!cambia) return;
+  const nueva = dom.editarInsumoUnidad.value;
+  dom.editarInsumoFactorTexto.textContent = `Lo que ya cargaste está en "${o.unidad}" (hoy hay ${o.stockActual} ${o.unidad}). Para pasarlo a "${nueva}" necesito saber cuánto vale cada uno. El stock, las recetas y las líneas de proveedor de este insumo se convierten solos; lo que ya quedó anotado en el historial no se toca.`;
+  dom.editarInsumoFactorLabel.textContent = `1 ${o.unidad} cargado equivale a cuántos ${nueva}`;
+  dom.editarInsumoFactor.placeholder = o.unidad === "unidad" && (nueva === "g" || nueva === "ml") ? "1000 (si cada unidad era 1 kg o 1 L)" : "1";
+}
+
+const esc = (valor) => String(valor ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+async function pintarProveedoresDelInsumo(insumoId) {
+  const [lineas, proveedores] = await Promise.all([getAll("proveedor_insumos"), getAll("proveedores")]);
+  const suyas = lineas.filter((l) => l.insumoId === insumoId && l.activo !== false);
+  dom.editarInsumoProveedores.innerHTML = suyas.length === 0
+    ? `<p class="cal-muted">Ningún proveedor lo vende todavía.</p>`
+    : suyas.map((l) => {
+        const prov = proveedores.find((p) => p.id === l.proveedorId);
+        return `<div class="insumo-en-pausa-fila">
+          <span>${esc(prov?.nombre || l.proveedorId)} · ${esc(l.nombreProducto)}<br><small class="cal-muted">${centsToMoney(l.precioUnitarioCentavos)} por ${esc(l.unidadCompra)} · trae ${l.cantidadPorUnidad}</small></span>
+          <button type="button" class="ghost-button compact" data-editar-linea="${esc(l.id)}">Editar</button>
+        </div>`;
+      }).join("");
+}
+
+async function openEditarInsumoSheet(insumoParam = null) {
+  const i = insumoParam && insumoParam.id ? insumoParam : selectedInsumo;
+  if (!i) return;
+  selectedInsumo = i;
+  await pintarProveedoresDelInsumo(i.id);
+  editarInsumoOriginal = { ...i };
+  dom.editarInsumoNombre.value = i.nombre;
+  dom.editarInsumoUnidad.value = i.unidad;
+  dom.editarInsumoFactor.value = "";
+  const tieneEnvase = Number(i.factorConversion) > 1 && i.unidadCompra && i.unidadCompra !== i.unidad;
+  dom.editarInsumoEnvase.value = tieneEnvase ? i.unidadCompra : "";
+  dom.editarInsumoEnvaseTrae.value = tieneEnvase ? String(i.factorConversion) : "";
+  dom.editarInsumoMin.value = String(i.stockMinimo ?? "");
+  dom.editarInsumoCrit.value = String(i.stockCritico ?? "");
+  pintarFactorDeUnidad();
+  setInsumosAjusteSheetOpen(false);
+  setSheetOpen(dom.editarInsumoSheet, dom.editarInsumoBackdrop, true);
+  enfocar(dom.editarInsumoNombre);
+}
+
+function actualizarBotonEditarInsumoProvProd() {
+  const id = dom.provProdInsumo.value;
+  dom.provProdEditarInsumo.hidden = !id || id === "__nuevo__";
+}
+
+function closeEditarInsumoSheet() {
+  setSheetOpen(dom.editarInsumoSheet, dom.editarInsumoBackdrop, false);
+}
+
 function closeCrearInsumoSheet() {
   setCrearInsumoSheetOpen(false);
 }
@@ -1434,7 +1513,11 @@ function availableStockForProduct(product) {
 function productsWithReservedStock() {
   return products.map((product) => ({
     ...product,
-    stockDisponible: availableStockForProduct(product)
+    stockDisponible: availableStockForProduct(product),
+    // Solo para mostrar: lo que queda de lo comprado, descontando lo que ya esta en el carrito. No bloquea la venta.
+    stockReventa: stockReventaPorProducto.has(product.id)
+      ? Math.max(0, Math.floor(stockReventaPorProducto.get(product.id) - quantityInCartForProduct(product.id)))
+      : null
   }));
 }
 
@@ -1693,8 +1776,21 @@ function resetVuelto() {
   dom.vueltoResultado.hidden = true;
 }
 
+// Productos de compra y venta directa (medialunas, bebidas, alfajores...): no se producen, se compran y se
+// venden tal cual. Su stock ES el del insumo del mismo nombre (receta 1 a 1 con su propio id), asi que lo
+// que se compra en Insumos se ve en la Caja. Mapa productoId -> unidades en stock.
+let stockReventaPorProducto = new Map();
+
 async function loadProducts() {
   [categories, products] = await Promise.all([listCategories(), listProducts()]);
+  const [recetas, insumos] = await Promise.all([getAll("recetas"), getAll("insumos")]);
+  const stockInsumo = new Map(insumos.map((i) => [i.id, Number(i.stockActual) || 0]));
+  stockReventaPorProducto = new Map();
+  for (const p of products) {
+    if (p.controlaStock) continue;
+    const directa = recetas.some((r) => r.productoId === p.id && r.insumoId === p.id);
+    if (directa && stockInsumo.has(p.id)) stockReventaPorProducto.set(p.id, stockInsumo.get(p.id));
+  }
 }
 
 // Catalogo local (nombre/precio/categoria, igual en todos los dispositivos
@@ -1756,7 +1852,9 @@ async function renderCashier() {
   renderCurrentCart();
 }
 
-async function renderProductionView() {
+// `rapido`: dibuja ya con lo de ESTE dispositivo (sin esperar a la nube). Se usa justo despues de guardar algo,
+// para que el numero se vea en el momento; despues se vuelve a dibujar con la nube.
+async function renderProductionView({ rapido = false } = {}) {
   if (isModoConsulta()) {
     dom.productionGroups.style.display = "none";
     dom.produccionConsulta.hidden = false;
@@ -1796,7 +1894,9 @@ async function renderProductionView() {
   let snapshot = null;
   let historicoProduccion = null;
   let soloLocal = false;
-  if (navigator.onLine) {
+  if (rapido) {
+    // nada: cae al calculo local de abajo, que ya incluye lo recien guardado
+  } else if (navigator.onLine) {
     try {
       // Con internet SIEMPRE se mira la nube (lo de todos los dispositivos), mas lo propio que aun no subio.
       const remoto = await datosRemotosDelDia(todayISO(), { conPendientesLocales: true });
@@ -2456,8 +2556,28 @@ async function renderInsumosEnPausa() {
   dom.insumosEnPausaLista.innerHTML = enPausa.map((i) => `
     <div class="insumo-en-pausa-fila">
       <span>${i.nombre}</span>
-      <button type="button" class="ghost-button compact" data-reactivar="${i.id}">Reactivar</button>
+      <span class="insumo-en-pausa-acciones">
+        <button type="button" class="ghost-button compact" data-reactivar="${i.id}">Reactivar</button>
+        <button type="button" class="ghost-button compact danger" data-eliminar-insumo="${i.id}">Eliminar</button>
+      </span>
     </div>`).join("");
+}
+
+async function handleEliminarInsumoEnPausa(insumoId) {
+  const insumo = await getOne("insumos", insumoId);
+  const ok = await confirmDialog({
+    title: "Eliminar insumo",
+    message: `Se borra "${insumo?.nombre || insumoId}" para siempre, con las líneas de proveedor que tenga. Solo se puede si nunca tuvo compras ni consumo. ¿Eliminar?`,
+    acceptText: "Eliminar"
+  });
+  if (!ok) return;
+  try {
+    const r = await eliminarInsumoDefinitivo(insumoId);
+    setFlash(`"${r.nombre}" eliminado.`, "success");
+    await renderInsumosView();
+  } catch (error) {
+    setFlash(error.message || "No se pudo eliminar.", "error");
+  }
 }
 
 async function handleReactivarInsumo(insumoId) {
@@ -2736,6 +2856,7 @@ async function openProvProdAdd(proveedorId) {
   limpiarProvProdNuevoInsumoFields();
   const insumos = await listInsumos();
   renderProvProdInsumoSelect(dom.provProdInsumo, insumos, "");
+  actualizarBotonEditarInsumoProvProd();
   provProdProductosDisponibles = await listProducts();
   await refrescarProvProdReceta();
   setProvProdSheetOpen(true);
@@ -2755,6 +2876,7 @@ async function openProvProdEdit(producto) {
   limpiarProvProdNuevoInsumoFields();
   const insumos = await listInsumos();
   renderProvProdInsumoSelect(dom.provProdInsumo, insumos, producto.insumoId ?? "");
+  actualizarBotonEditarInsumoProvProd();
   provProdProductosDisponibles = await listProducts();
   await refrescarProvProdReceta();
   setProvProdSheetOpen(true);
@@ -3999,9 +4121,16 @@ async function commitProduction(productId, quantityRaw) {
     setFlash("Produccion guardada.", "success");
   }
   closeProductionSheet();
-  trySyncMovimientoStock(movimiento).catch(() => {});
-  if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
+  // Se dibuja ya con lo local (se ve el numero al instante) y, cuando termina de subir, otra vez con la nube.
+  const subida = Promise.allSettled([
+    trySyncMovimientoStock(movimiento),
+    movimientosInsumos.length > 0 ? trySyncMovimientosInsumos(movimientosInsumos) : null
+  ]);
   await renderCashier();
+  if (currentView === "produccion") {
+    await renderProductionView({ rapido: true });
+    subida.then(() => { if (currentView === "produccion") renderProductionView().catch(() => {}); });
+  }
 }
 
 // Uso puntual, una vez: pone en 0 el stock de todos los productos activos
@@ -4323,6 +4452,8 @@ function bindEvents() {
   dom.insumosEnPausaLista?.addEventListener("click", (e) => {
     const b = e.target.closest("[data-reactivar]");
     if (b) handleReactivarInsumo(b.dataset.reactivar);
+    const del = e.target.closest("[data-eliminar-insumo]");
+    if (del) handleEliminarInsumoEnPausa(del.dataset.eliminarInsumo);
   });
   dom.closeInsumosAjuste.addEventListener("click", closeInsumoAjusteSheet);
   dom.insumosAjusteBackdrop.addEventListener("click", closeInsumoAjusteSheet);
@@ -4512,6 +4643,83 @@ function bindEvents() {
   dom.facturaBackdrop.addEventListener("click", closeFacturaSheet);
 
   dom.abrirCrearInsumo.addEventListener("click", openCrearInsumoSheet);
+  dom.insumosEditarAbrir.addEventListener("click", () => { openEditarInsumoSheet().catch(() => {}); });
+  // Editar una linea de proveedor desde el insumo (cuanto trae, unidad, precio).
+  dom.editarInsumoProveedores.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-editar-linea]");
+    if (!b) return;
+    const linea = await getOne("proveedor_insumos", b.dataset.editarLinea);
+    if (!linea) return;
+    // La hoja de la linea vive dentro de la pestaña Proveedores: hay que estar ahi para que se vea.
+    showGestionSubView("proveedores");
+    await openProvProdEdit(linea);
+  });
+  dom.editarInsumoEliminar.addEventListener("click", async () => {
+    const o = editarInsumoOriginal;
+    if (!o) return;
+    const ok = await confirmDialog({
+      title: "Eliminar insumo",
+      message: `Se borra "${o.nombre}" y las líneas de los proveedores que lo venden. Solo se puede si nunca tuvo compras ni consumo. No se puede deshacer.`,
+      acceptText: "Eliminar"
+    });
+    if (!ok) return;
+    try {
+      const r = await eliminarInsumoDefinitivo(o.id);
+      setFlash(`"${r.nombre}" eliminado.`, "success");
+      closeEditarInsumoSheet();
+      await renderInsumosView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo eliminar.", "error");
+    }
+  });
+  // Desde un proveedor: ir a editar el insumo que esa linea lleva.
+  dom.provProdEditarInsumo.addEventListener("click", async () => {
+    const id = dom.provProdInsumo.value;
+    if (!id || id === "__nuevo__") return;
+    const insumo = await getOne("insumos", id);
+    if (!insumo) return;
+    showGestionSubView("insumos");
+    await openEditarInsumoSheet(insumo);
+  });
+  dom.provProdInsumo.addEventListener("change", actualizarBotonEditarInsumoProvProd);
+  dom.closeEditarInsumo.addEventListener("click", closeEditarInsumoSheet);
+  dom.editarInsumoBackdrop.addEventListener("click", closeEditarInsumoSheet);
+  dom.editarInsumoUnidad.addEventListener("change", pintarFactorDeUnidad);
+  dom.editarInsumoForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (editarInsumoInProgress || !editarInsumoOriginal) return;
+    const o = editarInsumoOriginal;
+    const cambiaUnidad = dom.editarInsumoUnidad.value !== o.unidad;
+    // Si cambia la unidad y no se toco el minimo/critico, se convierten solos (vacio = "convertilo").
+    const sinTocar = (campo, original) => (cambiaUnidad && campo.value === String(original ?? "") ? "" : campo.value);
+    if (cambiaUnidad) {
+      const ok = await confirmDialog({
+        title: "Cambiar la unidad",
+        message: `"${o.nombre}" pasa de ${o.unidad} a ${dom.editarInsumoUnidad.value}: 1 ${o.unidad} = ${dom.editarInsumoFactor.value || "?"} ${dom.editarInsumoUnidad.value}. El stock actual (${o.stockActual} ${o.unidad}) se convierte y queda anotado un movimiento de ajuste. ¿Seguir?`,
+        acceptText: "Cambiar unidad"
+      });
+      if (!ok) return;
+    }
+    try {
+      editarInsumoInProgress = true;
+      const r = await editarInsumo(o.id, {
+        nombre: dom.editarInsumoNombre.value,
+        unidad: dom.editarInsumoUnidad.value,
+        factorUnidad: dom.editarInsumoFactor.value,
+        unidadCompra: dom.editarInsumoEnvase.value,
+        factorConversion: dom.editarInsumoEnvaseTrae.value,
+        stockMinimo: sinTocar(dom.editarInsumoMin, o.stockMinimo),
+        stockCritico: sinTocar(dom.editarInsumoCrit, o.stockCritico)
+      });
+      setFlash(r.cambioUnidad ? `Insumo actualizado. Unidad cambiada a ${r.insumo.unidad}${r.recetasReexpresadas ? `; ${r.recetasReexpresadas} receta(s) convertida(s)` : ""}.` : "Insumo actualizado.", "success");
+      closeEditarInsumoSheet();
+      await renderInsumosView();
+    } catch (error) {
+      setFlash(error.message || "No se pudo guardar el insumo.", "error");
+    } finally {
+      editarInsumoInProgress = false;
+    }
+  });
   dom.closeCrearInsumo.addEventListener("click", closeCrearInsumoSheet);
   dom.crearInsumoBackdrop.addEventListener("click", closeCrearInsumoSheet);
 
@@ -4670,6 +4878,17 @@ function bindEvents() {
       if (!nombre) throw new Error("El nombre del producto es obligatorio.");
       if (!unidad) throw new Error("La unidad de compra es obligatoria.");
       if (isNaN(precio) || precio < 0) throw new Error("Ingresa un precio válido.");
+      if (!dom.provProdInsumo.value && provProdMode === "add") {
+        // Sin insumo vinculado la linea no aparece en Insumos ni en la lista de compras. Se ofrece crear el insumo
+        // ya (con este mismo nombre) en vez de guardar algo que despues "no aparece".
+        dom.provProdInsumo.value = "__nuevo__";
+        dom.provProdNuevoNombre.value = nombre;
+        updateProvProdCantidadLabel();
+        actualizarBotonEditarInsumoProvProd();
+        setFlash("Falta elegir el insumo. Armé uno nuevo con este nombre: elegí en qué unidad lo gastás (g, ml, unidad…) y guardá de nuevo.", "warning");
+        enfocar(dom.provProdNuevoUnidad);
+        return;
+      }
       const insumoId = dom.provProdInsumo.value || null;
       const cantidad = parseDecimal(dom.provProdCantidad.value) || 1;
       const esInsumoNuevo = insumoId === "__nuevo__";

@@ -112,7 +112,8 @@ export function renderProductGrid(container, categories, products, onProductClic
         button.dataset.price = product.precioCentavos;
         button.dataset.stock = displayStock;
         button.dataset.controlsStock = product.controlaStock ? "1" : "0";
-        button.innerHTML = product.controlaStock
+        const muestraReventa = !product.controlaStock && product.stockReventa !== null && product.stockReventa !== undefined;
+        button.innerHTML = (product.controlaStock || muestraReventa)
           ? `
             <span class="product-name"></span>
             <span class="product-meta"></span>
@@ -126,6 +127,10 @@ export function renderProductGrid(container, categories, products, onProductClic
         button.querySelector(".product-meta").textContent = centsToMoney(product.precioCentavos);
         if (product.controlaStock) {
           button.querySelector(".stock-pill").textContent = `${displayStock} disp.`;
+        } else if (muestraReventa) {
+          const pill = button.querySelector(".stock-pill");
+          pill.textContent = `${product.stockReventa} disp.`;
+          pill.classList.add(stockStatus({ stockActual: product.stockReventa, umbralBajo: 0 }).className);
         }
         button.addEventListener("click", () => onProductClick(product));
         grid.appendChild(button);

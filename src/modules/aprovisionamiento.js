@@ -1,9 +1,10 @@
 import { getAll, getOne, putOne, countAll, withStores, requestToPromise } from "../db/idb.js";
 import { todayISO } from "../utils/format.js";
+import { normalizarUnidadBase } from "../utils/unidades.js";
 import { getMermas, pctDeMerma, cantidadDeMerma } from "./mermas.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount, hayPendientesDeTipo } from "./sync.js";
-import { fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
+import { insumoTieneMovimientosRemotos, fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
@@ -902,6 +903,43 @@ export async function descartarInsumo(insumoId) {
   if (suyas.length > 0) trySyncProveedorInsumosSnapshot(piFinal).catch(() => {});
 
   return { nombre: insumo.nombre, lineasProveedor: suyas.length };
+}
+
+// BORRAR un insumo de verdad (no ocultarlo). Solo si no deja historia atras: sin movimientos de stock (ni en este
+// dispositivo ni en la nube, porque borrarlo se llevaria su historial) y sin recetas ni variantes que lo usen.
+// Si tiene historial, lo correcto es pausarlo (no aparece en ningun lado, pero la historia queda). Sus lineas de
+// proveedor se borran con el. La nube se borra PRIMERO: si falla o no hay conexion, no se toca nada local.
+export async function eliminarInsumoDefinitivo(insumoId) {
+  const insumo = await getOne("insumos", insumoId);
+  if (!insumo) throw new Error("Ese insumo no existe en este dispositivo.");
+
+  const [recetas, movimientos, proveedorInsumos, grupos] = await Promise.all([
+    getAll("recetas"), getAll("movimientos_insumos"), getAll("proveedor_insumos"), getGruposVariantes().catch(() => [])
+  ]);
+  const enUso = recetas.filter((r) => r.insumoId === insumoId);
+  if (enUso.length > 0) {
+    const productos = await getAll("productos");
+    const nombres = enUso.map((r) => productos.find((p) => p.id === r.productoId)?.nombre || r.productoId).slice(0, 3);
+    throw new Error(`No se puede borrar: lo usa ${nombres.join(", ")}${enUso.length > 3 ? ` y ${enUso.length - 3} más` : ""}. Sacalo de esas recetas primero.`);
+  }
+  if (JSON.stringify(grupos).includes(`"${insumoId}"`)) {
+    throw new Error("No se puede borrar: es una opción de una variante (por ejemplo un tipo de leche). Sacalo de la variante primero.");
+  }
+  const tieneHistorial = movimientos.some((m) => m.insumoId === insumoId)
+    || await insumoTieneMovimientosRemotos(insumoId).catch(() => { throw new Error("Hace falta conexión para borrarlo (se revisa que no tenga historial en la nube)."); });
+  if (tieneHistorial) {
+    throw new Error("Tiene historial de stock (compras o consumo): borrarlo se lo llevaría. Pausalo en su lugar: deja de aparecer pero la historia queda.");
+  }
+
+  const lineas = proveedorInsumos.filter((pi) => pi.insumoId === insumoId);
+  for (const l of lineas) await deleteProveedorInsumoRemoto(l.id).catch(() => {});
+  await deleteInsumoRemoto(insumoId);
+
+  await withStores(["insumos", "proveedor_insumos"], "readwrite", (stores) => {
+    stores.insumos.delete(insumoId);
+    for (const l of lineas) stores.proveedor_insumos.delete(l.id);
+  });
+  return { nombre: insumo.nombre, lineasProveedor: lineas.length };
 }
 
 // Pausar un insumo: "por ahora no lo uso". Sale de las listas, de la lista de compras y de los
@@ -2491,4 +2529,76 @@ export async function restoreInsumosInTx(stores, saleItems, ventaId, fecha, now,
     movimientosCreados.push(mov);
   }
   return movimientosCreados;
+}
+
+// Editar un insumo ya creado: nombre, minimos, envase y —si se cargo mal— la unidad base.
+//
+// Cambiar la UNIDAD BASE es lo delicado: el stock se deriva del ledger (movimientos_insumos), asi que no se
+// reescribe nada a ciegas. Se pide cuanto vale 1 de la unidad vieja en la nueva (`factorUnidad`) y:
+//   - el stock se corrige con UN movimiento "calibracion" por la diferencia (el historial viejo queda como estaba,
+//     escrito en la unidad vieja, y el stock da bien);
+//   - las recetas y las lineas de proveedor que usan este insumo se reexpresan (estaban en la unidad vieja).
+// Sin cambio de unidad solo se actualizan los campos; no se toca el stock.
+export async function editarInsumo(insumoId, { nombre, unidad, factorUnidad = 1, unidadCompra, factorConversion, stockMinimo, stockCritico }) {
+  const [insumos, recetas, proveedorInsumos] = await Promise.all([getAll("insumos"), getAll("recetas"), getAll("proveedor_insumos")]);
+  const insumo = insumos.find((i) => i.id === insumoId);
+  if (!insumo) throw new Error("Insumo no encontrado.");
+
+  const nombreLimpio = String(nombre ?? insumo.nombre).trim();
+  if (!nombreLimpio) throw new Error("El nombre no puede quedar vacío.");
+  const unidadNueva = unidad ? normalizarUnidadBase(unidad) : insumo.unidad;
+  if (!unidadNueva) throw new Error("Elegí la unidad: g, ml, unidad o rebanada.");
+  const cambiaUnidad = unidadNueva !== insumo.unidad;
+  const f = cambiaUnidad ? Number(String(factorUnidad).replace(",", ".")) : 1;
+  if (cambiaUnidad && !(Number.isFinite(f) && f > 0)) {
+    throw new Error(`Decí cuántos ${unidadNueva} equivale 1 ${insumo.unidad} de lo que ya cargaste.`);
+  }
+  const num = (v, actual) => {
+    if (v === "" || v === null || v === undefined) return actual;
+    const n = Number(String(v).replace(",", "."));
+    if (!Number.isFinite(n) || n < 0) throw new Error("Hay un número que no se entiende.");
+    return n;
+  };
+  const envaseNombre = String(unidadCompra ?? "").trim();
+  const envaseTrae = num(factorConversion, null);
+  const tieneEnvase = Boolean(envaseNombre) && envaseTrae !== null && envaseTrae > 1;
+
+  const now = new Date().toISOString();
+  const stockAnterior = Number(insumo.stockActual) || 0;
+  const stockNuevo = cambiaUnidad ? Math.round(stockAnterior * f * 1000) / 1000 : stockAnterior;
+  const actualizado = {
+    ...insumo,
+    nombre: nombreLimpio,
+    unidad: unidadNueva,
+    unidadCompra: tieneEnvase ? envaseNombre : unidadNueva,
+    factorConversion: tieneEnvase ? envaseTrae : 1,
+    stockActual: stockNuevo,
+    stockMinimo: num(stockMinimo, cambiaUnidad ? insumo.stockMinimo * f : insumo.stockMinimo),
+    stockCritico: num(stockCritico, cambiaUnidad ? insumo.stockCritico * f : insumo.stockCritico),
+    actualizadoEn: now
+  };
+
+  const movimiento = cambiaUnidad && stockNuevo !== stockAnterior
+    ? { uuid: crypto.randomUUID(), insumoId, tipo: "calibracion", cantidad: stockNuevo - stockAnterior, stockAnterior, stockNuevo, fecha: todayISO(), creadoEn: now }
+    : null;
+  const recetasNuevas = cambiaUnidad
+    ? recetas.filter((r) => r.insumoId === insumoId).map((r) => ({ ...r, cantidadPorUnidad: (Number(r.cantidadPorUnidad) || 0) * f, actualizadoEn: now }))
+    : [];
+  const piNuevos = cambiaUnidad
+    ? proveedorInsumos.filter((p) => p.insumoId === insumoId).map((p) => ({ ...p, cantidadPorUnidad: (Number(p.cantidadPorUnidad) || 0) * f }))
+    : [];
+
+  await withStores(["insumos", "recetas", "proveedor_insumos", "movimientos_insumos"], "readwrite", (stores) => {
+    stores.insumos.put(actualizado);
+    for (const r of recetasNuevas) stores.recetas.put(r);
+    for (const p of piNuevos) stores.proveedor_insumos.put(p);
+    if (movimiento) stores.movimientos_insumos.add(movimiento);
+  });
+
+  // El stock sube como movimiento; el resto, como snapshot del catalogo (igual que cualquier otra edicion).
+  if (movimiento) trySyncMovimientosInsumos([movimiento]).catch(() => {});
+  trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
+  if (recetasNuevas.length) trySyncRecetasSnapshot(await getAll("recetas")).catch(() => {});
+  if (piNuevos.length) trySyncProveedorInsumosSnapshot(await getAll("proveedor_insumos")).catch(() => {});
+  return { insumo: actualizado, cambioUnidad: cambiaUnidad, recetasReexpresadas: recetasNuevas.length, lineasProveedorReexpresadas: piNuevos.length };
 }
