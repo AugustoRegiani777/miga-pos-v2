@@ -10,7 +10,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF, PRUEBA_SIN_BASE } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, historialRecienteDeInsumos, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1, aplicarUmbralesV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, historialRecienteDeInsumos, historialCompletoDeInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1, aplicarUmbralesV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -555,6 +555,12 @@ const dom = {
   abrirFactura: document.querySelector("#abrir-factura"),
   abrirCrearInsumo: document.querySelector("#abrir-crear-insumo"),
   insumosEditarAbrir: document.querySelector("#insumos-editar-abrir"),
+  insumoHistorialBackdrop: document.querySelector("#insumo-historial-backdrop"),
+  insumoHistorialSheet: document.querySelector("#insumo-historial-sheet"),
+  insumoHistorialTitulo: document.querySelector("#insumo-historial-titulo"),
+  insumoHistorialSub: document.querySelector("#insumo-historial-sub"),
+  insumoHistorialLista: document.querySelector("#insumo-historial-lista"),
+  closeInsumoHistorial: document.querySelector("#close-insumo-historial"),
   insumosCompraProveedorField: document.querySelector("#insumos-compra-proveedor-field"),
   insumosCompraProveedor: document.querySelector("#insumos-compra-proveedor"),
   editarInsumoBackdrop: document.querySelector("#editar-insumo-backdrop"),
@@ -1258,6 +1264,46 @@ function actualizarBotonEditarInsumoProvProd() {
   const id = dom.provProdInsumo.value;
   dom.provProdEditarInsumo.hidden = !id || id === "__nuevo__";
 }
+
+// Historial completo de un insumo: aprovisionamientos, ajustes y calibraciones, con fecha, proveedor y el stock que quedo.
+const TIPO_HISTORIAL = {
+  compra: { grupo: "Aprovisionamiento", clase: "compra" },
+  desperdicio: { grupo: "Ajuste", detalle: "baja por desperdicio", clase: "ajuste" },
+  no_recibido: { grupo: "Ajuste", detalle: "cantidad no recibida", clase: "ajuste" },
+  error_conteo: { grupo: "Ajuste", detalle: "error de conteo", clase: "ajuste" },
+  calibracion: { grupo: "Calibración", clase: "calibracion" }
+};
+
+async function openHistorialInsumo(insumo) {
+  dom.insumoHistorialTitulo.textContent = `Historial · ${insumo.nombre}`;
+  dom.insumoHistorialSub.textContent = "";
+  dom.insumoHistorialLista.innerHTML = `<p class="cal-muted">Cargando…</p>`;
+  setSheetOpen(dom.insumoHistorialSheet, dom.insumoHistorialBackdrop, true);
+  const [{ movimientos, aviso }, proveedores] = await Promise.all([historialCompletoDeInsumo(insumo.id), getAll("proveedores")]);
+  const nombreProv = new Map(proveedores.map((p) => [p.id, p.nombre]));
+  const env = envaseDeInsumo(insumo);
+  const fmt = (v) => formatearCantidad(Math.abs(Number(v) || 0), insumo.unidad, { envase: env });
+  dom.insumoHistorialSub.textContent = aviso || `${movimientos.length} movimiento${movimientos.length === 1 ? "" : "s"} · stock hoy ${formatearCantidad(insumo.stockActual, insumo.unidad, { envase: env })}`;
+  dom.insumoHistorialLista.innerHTML = movimientos.length === 0
+    ? `<p class="empty-state">Todavía no hay compras, ajustes ni calibraciones de este insumo.</p>`
+    : `<ul class="historial-insumo">${movimientos.map((m) => {
+        const t = TIPO_HISTORIAL[m.tipo] || { grupo: m.tipo, clase: "ajuste" };
+        const fecha = String(m.fecha || m.creadoEn || "").slice(0, 10).split("-").reverse().join("/");
+        const signo = m.cantidad > 0 ? "+" : m.cantidad < 0 ? "−" : "";
+        const quedo = m.stockNuevo !== null && m.stockNuevo !== undefined && Number.isFinite(Number(m.stockNuevo)) ? `quedó en ${formatearCantidad(Number(m.stockNuevo), insumo.unidad, { envase: env })}` : "";
+        const prov = m.tipo === "compra" ? (nombreProv.get(m.proveedorId) || "proveedor sin anotar") : "";
+        return `<li class="hist-fila hist-${t.clase}">
+          <div class="hist-linea">
+            <span class="hist-fecha">${fecha}</span>
+            <span class="hist-tipo">${t.grupo}${t.detalle ? ` <small>· ${t.detalle}</small>` : ""}</span>
+            <strong class="hist-cant">${signo}${fmt(m.cantidad)}</strong>
+          </div>
+          <div class="hist-detalle cal-muted">${[prov, quedo].filter(Boolean).join(" · ")}</div>
+        </li>`;
+      }).join("")}</ul>`;
+}
+
+function closeInsumoHistorial() { setSheetOpen(dom.insumoHistorialSheet, dom.insumoHistorialBackdrop, false); }
 
 function closeEditarInsumoSheet() {
   setSheetOpen(dom.editarInsumoSheet, dom.editarInsumoBackdrop, false);
@@ -2706,7 +2752,7 @@ async function renderInsumosView() {
   const q = norm(dom.insumosBuscar?.value);
   if (q) ordenados = ordenados.filter((i) => norm(i.nombre).includes(q));
   ordenados = await enriquecerInsumosConHistorial(ordenados);
-  renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet);
+  renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet, openHistorialInsumo);
   await renderInsumosEnPausa();
   renderCalibracionAlert(dom.calibracionAlert, insumos);
   await renderAvisoCiclo();
@@ -4789,6 +4835,8 @@ function bindEvents() {
   });
   dom.provProdInsumo.addEventListener("change", actualizarBotonEditarInsumoProvProd);
   dom.closeEditarInsumo.addEventListener("click", closeEditarInsumoSheet);
+  dom.closeInsumoHistorial.addEventListener("click", closeInsumoHistorial);
+  dom.insumoHistorialBackdrop.addEventListener("click", closeInsumoHistorial);
   dom.editarInsumoBackdrop.addEventListener("click", closeEditarInsumoSheet);
   dom.editarInsumoUnidad.addEventListener("change", pintarFactorDeUnidad);
   dom.editarInsumoForm.addEventListener("submit", async (event) => {

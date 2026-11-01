@@ -81,28 +81,13 @@ function stockBaseText(insumo) {
   return formatearConEnvase(insumo.stockActual, insumo.unidad, envaseDe(insumo));
 }
 
-// "Ultimos movimientos" a simple vista: los 3 mas nuevos entre compras y ajustes, con fecha y cantidad.
-const ROTULO_MOVIMIENTO = { compra: "compra", desperdicio: "baja", no_recibido: "no recibido", error_conteo: "corrección", calibracion: "recuento" };
-function lineaDeHistorial(insumo) {
-  const lista = insumo.ultimosMovimientos;
-  if (!lista) return "";
-  if (lista.length === 0) return `<p class="stock-row-compra">Sin compras ni ajustes cargados</p>`;
-  const piezas = lista.map((m) => {
-    const fecha = String(m.fecha || m.creadoEn || "").slice(0, 10).split("-").reverse().slice(0, 2).join("/");
-    const cantidad = Number(m.cantidad) || 0;
-    const signo = cantidad > 0 ? "+" : cantidad < 0 ? "−" : "";
-    return `<span class="mov-chip mov-${m.tipo}">${fecha} <strong>${signo}${formatearCantidad(Math.abs(cantidad), insumo.unidad, { envase: envaseDe(insumo) })}</strong> ${ROTULO_MOVIMIENTO[m.tipo] || m.tipo}</span>`;
-  });
-  return `<p class="stock-row-movs">${piezas.join("")}</p>`;
-}
-
 // onCalibrar (opcional): cada fila trae su propio "Calibrar", junto al NOMBRE del
 // insumo (no junto al estado). Calibrar es contar lo que hay y decirselo al
 // sistema: una herramienta de la fila, no una tarea pendiente. Por eso es texto
 // discreto y no un boton de color, y por eso no comparte lugar con la cantidad y
 // el estado, que es lo que la persona lee. Va en la fila del insumo que se tiene
 // delante, no en una lista aparte donde hay que ir a buscarlo.
-export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
+export function renderInsumosList(container, insumos, onSelect, onCalibrar, onHistorial) {
   if (insumos.length === 0) {
     container.innerHTML = '<p class="empty-state">No hay insumos cargados.</p>';
     return;
@@ -115,7 +100,6 @@ export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
     grupoAnterior = insumo.grupo;
     const cuando = insumo.ultimaCompra !== undefined
       ? `<p class="stock-row-compra">${insumo.ultimaCompra ? `Última compra: ${insumo.ultimaCompra.split("-").reverse().join("/")}` : "Sin compras cargadas"}</p>` : "";
-    const historial = lineaDeHistorial(insumo);
     const proveedor = insumo.proveedorTexto ? `<p class="stock-row-compra">${insumo.proveedorTexto}</p>` : "";
     return `${encabezado}
     <div class="stock-row" data-id="${insumo.id}" role="button" tabindex="0">
@@ -123,9 +107,9 @@ export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
         <div class="stock-row-titulo">
           <h2>${insumo.nombre}${insumo.esEstimado ? " ~" : ""}</h2>
           ${onCalibrar ? `<button type="button" class="btn-calibrar-insumo" data-calibrar-fila="${insumo.id}" aria-label="Calibrar ${insumo.nombre}">Calibrar</button>` : ""}
+          ${onHistorial ? `<button type="button" class="btn-calibrar-insumo" data-historial-fila="${insumo.id}" aria-label="Historial de ${insumo.nombre}">Historial</button>` : ""}
         </div>
         <p>${stockBaseText(insumo)}</p>
-        ${historial}
         ${proveedor}
         ${cuando}
       </div>
@@ -140,6 +124,12 @@ export function renderInsumosList(container, insumos, onSelect, onCalibrar) {
     const insumo = insumos.find(i => i.id === btn.dataset.calibrarFila);
     if (!insumo) return;
     btn.addEventListener("click", e => { e.stopPropagation(); onCalibrar(insumo); });
+    btn.addEventListener("keydown", e => { e.stopPropagation(); });
+  });
+  container.querySelectorAll("[data-historial-fila]").forEach(btn => {
+    const insumo = insumos.find(i => i.id === btn.dataset.historialFila);
+    if (!insumo) return;
+    btn.addEventListener("click", e => { e.stopPropagation(); onHistorial(insumo); });
     btn.addEventListener("keydown", e => { e.stopPropagation(); });
   });
   container.querySelectorAll(".stock-row[data-id]").forEach(row => {

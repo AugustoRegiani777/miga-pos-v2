@@ -568,6 +568,12 @@ export async function fetchMovimientosInsumosRecientes({ limit = 1500 } = {}) {
   }
 }
 
+// Todos los movimientos de aprovisionamiento de UN insumo (compras, ajustes y calibraciones), del mas nuevo al mas viejo.
+export async function fetchHistorialDeInsumo(insumoId) {
+  const q = encodeURIComponent(insumoId);
+  return sbFetch(`/movimientos_insumos?insumo_id=eq.${q}&tipo=in.(${TIPOS_DE_APROVISIONAMIENTO})&order=creado_en.desc&limit=1000&select=uuid,tipo,cantidad,stock_anterior,stock_nuevo,fecha,creado_en,proveedor_id`);
+}
+
 // Para decidir si un insumo se puede BORRAR de verdad: si en la nube tiene movimientos (compras, consumo, ajustes),
 // borrarlo se llevaria su historia (ON DELETE CASCADE), asi que solo se puede ocultar.
 export async function insumoTieneMovimientosRemotos(insumoId) {

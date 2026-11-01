@@ -734,6 +734,16 @@
         </form>
       </section>
 
+      <!-- Sheet: historial completo de un insumo -->
+      <section class="production-sheet-backdrop" id="insumo-historial-backdrop" hidden></section>
+      <section class="form-section stock-adjust-sheet" id="insumo-historial-sheet" aria-hidden="true">
+        <div class="production-sheet-header">
+          <div><h2 id="insumo-historial-titulo">Historial</h2><p class="cal-muted" id="insumo-historial-sub"></p></div>
+          <button type="button" class="ghost-button compact" id="close-insumo-historial">Cerrar</button>
+        </div>
+        <div class="sheet-scroll-body" id="insumo-historial-lista"></div>
+      </section>
+
       <!-- Sheet: editar un insumo existente (nombre, unidad, envase, minimos) -->
       <section class="production-sheet-backdrop" id="editar-insumo-backdrop" hidden></section>
       <section class="form-section stock-adjust-sheet" id="editar-insumo-sheet" aria-hidden="true">

@@ -4,7 +4,7 @@ import { normalizarUnidadBase } from "../utils/unidades.js";
 import { getMermas, pctDeMerma, cantidadDeMerma } from "./mermas.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount, hayPendientesDeTipo } from "./sync.js";
-import { fetchMovimientosInsumosRecientes, insumoTieneMovimientosRemotos, fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
+import { fetchHistorialDeInsumo, fetchMovimientosInsumosRecientes, insumoTieneMovimientosRemotos, fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
@@ -2683,4 +2683,23 @@ export async function historialRecienteDeInsumos({ cuantos = 3 } = {}) {
     resultado.set(m.insumoId, e);
   }
   return resultado;
+}
+
+// El historial COMPLETO de un insumo: aprovisionamientos (compras), ajustes (bajas y correcciones) y calibraciones, con
+// fecha, cantidad, el stock que quedo y a quien se le compro. Nube (todos los dispositivos) + lo local que no subio.
+export async function historialCompletoDeInsumo(insumoId) {
+  const TIPOS = new Set(["compra", "desperdicio", "no_recibido", "error_conteo", "calibracion"]);
+  const porUuid = new Map();
+  let aviso = "";
+  try {
+    for (const r of await fetchHistorialDeInsumo(insumoId)) {
+      porUuid.set(r.uuid, { uuid: r.uuid, tipo: r.tipo, cantidad: Number(r.cantidad), stockAnterior: r.stock_anterior, stockNuevo: r.stock_nuevo, fecha: r.fecha, creadoEn: r.creado_en, proveedorId: r.proveedor_id || null });
+    }
+  } catch { aviso = "Sin conexión: se ve lo que hay en este dispositivo."; }
+  for (const m of await getAll("movimientos_insumos")) {
+    if (m.insumoId !== insumoId || !TIPOS.has(m.tipo)) continue;
+    porUuid.set(m.uuid, { uuid: m.uuid, tipo: m.tipo, cantidad: Number(m.cantidad), stockAnterior: m.stockAnterior, stockNuevo: m.stockNuevo, fecha: m.fecha, creadoEn: m.creadoEn, proveedorId: m.proveedorId || null });
+  }
+  const movimientos = [...porUuid.values()].sort((a, b) => String(b.creadoEn || b.fecha || "").localeCompare(String(a.creadoEn || a.fecha || "")));
+  return { movimientos, aviso };
 }

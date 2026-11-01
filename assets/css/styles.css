@@ -4692,3 +4692,17 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .stock-row .mov-chip strong, .stock-row .stock-row-compra strong { min-width: 0; text-align: left; font-size: inherit; display: inline; }
 .stock-row p.stock-row-compra { display: block; }
 .stock-row p.stock-row-compra span { display: inline; }
+
+/* Historial de un insumo */
+.historial-insumo { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hist-fila { padding: 10px 12px; border-radius: 10px; background: var(--page); border-left: 4px solid var(--line); }
+.hist-fila.hist-compra { border-left-color: var(--txt-ok, #20734d); }
+.hist-fila.hist-ajuste { border-left-color: var(--txt-low, #a26400); }
+.hist-fila.hist-calibracion { border-left-color: var(--primary-2, #1f6f78); }
+.hist-linea { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: baseline; }
+.hist-fecha { color: var(--muted); font-size: 0.9rem; }
+.hist-tipo { font-weight: 700; }
+.hist-tipo small { font-weight: 400; color: var(--muted); }
+.hist-cant { font-size: 1.05rem; }
+.hist-compra .hist-cant { color: var(--txt-ok, #20734d); }
+.hist-detalle { margin-top: 2px; font-size: 0.85rem; }
