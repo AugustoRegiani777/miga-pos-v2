@@ -4675,9 +4675,33 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .insumo-en-pausa-acciones { display: flex; gap: 6px; }
 #editar-insumo-eliminar { margin-top: 18px; width: 100%; }
 
-/* Sandwiches especiales (premium): un tono calido y ameno, distinto del clasico (que queda con el fondo normal). */
-.product-button.especial { background: color-mix(in srgb, #e0a82e 24%, var(--surface)); border-color: color-mix(in srgb, #e0a82e 65%, var(--line)); }
-.product-button.especial:hover:not(.disabled) { background: color-mix(in srgb, #e0a82e 34%, var(--surface)); }
+/* Sandwiches especiales (premium): degradado calido (dorado a terracota) con un brillo en la esquina y una estrella.
+   Se arma con color-mix sobre el fondo del tema, asi se ve bien en oscuro, claro y unicornio. El clasico queda normal. */
+.product-button.especial {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #f4c15d 55%, transparent);
+  background:
+    radial-gradient(120% 95% at 100% 0%, color-mix(in srgb, #ffd37a 34%, transparent) 0%, transparent 58%),
+    linear-gradient(150deg, color-mix(in srgb, #f0a43a 30%, var(--surface)) 0%, color-mix(in srgb, #d9603b 22%, var(--surface)) 100%);
+  box-shadow: 0 3px 14px color-mix(in srgb, #e0883a 26%, transparent), inset 0 1px 0 rgb(255 255 255 / 16%);
+}
+.product-button.especial::after {
+  content: "★";
+  position: absolute;
+  top: 9px;
+  right: 11px;
+  font-size: 1rem;
+  line-height: 1;
+  color: color-mix(in srgb, #f2b630 88%, var(--ink));
+  text-shadow: 0 0 8px color-mix(in srgb, #ffd37a 60%, transparent);
+}
+.product-button.especial .product-name { padding-right: 22px; }
+.product-button.especial:hover:not(.disabled) {
+  background:
+    radial-gradient(120% 95% at 100% 0%, color-mix(in srgb, #ffd37a 44%, transparent) 0%, transparent 58%),
+    linear-gradient(150deg, color-mix(in srgb, #f0a43a 38%, var(--surface)) 0%, color-mix(in srgb, #d9603b 28%, var(--surface)) 100%);
+}
 
 /* Insumos: ultimos movimientos a simple vista */
 .stock-row-movs { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 4px 0 2px; }
