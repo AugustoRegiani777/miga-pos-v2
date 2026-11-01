@@ -4675,32 +4675,47 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .insumo-en-pausa-acciones { display: flex; gap: 6px; }
 #editar-insumo-eliminar { margin-top: 18px; width: 100%; }
 
-/* Sandwiches especiales (premium): degradado calido (dorado a terracota) con un brillo en la esquina y una estrella.
-   Se arma con color-mix sobre el fondo del tema, asi se ve bien en oscuro, claro y unicornio. El clasico queda normal. */
+/* Sandwiches especiales (premium): un degradado SUTIL con la paleta de cada tema (oscuro: oro apagado; claro: crema
+   y durazno; unicornio: lila y rosa, como su propio fondo), un brillo leve en la esquina y una estrella. Los
+   porcentajes son bajos a proposito: se distinguen de un vistazo sin competir con el nombre ni el precio. */
+:root {
+  --esp-a: #d9a24a; --esp-b: #b8683f;
+  --esp-fa: 12%; --esp-fb: 8%; --esp-brillo: 11%;
+  --esp-estrella: #e0ad4b;
+}
+:root[data-theme="claro"] {
+  --esp-a: #e7b35c; --esp-b: #e5a07c;
+  --esp-fa: 17%; --esp-fb: 12%; --esp-brillo: 16%;
+  --esp-estrella: #c4872a;
+}
+:root[data-theme="unicornio"] {
+  --esp-a: #c79af2; --esp-b: #f4a6c9;
+  --esp-fa: 24%; --esp-fb: 18%; --esp-brillo: 22%;
+  --esp-estrella: var(--accent);
+}
 .product-button.especial {
   position: relative;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, #f4c15d 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--esp-a) 34%, var(--line));
   background:
-    radial-gradient(120% 95% at 100% 0%, color-mix(in srgb, #ffd37a 34%, transparent) 0%, transparent 58%),
-    linear-gradient(150deg, color-mix(in srgb, #f0a43a 30%, var(--surface)) 0%, color-mix(in srgb, #d9603b 22%, var(--surface)) 100%);
-  box-shadow: 0 3px 14px color-mix(in srgb, #e0883a 26%, transparent), inset 0 1px 0 rgb(255 255 255 / 16%);
+    radial-gradient(110% 90% at 100% 0%, color-mix(in srgb, var(--esp-a) var(--esp-brillo), transparent) 0%, transparent 55%),
+    linear-gradient(150deg, color-mix(in srgb, var(--esp-a) var(--esp-fa), var(--surface)) 0%, color-mix(in srgb, var(--esp-b) var(--esp-fb), var(--surface)) 100%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%), 0 2px 10px color-mix(in srgb, var(--esp-b) 12%, transparent);
 }
 .product-button.especial::after {
   content: "★";
   position: absolute;
   top: 9px;
   right: 11px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   line-height: 1;
-  color: color-mix(in srgb, #f2b630 88%, var(--ink));
-  text-shadow: 0 0 8px color-mix(in srgb, #ffd37a 60%, transparent);
+  color: var(--esp-estrella);
 }
 .product-button.especial .product-name { padding-right: 22px; }
 .product-button.especial:hover:not(.disabled) {
   background:
-    radial-gradient(120% 95% at 100% 0%, color-mix(in srgb, #ffd37a 44%, transparent) 0%, transparent 58%),
-    linear-gradient(150deg, color-mix(in srgb, #f0a43a 38%, var(--surface)) 0%, color-mix(in srgb, #d9603b 28%, var(--surface)) 100%);
+    radial-gradient(110% 90% at 100% 0%, color-mix(in srgb, var(--esp-a) calc(var(--esp-brillo) + 6%), transparent) 0%, transparent 55%),
+    linear-gradient(150deg, color-mix(in srgb, var(--esp-a) calc(var(--esp-fa) + 6%), var(--surface)) 0%, color-mix(in srgb, var(--esp-b) calc(var(--esp-fb) + 6%), var(--surface)) 100%);
 }
 
 /* Insumos: ultimos movimientos a simple vista */
