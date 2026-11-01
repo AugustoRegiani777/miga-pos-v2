@@ -142,7 +142,8 @@ export async function confirmarFactura(proveedorId, lineas, nuevoProveedor = nul
       stockAnterior,
       stockNuevo,
       fecha,
-      creadoEn: now
+      creadoEn: now,
+      proveedorId: proveedorId || null
     });
     if (merma > 0) {
       movimientos.push({

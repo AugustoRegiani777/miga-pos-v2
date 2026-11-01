@@ -10,7 +10,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF, PRUEBA_SIN_BASE } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1, aplicarUmbralesV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, historialRecienteDeInsumos, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1, aplicarUmbralesV1 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -555,6 +555,8 @@ const dom = {
   abrirFactura: document.querySelector("#abrir-factura"),
   abrirCrearInsumo: document.querySelector("#abrir-crear-insumo"),
   insumosEditarAbrir: document.querySelector("#insumos-editar-abrir"),
+  insumosCompraProveedorField: document.querySelector("#insumos-compra-proveedor-field"),
+  insumosCompraProveedor: document.querySelector("#insumos-compra-proveedor"),
   editarInsumoBackdrop: document.querySelector("#editar-insumo-backdrop"),
   editarInsumoSheet: document.querySelector("#editar-insumo-sheet"),
   closeEditarInsumo: document.querySelector("#close-editar-insumo"),
@@ -2245,7 +2247,24 @@ function updateCompraEquivale(insumo) {
 // redondear para arriba — el valor exacto que aviso "Falta stock", para que
 // coincida con lo que el usuario ya vio ahi) y se deja precargado pero
 // editable, por si lo que se compro en la realidad fue otra cantidad.
+// A quien se le compro: los proveedores que venden este insumo; arranca en el de la ultima compra (o el unico).
+async function llenarProveedorDeCompra(insumo) {
+  const [lineas, proveedores, historial] = await Promise.all([
+    getAll("proveedor_insumos"), getAll("proveedores"), historialRecienteDeInsumos().catch(() => new Map())
+  ]);
+  const ids = [...new Set(lineas.filter((l) => l.insumoId === insumo.id && l.activo !== false).map((l) => l.proveedorId))];
+  const opciones = ids.map((id) => proveedores.find((p) => p.id === id)).filter(Boolean);
+  dom.insumosCompraProveedorField.hidden = opciones.length === 0;
+  if (opciones.length === 0) { dom.insumosCompraProveedor.innerHTML = ""; return; }
+  const ultimo = historial.get(insumo.id)?.proveedorId;
+  const elegido = opciones.some((p) => p.id === ultimo) ? ultimo : (opciones.length === 1 ? opciones[0].id : "");
+  dom.insumosCompraProveedor.innerHTML =
+    (opciones.length > 1 ? `<option value="">— No sé / otro —</option>` : "") +
+    opciones.map((p) => `<option value="${p.id}"${p.id === elegido ? " selected" : ""}>${p.nombre}</option>`).join("");
+}
+
 function openInsumoAjusteSheet(insumo, deficitBase) {
+  llenarProveedorDeCompra(insumo).catch(() => {});
   selectedInsumoId = insumo.id;
   selectedInsumo = insumo;
   renderInsumoAjusteSelected(dom.insumosAjusteSelected, insumo);
@@ -2653,6 +2672,31 @@ async function handlePausarInsumo() {
   }
 }
 
+// Cada insumo con sus 3 ultimos movimientos (compras y ajustes) y su proveedor: el de la ULTIMA compra con
+// proveedor anotado; si todavia no hay ninguna, el habitual (el mas barato de los que lo venden).
+async function enriquecerInsumosConHistorial(insumos) {
+  const [historial, lineas, proveedores] = await Promise.all([
+    historialRecienteDeInsumos().catch(() => new Map()), getAll("proveedor_insumos"), getAll("proveedores")
+  ]);
+  const nombreProv = new Map(proveedores.map((p) => [p.id, p.nombre]));
+  return insumos.map((i) => {
+    const h = historial.get(i.id);
+    let proveedorTexto = "";
+    if (h?.proveedorId && nombreProv.has(h.proveedorId)) {
+      proveedorTexto = `Proveedor: <strong>${nombreProv.get(h.proveedorId)}</strong> <span class="cal-muted">(última compra)</span>`;
+    } else {
+      const suyas = lineas.filter((l) => l.insumoId === i.id && l.activo !== false && nombreProv.has(l.proveedorId));
+      if (suyas.length) {
+        const barata = suyas.slice().sort((a, b) => (a.precioUnitarioCentavos / (a.cantidadPorUnidad || 1)) - (b.precioUnitarioCentavos / (b.cantidadPorUnidad || 1)))[0];
+        proveedorTexto = `Proveedor: <strong>${nombreProv.get(barata.proveedorId)}</strong> <span class="cal-muted">(habitual)</span>`;
+      } else {
+        proveedorTexto = `<span class="cal-muted">Sin proveedor</span>`;
+      }
+    }
+    return { ...i, ultimosMovimientos: h ? h.ultimos : [], proveedorTexto };
+  });
+}
+
 async function renderInsumosView() {
   const insumos = await listInsumos();
   actualizarBotonSentido();
@@ -2661,6 +2705,7 @@ async function renderInsumosView() {
   const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
   const q = norm(dom.insumosBuscar?.value);
   if (q) ordenados = ordenados.filter((i) => norm(i.nombre).includes(q));
+  ordenados = await enriquecerInsumosConHistorial(ordenados);
   renderInsumosList(dom.insumosList, ordenados, openInsumoAjusteSheet, openCalibracionSheet);
   await renderInsumosEnPausa();
   renderCalibracionAlert(dom.calibracionAlert, insumos);
@@ -4623,7 +4668,7 @@ function bindEvents() {
         if (!tipoGuardar) throw new Error("Seleccioná el motivo del ajuste.");
       }
       if (!(await confirmarCantidadDescomunal(insumo, delta))) return;
-      await ajustarStockInsumo(selectedInsumoId, delta, tipoGuardar);
+      await ajustarStockInsumo(selectedInsumoId, delta, tipoGuardar, { proveedorId: tipoGuardar === "compra" ? (dom.insumosCompraProveedor.value || null) : null });
       const msgs = { compra: "Compra registrada", desperdicio: "Baja registrada", no_recibido: "Corrección registrada", error_conteo: "Corrección registrada" };
       setFlash(`${msgs[tipoGuardar] ?? "Ajuste registrado"}: ${insumo.nombre}.`, "success");
       // Si viniamos de "Falta stock de insumos" con mas de uno faltante, no

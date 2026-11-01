@@ -555,6 +555,19 @@ export async function deleteInsumoRemoto(insumoId) {
   }
 }
 
+// Las compras y los ajustes (no el consumo diario) de TODOS los dispositivos, los mas nuevos primero: para mostrar
+// "ultimos movimientos" y "ultimo proveedor" de cada insumo. Antes de la migracion 027 la columna proveedor_id no
+// existe: se reintenta sin ella en vez de dejar la lista sin historial.
+const TIPOS_DE_APROVISIONAMIENTO = "compra,desperdicio,no_recibido,error_conteo,calibracion";
+export async function fetchMovimientosInsumosRecientes({ limit = 1500 } = {}) {
+  const base = `/movimientos_insumos?tipo=in.(${TIPOS_DE_APROVISIONAMIENTO})&order=creado_en.desc&limit=${limit}`;
+  try {
+    return await sbFetch(`${base}&select=uuid,insumo_id,tipo,cantidad,fecha,creado_en,proveedor_id`);
+  } catch {
+    return await sbFetch(`${base}&select=uuid,insumo_id,tipo,cantidad,fecha,creado_en`);
+  }
+}
+
 // Para decidir si un insumo se puede BORRAR de verdad: si en la nube tiene movimientos (compras, consumo, ajustes),
 // borrarlo se llevaria su historia (ON DELETE CASCADE), asi que solo se puede ocultar.
 export async function insumoTieneMovimientosRemotos(insumoId) {
@@ -702,6 +715,7 @@ export async function pushMovimientosInsumos(movimientos) {
     producto_id: m.productoId || null,
     venta_id_local: m.ventaId || null,
     venta_uuid: m.ventaUuid || null,
+    proveedor_id: m.proveedorId || null,
     fecha: m.fecha,
     creado_en: m.creadoEn
   })), "uuid");

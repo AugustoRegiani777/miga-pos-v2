@@ -4678,3 +4678,17 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 /* Sandwiches especiales (premium): un tono calido y ameno, distinto del clasico (que queda con el fondo normal). */
 .product-button.especial { background: color-mix(in srgb, #e0a82e 24%, var(--surface)); border-color: color-mix(in srgb, #e0a82e 65%, var(--line)); }
 .product-button.especial:hover:not(.disabled) { background: color-mix(in srgb, #e0a82e 34%, var(--surface)); }
+
+/* Insumos: ultimos movimientos a simple vista */
+.stock-row-movs { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 4px 0 2px; }
+.mov-chip { font-size: 0.78rem; padding: 2px 8px; border-radius: 999px; background: var(--page); color: var(--muted); white-space: nowrap; }
+.mov-chip strong { color: var(--ink); }
+.mov-chip.mov-compra strong { color: var(--txt-ok, #20734d); }
+.mov-chip.mov-desperdicio strong, .mov-chip.mov-no_recibido strong { color: var(--txt-out, #a32020); }
+
+/* Las filas de stock agrandan todo <strong> y ponen cada <span> en su linea: aca se corrige para los chips de movimientos y el proveedor. */
+.stock-row p.stock-row-movs { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.stock-row p.stock-row-movs .mov-chip { display: inline-block; }
+.stock-row .mov-chip strong, .stock-row .stock-row-compra strong { min-width: 0; text-align: left; font-size: inherit; display: inline; }
+.stock-row p.stock-row-compra { display: block; }
+.stock-row p.stock-row-compra span { display: inline; }

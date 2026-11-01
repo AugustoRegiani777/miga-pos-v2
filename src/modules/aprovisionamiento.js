@@ -4,7 +4,7 @@ import { normalizarUnidadBase } from "../utils/unidades.js";
 import { getMermas, pctDeMerma, cantidadDeMerma } from "./mermas.js";
 import { initialInsumos, initialRecetas, INSUMOS_SEED_VERSION, INSUMOS_OBSOLETOS_NOMBRES } from "./seed.js";
 import { trySyncCalibracion, trySyncInsumosSnapshot, trySyncRecetasSnapshot, trySyncHistorialReceta, trySyncMovimientosInsumos, trySyncProveedorInsumosSnapshot, trySyncCatalogoSnapshot, trySyncProveedoresSnapshot, trySyncProductoEliminado, getPendingSyncCount, hayPendientesDeTipo } from "./sync.js";
-import { insumoTieneMovimientosRemotos, fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
+import { fetchMovimientosInsumosRecientes, insumoTieneMovimientosRemotos, fetchInsumosCatalogo, fetchStockInsumos, deleteRecetaRemota, deleteInsumoRemoto, deleteProveedorInsumoRemoto, ENTORNO_DE_PRUEBA } from "../db/supabase.js";
 import { estadoDeTodos, explicarEstado } from "./estado-stock.js";
 import { demandaConocidaPorInsumo } from "./demanda-pedidos.js";
 import { leerSerieConsumoLocal, sincronizarSerieConsumo } from "../db/consumo-remoto.js";
@@ -1840,7 +1840,7 @@ export async function listaDeComprasSmart({ hoy = todayISO(), pedidos = null } =
   return { items, byProveedor };
 }
 
-export async function ajustarStockInsumo(insumoId, cantidad, tipo) {
+export async function ajustarStockInsumo(insumoId, cantidad, tipo, { proveedorId = null } = {}) {
   const now = new Date().toISOString();
   const fecha = todayISO();
 
@@ -1871,7 +1871,7 @@ export async function ajustarStockInsumo(insumoId, cantidad, tipo) {
   // (reconciliarStockInsumosConNube) el stock local volvia al de la nube, o
   // sea que la compra se perdia sin dejar rastro. Todo movimiento que mueve
   // stock tiene que viajar.
-  const movimiento = { uuid: crypto.randomUUID(), insumoId, tipo, cantidad, stockAnterior, stockNuevo, fecha, creadoEn: now };
+  const movimiento = { uuid: crypto.randomUUID(), insumoId, tipo, cantidad, stockAnterior, stockNuevo, fecha, creadoEn: now, ...(tipo === "compra" && proveedorId ? { proveedorId } : {}) };
   const movimientoMerma = merma > 0
     ? { uuid: crypto.randomUUID(), insumoId, tipo: "desperdicio", cantidad: -merma, stockAnterior: stockNuevo, stockNuevo: stockFinal, fecha, creadoEn: now }
     : null;
@@ -2653,4 +2653,34 @@ export async function aplicarUmbralesV1() {
   if (productosNuevos.length) trySyncCatalogoSnapshot(await getAll("categorias"), await getAll("productos")).catch(() => {});
   if (insumosNuevos.length) trySyncInsumosSnapshot(await getAll("insumos")).catch(() => {});
   return { cambios: productosNuevos.length + insumosNuevos.length };
+}
+
+// Los ultimos movimientos "de aprovisionamiento" de cada insumo (compras y ajustes: entradas, bajas, recuentos; el
+// consumo de cada venta no cuenta) y a quien se le compro la ultima vez. Junta lo de la nube (todos los dispositivos)
+// con lo de este dispositivo que todavia no subio. Devuelve un Map insumoId -> { ultimos: [3 mas nuevos], proveedorId }.
+let _recientesNube = { en: 0, filas: [] };
+export async function historialRecienteDeInsumos({ cuantos = 3 } = {}) {
+  const ahora = Date.now();
+  if (ahora - _recientesNube.en > 30000) {
+    try { _recientesNube = { en: ahora, filas: await fetchMovimientosInsumosRecientes() }; }
+    catch { _recientesNube = { en: ahora - 25000, filas: _recientesNube.filas }; }   // sin conexion: lo ultimo que se tenia
+  }
+  const TIPOS = new Set(["compra", "desperdicio", "no_recibido", "error_conteo", "calibracion"]);
+  const porUuid = new Map();
+  for (const r of _recientesNube.filas) {
+    porUuid.set(r.uuid, { uuid: r.uuid, insumoId: r.insumo_id, tipo: r.tipo, cantidad: Number(r.cantidad), fecha: r.fecha, creadoEn: r.creado_en, proveedorId: r.proveedor_id || null });
+  }
+  for (const m of await getAll("movimientos_insumos")) {
+    if (!TIPOS.has(m.tipo)) continue;
+    porUuid.set(m.uuid, { uuid: m.uuid, insumoId: m.insumoId, tipo: m.tipo, cantidad: Number(m.cantidad), fecha: m.fecha, creadoEn: m.creadoEn, proveedorId: m.proveedorId || null });
+  }
+  const orden = (a, b) => String(b.creadoEn || b.fecha || "").localeCompare(String(a.creadoEn || a.fecha || ""));
+  const resultado = new Map();
+  for (const m of [...porUuid.values()].sort(orden)) {
+    const e = resultado.get(m.insumoId) || { ultimos: [], proveedorId: null };
+    if (e.ultimos.length < cuantos) e.ultimos.push(m);
+    if (!e.proveedorId && m.tipo === "compra" && m.proveedorId) e.proveedorId = m.proveedorId;
+    resultado.set(m.insumoId, e);
+  }
+  return resultado;
 }
