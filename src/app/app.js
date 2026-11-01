@@ -4155,6 +4155,15 @@ async function handleConfirmSale() {
   }
 }
 
+// Despues de guardar algo en Produccion: se dibuja YA con lo de este dispositivo (el numero cambia al instante) y,
+// cuando termina de subir a la nube, se vuelve a dibujar con la nube. Si se leyera la nube de entrada, el cambio
+// todavia no habria llegado y la pantalla mostraria el numero viejo hasta cambiar de pestaña.
+async function refrescarProduccionTrasGuardar(subida) {
+  if (currentView !== "produccion") return;
+  await renderProductionView({ rapido: true });
+  Promise.resolve(subida).then(() => { if (currentView === "produccion") renderProductionView().catch(() => {}); });
+}
+
 async function commitProduction(productId, quantityRaw) {
   const { warnings, movimiento, movimientosInsumos } = await saveDailyProduction(productId, quantityRaw);
   dom.productionQuantity.value = "";
@@ -4170,10 +4179,7 @@ async function commitProduction(productId, quantityRaw) {
     movimientosInsumos.length > 0 ? trySyncMovimientosInsumos(movimientosInsumos) : null
   ]);
   await renderCashier();
-  if (currentView === "produccion") {
-    await renderProductionView({ rapido: true });
-    subida.then(() => { if (currentView === "produccion") renderProductionView().catch(() => {}); });
-  }
+  await refrescarProduccionTrasGuardar(subida);
 }
 
 // Uso puntual, una vez: pone en 0 el stock de todos los productos activos
@@ -4194,6 +4200,7 @@ async function handleClosePeriod() {
   try {
     closePeriodInProgress = true;
     const productos = (await getAll("productos")).filter((p) => p.activo && p.controlaStock);
+    const subidasCierre = [];
     let ajustados = 0;
     let yaEnCero = 0;
     for (const producto of productos) {
@@ -4202,11 +4209,11 @@ async function handleClosePeriod() {
         continue;
       }
       const { movimiento } = await adjustStockLevel(producto.id, 0, "Cierre de periodo");
-      trySyncMovimientoStock(movimiento).catch(() => {});
+      subidasCierre.push(trySyncMovimientoStock(movimiento));
       ajustados++;
     }
     setFlash(`Cierre de periodo: ${ajustados} productos puestos en 0${yaEnCero > 0 ? `, ${yaEnCero} ya estaban en 0` : ""}.`, "success");
-    await renderProductionView();
+    await refrescarProduccionTrasGuardar(Promise.allSettled(subidasCierre));
   } catch (error) {
     await renderCashier();
     setFlash(error.message || "No se pudo cerrar el periodo.", "error");
@@ -4384,9 +4391,11 @@ function bindEvents() {
         setFlash(`Stock de ${product.nombre} ajustado a ${newStock}.`, "success");
       }
       closeStockAdjustSheet();
-      trySyncMovimientoStock(movimiento).catch(() => {});
-      if (movimientosInsumos.length > 0) trySyncMovimientosInsumos(movimientosInsumos).catch(() => {});
-      await renderProductionView();
+      const subida = Promise.allSettled([
+        trySyncMovimientoStock(movimiento),
+        movimientosInsumos.length > 0 ? trySyncMovimientosInsumos(movimientosInsumos) : null
+      ]);
+      await refrescarProduccionTrasGuardar(subida);
       await renderCashier();
     } catch (error) {
       setFlash(error.message, "error");
