@@ -2611,7 +2611,7 @@ export async function editarInsumo(insumoId, { nombre, unidad, factorUnidad = 1,
 // Es idempotente (poner el mismo numero dos veces no cambia nada) asi que dos dispositivos coinciden.
 const UMBRALES_V1_KEY = "umbrales_octubre_v1";
 const BEBIDAS_UMBRAL = ["coca-cola", "coca-cola-cero", "agua", "agua-con-gas", "jugo", "cerveza", "sprite", "fanta", "nestea", "aquiaros"];
-const BOLLERIA_INSUMOS_UMBRAL = ["medialunas", "alfajor-havana", "mantecol", "bon-o-bon"];
+const BOLLERIA_INSUMOS_UMBRAL = ["medialunas", "alfajor-havana", "mantecol", "bon-o-bon", "chipa", "cinnamon-roll"];
 const SANDWICHES_ALTOS = ["jamon-queso", "huevo-jamon", "jamon-serrano-rucula", "mortadela-pesto-queso"];
 
 export async function aplicarUmbralesV1() {
