@@ -174,7 +174,7 @@ export function renderCart(container, sandwichCountNode, totalNode, confirmButto
       </div>
     `;
     line.querySelector("strong").textContent = item.displayName || item.nombre;
-    line.querySelector(".cart-unit").textContent = item.saleMode === "togoo" && item.controlaStock
+    line.querySelector(".cart-unit").textContent = item.saleMode === "togoo" && (item.admiteTogoo ?? item.controlaStock)
       ? "ToGoo — incluido en tarifa fija"
       : `${centsToMoney(item.precioCentavos)} c/u`;
     line.querySelector("span").textContent = item.quantity;

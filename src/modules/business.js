@@ -1,6 +1,7 @@
 import { getAll, countAll, requestToPromise, withStores } from "../db/idb.js";
 import { currentTime, todayISO } from "../utils/format.js";
 import { calculateCartPricing } from "./pricing.js";
+import { admiteToGoo } from "./venta-directa.js";
 import { deductInsumosForProductionInTx, deductInsumosInTx, restoreInsumosInTx } from "./aprovisionamiento.js";
 import { fetchStockProductos, fetchVentasDelDia, fetchMovimientosStockDesde, fetchConfiguracionCompartida } from "../db/supabase.js";
 import { trySyncConfiguracionCompartida, getPendingSyncCount } from "./sync.js";
@@ -586,11 +587,16 @@ export async function confirmSale(items, formaPago = "efectivo") {
       stockProducts.set(product.id, product);
     }
 
+    // Too Good To Go y baja valen para comida (sandwiches, bolleria): tengan stock propio o sean venta directa.
+    const hayToGooOBaja = cart.lines.some((l) => l.saleMode === "togoo" || l.saleMode === "baja");
+    const recetasTx = hayToGooOBaja ? await requestToPromise(stores.recetas.getAll()) : [];
+    const insumosTx = hayToGooOBaja ? await requestToPromise(stores.insumos.getAll()) : [];
     for (const item of cart.lines) {
       const product = stockProducts.get(item.productId);
-      const lineSaleMode = item.saleMode === "togoo" && product.controlaStock
+      const admiteModo = admiteToGoo(product, recetasTx, insumosTx);
+      const lineSaleMode = item.saleMode === "togoo" && admiteModo
         ? "togoo"
-        : item.saleMode === "baja" && product.controlaStock
+        : item.saleMode === "baja" && admiteModo
           ? "baja"
           : "normal";
       if (saleMode === "normal" && lineSaleMode !== "normal") saleMode = lineSaleMode;

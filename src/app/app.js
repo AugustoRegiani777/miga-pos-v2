@@ -1568,6 +1568,8 @@ function productsWithReservedStock() {
   return products.map((product) => ({
     ...product,
     stockDisponible: availableStockForProduct(product),
+    // Puede ir en un carrito Too Good To Go / baja: comida con stock propio o de bolleria vendida directa.
+    admiteTogoo: Boolean(product.controlaStock || (product.categoriaId === "bolleria" && stockReventaPorProducto.has(product.id))),
     // Solo para mostrar: lo que queda de lo comprado, descontando lo que ya esta en el carrito. No bloquea la venta.
     stockReventa: stockReventaPorProducto.has(product.id)
       ? Math.max(0, Math.floor(stockReventaPorProducto.get(product.id).stock - quantityInCartForProduct(product.id)))
@@ -1788,8 +1790,9 @@ function effectiveSaleMode(item) {
   // Mismo criterio que confirmSale en business.js: togoo/baja solo aplican a productos
   // con control de stock propio — un producto sin stock (ej. cafe) agregado con el
   // carrito en modo ToGoo termina cobrando precio normal igual.
-  if (item.saleMode === "togoo" && item.controlaStock) return "togoo";
-  if (item.saleMode === "baja" && item.controlaStock) return "baja";
+  const admite = item.admiteTogoo ?? item.controlaStock;
+  if (item.saleMode === "togoo" && admite) return "togoo";
+  if (item.saleMode === "baja" && admite) return "baja";
   return "normal";
 }
 
