@@ -1564,6 +1564,14 @@ function availableStockForProduct(product) {
   return Math.max(0, product.stockActual - quantityInCartForProduct(product.id));
 }
 
+function enCarritoDelInsumo(insumoId, productoId) {
+  let total = 0;
+  for (const [id, info] of stockReventaPorProducto) {
+    if (info.insumoId === insumoId) total += quantityInCartForProduct(id);
+  }
+  return total || quantityInCartForProduct(productoId);
+}
+
 function productsWithReservedStock() {
   return products.map((product) => ({
     ...product,
@@ -1571,8 +1579,10 @@ function productsWithReservedStock() {
     // Puede ir en un carrito Too Good To Go / baja: comida con stock propio o de bolleria vendida directa.
     admiteTogoo: Boolean(product.controlaStock || (product.categoriaId === "bolleria" && stockReventaPorProducto.has(product.id))),
     // Solo para mostrar: lo que queda de lo comprado, descontando lo que ya esta en el carrito. No bloquea la venta.
+    // Dos productos pueden compartir el MISMO insumo (mini medialuna y mini medialuna ddl): lo que hay en el carrito
+    // de cualquiera de los dos baja el numero de los dos.
     stockReventa: stockReventaPorProducto.has(product.id)
-      ? Math.max(0, Math.floor(stockReventaPorProducto.get(product.id).stock - quantityInCartForProduct(product.id)))
+      ? Math.max(0, Math.floor(stockReventaPorProducto.get(product.id).stock - enCarritoDelInsumo(stockReventaPorProducto.get(product.id).insumoId, product.id)))
       : null,
     // Los umbrales de lo que se compra hecho son los de su insumo.
     umbralBajo: stockReventaPorProducto.has(product.id) ? stockReventaPorProducto.get(product.id).minimo : product.umbralBajo,
@@ -1857,7 +1867,7 @@ async function loadProducts() {
     const [linea] = lineas;
     const insumo = insumos.find((i) => i.id === linea.insumoId);
     const directa = insumo && insumo.unidad === "unidad" && (Number(linea.cantidadPorUnidad) === 1 || linea.insumoId === p.id);
-    if (directa) stockReventaPorProducto.set(p.id, { stock: stockInsumo.get(linea.insumoId) ?? 0, minimo: Number(insumo.stockMinimo) || 0, critico: Number(insumo.stockCritico) || 0 });
+    if (directa) stockReventaPorProducto.set(p.id, { insumoId: linea.insumoId, stock: stockInsumo.get(linea.insumoId) ?? 0, minimo: Number(insumo.stockMinimo) || 0, critico: Number(insumo.stockCritico) || 0 });
   }
 }
 
