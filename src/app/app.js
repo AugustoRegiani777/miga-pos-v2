@@ -10,7 +10,7 @@ import { sumarDias } from "../modules/panel-calculos.js";
 import { signIn, signOut, restoreSession, fetchStockProductos, fetchProductosCatalogo, BASE_REF, PRUEBA_SIN_BASE } from "../db/supabase.js";
 import { asegurarMismaBase } from "../utils/base-de-datos.js";
 import { leerVersionPublicada } from "../utils/version.js";
-import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, historialRecienteDeInsumos, historialCompletoDeInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1, aplicarUmbralesV1 } from "../modules/aprovisionamiento.js";
+import { seedInsumos, listInsumos, ajustarStockInsumo, calibrarInsumo, listaDeComprasSmart, exportarListaCompras, getCalibracionDashboardData, getRecetasDashboardData, actualizarReceta, saveInsumoCalibrationSettings, previewProduccionInsumos, pausarInsumo, reactivarInsumo, listInsumosEnPausa, pullInsumosDesdeNube, createInsumo, editarInsumo, eliminarInsumoDefinitivo, historialRecienteDeInsumos, historialCompletoDeInsumo, crearLineaReceta, eliminarLineaReceta, descartarInsumo, reconciliarStockInsumosConNube, normalizarEnvasesInsumos, limpiarCatalogoV12, limpiarCatalogoV13, limpiarCatalogoV14, activarSetCompletoDePrueba, afinarCatalogoDePrueba, pasarProductosAEnPrueba, sacarReventaDeProduccion, borrarEspejosSinHistorial, renombrarProductosDePrueba, actualizarPreciosOctubre, borrarInsumosConUnidadRara, quitarDelCatalogoDePruebaV1, aplicarUmbralesV1, aplicarUmbralesV2 } from "../modules/aprovisionamiento.js";
 import { seedProveedores, getProveedoresDashboardData, updateProveedor, createProveedor, saveProveedorInsumo, deleteProveedorInsumo, pullProveedoresDesdeNube, eliminarProveedor, planEliminarProveedor } from "../modules/proveedores.js";
 import { renderProveedoresList, renderProvProdInsumoSelect, renderProvProdRecetaRows, aplicarProvProdRecetaSeleccion } from "../ui/render-proveedores.js";
 import { getMenuDashboardData, saveProducto, setProductoActivo, moverProductoOrden, reordenarProductos, pullCatalogoDesdeNube, verificarEliminacionProducto, mensajeBloqueoEliminacion, eliminarProducto, definirProductoComoReventa } from "../modules/menu.js";
@@ -196,6 +196,7 @@ async function pullCatalogoCompleto() {
   await borrarInsumosConUnidadRara().catch(() => ({ cambios: 0 }));
   await quitarDelCatalogoDePruebaV1().catch(() => ({ cambios: 0 }));
   await aplicarUmbralesV1().catch(() => ({ cambios: 0 }));
+  await aplicarUmbralesV2().catch(() => ({ cambios: 0 }));
   await refreshGruposVariantes();
   await loadProducts();
   return { catalogo, insumosCount, proveedoresResult, variantesResult, stockInsumos, stockProductos };

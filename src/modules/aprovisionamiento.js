@@ -2703,3 +2703,33 @@ export async function historialCompletoDeInsumo(insumoId) {
   const movimientos = [...porUuid.values()].sort((a, b) => String(b.creadoEn || b.fecha || "").localeCompare(String(a.creadoEn || a.fecha || "")));
   return { movimientos, aviso };
 }
+
+// Umbrales de los sandwiches, version 2 (los fijo el dueño en noviembre para los colores de la Caja). Reemplazan a
+// los de la v1. Se aplica UNA vez por dispositivo; despues cada uno se cambia a mano desde Menu.
+//   rojo hasta el critico, naranja hasta el minimo, verde por encima:
+//   Jamon y queso: critico 6, naranja 7-8, verde desde 9
+//   Huevo y jamon / Jamon serrano: critico 2, naranja 3-4, verde desde 5
+//   el resto de los sandwiches: critico 1, naranja 2-4, verde desde 5
+const UMBRALES_V2_KEY = "umbrales_sandwiches_v2";
+const SANDWICH_UMBRALES_V2 = { "jamon-queso": [8, 6], "huevo-jamon": [4, 2], "jamon-serrano-rucula": [4, 2] };   // id -> [naranja hasta, rojo hasta]
+const SANDWICH_RESTO_V2 = [4, 1];
+
+export async function aplicarUmbralesV2() {
+  const [productos, config] = await Promise.all([getAll("productos"), getAll("configuracion")]);
+  if (config.find((c) => c.id === UMBRALES_V2_KEY)?.valor) return { cambios: 0 };
+  if (productos.length === 0) return { cambios: 0 };
+  const now = new Date().toISOString();
+  const nuevos = [];
+  for (const p of productos) {
+    if (p.categoriaId !== "sandwiches" || !p.controlaStock) continue;
+    const [bajo, critico] = SANDWICH_UMBRALES_V2[p.id] || SANDWICH_RESTO_V2;
+    if (p.umbralBajo === bajo && p.umbralCritico === critico) continue;
+    nuevos.push({ ...p, umbralBajo: bajo, umbralCritico: critico, actualizadoEn: now });
+  }
+  await withStores(["productos", "configuracion"], "readwrite", (stores) => {
+    for (const p of nuevos) stores.productos.put(p);
+    stores.configuracion.put({ id: UMBRALES_V2_KEY, valor: true, actualizadoEn: now });
+  });
+  if (nuevos.length) trySyncCatalogoSnapshot(await getAll("categorias"), await getAll("productos")).catch(() => {});
+  return { cambios: nuevos.length };
+}
