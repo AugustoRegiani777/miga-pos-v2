@@ -4745,3 +4745,19 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .hist-cant { font-size: 1.05rem; }
 .hist-compra .hist-cant { color: var(--txt-ok, #20734d); }
 .hist-detalle { margin-top: 2px; font-size: 0.85rem; }
+
+/* Carrito: los dos interruptores (ToGoo y -40%), uno debajo del otro */
+.cart-toggles { display: grid; gap: 6px; justify-items: start; margin-left: auto; }
+.cart-toggles .toggle-switch { min-height: 40px; }
+.combo-summary.descuento-extra strong, .combo-summary.descuento-extra span { color: var(--txt-ok, #20734d); }
+
+/* Modo oscuro: las tarjetas de descuento y de combo del carrito, en naranja oscurecido con texto claro (mas contraste). */
+:root:not([data-theme="claro"]):not([data-theme="unicornio"]) .combo-summary {
+  background: color-mix(in srgb, #e07a1f 30%, var(--surface));
+  border-color: color-mix(in srgb, #f0942f 70%, var(--surface));
+}
+:root:not([data-theme="claro"]):not([data-theme="unicornio"]) .combo-summary strong { color: #ffd9a8; }
+:root:not([data-theme="claro"]):not([data-theme="unicornio"]) .combo-summary span { color: #ffffff; }
+:root:not([data-theme="claro"]):not([data-theme="unicornio"]) .combo-summary small { color: #f6d9b8; }
+:root:not([data-theme="claro"]):not([data-theme="unicornio"]) .combo-summary.descuento-extra strong,
+:root:not([data-theme="claro"]):not([data-theme="unicornio"]) .combo-summary.descuento-extra span { color: #ffffff; }

@@ -199,6 +199,15 @@ export function renderCart(container, sandwichCountNode, totalNode, confirmButto
     container.appendChild(warning);
   }
 
+  if (pricing?.descuentoExtraCentavos > 0) {
+    const extra = el("div", "combo-summary descuento-extra");
+    extra.innerHTML = `<strong></strong><span></span><small></small>`;
+    extra.querySelector("strong").textContent = `Descuento ${pricing.descuentoExtraPct}%`;
+    extra.querySelector("span").textContent = `−${centsToMoney(pricing.descuentoExtraCentavos)}`;
+    extra.querySelector("small").textContent = `Sobre ${centsToMoney(pricing.baseDescuentoCentavos)}`;
+    container.appendChild(extra);
+  }
+
   totalNode.textContent = centsToMoney(pricing?.totalCentavos ?? 0);
   confirmButton.disabled = false;
 }

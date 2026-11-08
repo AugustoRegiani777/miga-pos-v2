@@ -564,7 +564,7 @@ export async function saveDailyProduction(productId, quantity, fecha = todayISO(
   });
 }
 
-export async function confirmSale(items, formaPago = "efectivo") {
+export async function confirmSale(items, formaPago = "efectivo", { descuentoPct = 0 } = {}) {
   const cart = groupCartItems(items);
   const fecha = todayISO();
   const hora = currentTime();
@@ -633,8 +633,14 @@ export async function confirmSale(items, formaPago = "efectivo") {
     const bajaTotalCentavos = lines
       .filter((line) => line.saleMode === "baja")
       .reduce((total, line) => total + line.subtotalCentavos, 0);
-    const discountCentavos = pricing.discountCentavos;
-    totalCentavos = pricing.totalCentavos + toGooTotalCentavos + bajaTotalCentavos;
+    // Descuento extra (ej. -40%): se aplica sobre el precio normal de cada producto y REEMPLAZA a los combos (docena y
+    // media docena no se aplican a la vez). No toca la tarifa fija de Too Good To Go ni las bajas. Queda como una linea
+    // sintetica negativa, igual que el descuento de combo.
+    const pctExtra = Number(descuentoPct) > 0 && Number(descuentoPct) < 100 ? Number(descuentoPct) : 0;
+    const baseCentavos = pctExtra > 0 ? pricing.normalTotalCentavos : pricing.totalCentavos;
+    const discountCentavos = pctExtra > 0 ? 0 : pricing.discountCentavos;
+    const descuentoExtraCentavos = pctExtra > 0 ? Math.round(baseCentavos * pctExtra / 100) : 0;
+    totalCentavos = baseCentavos - descuentoExtraCentavos + toGooTotalCentavos + bajaTotalCentavos;
 
     const ventaUuid = crypto.randomUUID();
     const saleId = await requestToPromise(stores.ventas.add({ fecha, hora, totalCentavos, saleMode, formaPago, creadoEn: now, uuid: ventaUuid }));
@@ -670,6 +676,22 @@ export async function confirmSale(items, formaPago = "efectivo") {
       };
       stores.detalle_venta.add(descuento);
       _detallesSync.push(descuento);
+    }
+
+    if (descuentoExtraCentavos > 0) {
+      const descuentoExtra = {
+        uuid: crypto.randomUUID(),
+        ventaId: saleId,
+        productoId: `ajuste-descuento-${pctExtra}`,
+        productoNombre: `Descuento ${pctExtra}%`,
+        cantidad: 1,
+        precioUnitarioCentavos: -descuentoExtraCentavos,
+        subtotalCentavos: -descuentoExtraCentavos,
+        fecha,
+        creadoEn: now
+      };
+      stores.detalle_venta.add(descuentoExtra);
+      _detallesSync.push(descuentoExtra);
     }
 
     if (hasTogoo) {

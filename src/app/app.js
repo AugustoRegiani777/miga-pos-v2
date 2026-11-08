@@ -88,6 +88,14 @@ let cartTotalCentavosActual = 0;
 let currentView = "caja";
 let saleInProgress = false;
 let cartMode = "normal";
+// Descuento del 40% sobre el precio final del carrito (interruptor debajo de ToGoo). Se apaga solo al vender o vaciar.
+const DESCUENTO_EXTRA_PCT = 40;
+let descuento40Activo = false;
+function setDescuento40(activo) {
+  descuento40Activo = Boolean(activo);
+  dom.cartDescuento40.checked = descuento40Activo;
+  renderCurrentCart();
+}
 // "efectivo" | "tarjeta" | "glovo" | null. NINGUNA viene preseleccionada: quien cobra TIENE que elegir
 // (o marcar Too Good To Go) y recien entonces se habilita "Confirmar venta". Vuelve a null despues de
 // cada venta, asi no se cobra con el medio de la venta anterior sin darse cuenta.
@@ -416,6 +424,7 @@ const dom = {
   clearCart: document.querySelector("#clear-cart"),
   saleMessage: document.querySelector("#sale-message"),
   cartModeTogooToggle: document.querySelector("#cart-mode-togoo"),
+  cartDescuento40: document.querySelector("#cart-descuento40"),
   pagoFormaEfectivo: document.querySelector("#pago-forma-efectivo"),
   pagoFormaTarjeta: document.querySelector("#pago-forma-tarjeta"),
   pagoFormaGlovo: document.querySelector("#pago-forma-glovo"),
@@ -1811,7 +1820,11 @@ function renderCurrentCart() {
   const items = Array.from(cart.values());
   const pricing = calculateCartPricing(items.filter((item) => effectiveSaleMode(item) === "normal"));
   const hasTogoo = items.some((item) => effectiveSaleMode(item) === "togoo");
-  cartTotalCentavosActual = pricing.totalCentavos + (hasTogoo ? TOGOO_FLAT_TOTAL_CENTAVOS : 0);
+  // Descuento extra: se aplica sobre el precio normal de cada producto y REEMPLAZA a los combos (docena / media docena
+  // no entran a la vez); no toca la tarifa fija ToGoo.
+  const baseDescuentoCentavos = descuento40Activo ? pricing.normalTotalCentavos : pricing.totalCentavos;
+  const descuentoExtraCentavos = descuento40Activo ? Math.round(baseDescuentoCentavos * DESCUENTO_EXTRA_PCT / 100) : 0;
+  cartTotalCentavosActual = baseDescuentoCentavos - descuentoExtraCentavos + (hasTogoo ? TOGOO_FLAT_TOTAL_CENTAVOS : 0);
   renderCart(
     dom.cartItems,
     dom.cartSandwichCount,
@@ -1819,7 +1832,16 @@ function renderCurrentCart() {
     dom.confirmSale,
     cart,
     changeQuantity,
-    { ...pricing, totalCentavos: cartTotalCentavosActual }
+    {
+      ...pricing,
+      // Con el descuento activo no se muestra ningun combo ni su aviso: no aplican.
+      combo: descuento40Activo ? null : pricing.combo,
+      warning: descuento40Activo ? "" : pricing.warning,
+      totalCentavos: cartTotalCentavosActual,
+      descuentoExtraCentavos,
+      descuentoExtraPct: DESCUENTO_EXTRA_PCT,
+      baseDescuentoCentavos
+    }
   );
   actualizarPagoSegunToGoo();
   recalcularVuelto();
@@ -4244,7 +4266,7 @@ async function handleConfirmSale() {
       opcionNombre: item.opcionNombre || null
     }));
     // Too Good To Go no tiene forma de pago (lo cobra la app, y los calculos del cierre lo ignoran).
-    const sale = await confirmSale(items, carritoTodoToGoo() ? "efectivo" : formaPagoActual);
+    const sale = await confirmSale(items, carritoTodoToGoo() ? "efectivo" : formaPagoActual, { descuentoPct: descuento40Activo ? DESCUENTO_EXTRA_PCT : 0 });
     cart.clear();
     resetVuelto();
     setSaleMessage(
@@ -4254,6 +4276,8 @@ async function handleConfirmSale() {
       true
     );
     setCartMode("normal");
+    descuento40Activo = false;
+    dom.cartDescuento40.checked = false;
     setFormaPago(null);
     // Sync fire-and-forget — nunca bloquea la caja
     const { venta, detalles, movimientosStock, movimientosInsumos } = sale._syncPayload;
@@ -4350,6 +4374,9 @@ function bindEvents() {
 
   dom.clearCart.addEventListener("click", () => {
     cart.clear();
+    // El descuento es del carrito que se esta armando: al vaciar se apaga, para que no se le aplique al proximo cliente.
+    descuento40Activo = false;
+    dom.cartDescuento40.checked = false;
     setSaleMessage("");
     renderReservedStock();
     resetVuelto();
@@ -4360,6 +4387,9 @@ function bindEvents() {
   dom.pagoCon.addEventListener("input", recalcularVuelto);
   dom.cartModeTogooToggle.addEventListener("change", () => {
     setCartMode(dom.cartModeTogooToggle.checked ? "togoo" : "normal");
+  });
+  dom.cartDescuento40.addEventListener("change", () => {
+    setDescuento40(dom.cartDescuento40.checked);
   });
   dom.pagoFormaEfectivo.addEventListener("click", () => setFormaPago("efectivo"));
   dom.pagoFormaTarjeta.addEventListener("click", () => setFormaPago("tarjeta"));

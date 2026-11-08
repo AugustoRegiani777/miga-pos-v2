@@ -145,11 +145,18 @@
         <aside class="cart-panel" aria-label="Carrito">
           <div class="cart-header">
             <h2>Carrito</h2>
-            <label class="toggle-switch">
-              <input type="checkbox" id="cart-mode-togoo">
-              <span class="toggle-slider"></span>
-              <span class="toggle-label">ToGoo</span>
-            </label>
+            <div class="cart-toggles">
+              <label class="toggle-switch">
+                <input type="checkbox" id="cart-mode-togoo">
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">ToGoo</span>
+              </label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cart-descuento40">
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">−40 %</span>
+              </label>
+            </div>
             <button class="ghost-button" type="button" id="clear-cart">Vaciar</button>
           </div>
           <div id="cart-items" class="cart-items empty">Sin productos.</div>

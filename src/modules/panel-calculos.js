@@ -6,7 +6,7 @@ const CATEGORIA_SANDWICHES = "sandwiches";
 
 // Lineas sinteticas del detalle: no son productos que se vendieron.
 function esLineaSintetica(productoId = "") {
-  return productoId === "togoo-fee" || productoId.startsWith("combo-") || productoId.startsWith("ajuste-pedido-");
+  return productoId === "togoo-fee" || productoId.startsWith("combo-") || productoId.startsWith("ajuste-");
 }
 
 const suma = (lista, f) => lista.reduce((total, x) => total + f(x), 0);
